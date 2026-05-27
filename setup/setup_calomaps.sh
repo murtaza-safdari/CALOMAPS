@@ -9,6 +9,15 @@
 #   4. cd's into the simulation working directory
 
 echo "Loading Key4hep environment..."
+# Key4hep release pin. Don't bump casually: new releases occasionally change
+# library ABI (e.g. torch major versions, ROOT minor versions) and can break
+# saved-model loading or notebook output schemas. The current pin was tested
+# end-to-end with the smoke sim and the dashboard regen on 2026-05-26.
+# When you do bump (every ~6 months is a reasonable cadence): re-run
+#   1. `ddsim ... -N 10 ...`     (smoke sim, see handbook.md §8)
+#   2. notebooks/02_data_extraction.ipynb on a small subset
+#   3. analysis/verify_ensembles.py end-to-end
+# and confirm no regressions before merging the new pin.
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01
 
 echo "Injecting OpenGL library hack..."
