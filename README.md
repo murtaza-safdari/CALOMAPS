@@ -50,6 +50,7 @@ CALOMAPS/
 ├── README.md                          ← you are here
 ├── docs/
 │   ├── handbook.md                    ← OPERATIONAL guide; read this first
+│   ├── troubleshooting.md             ← infrastructure quirks (SSHFS, JupyterHub, CVMFS, quotas)
 │   ├── DECAL_pipeline.md              ← PHYSICS writeup (advisor's PDF transcribed)
 │   └── figures/                       ← rendered dashboards + figures
 ├── setup/
