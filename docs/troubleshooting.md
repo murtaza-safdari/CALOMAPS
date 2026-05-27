@@ -1,0 +1,157 @@
+# Troubleshooting
+
+Infrastructure-level quirks that bite when running CALOMAPS on the Fermilab Elastic Analysis Facility (EAF) and its SSHFS-mounted `/nashome` shared home. Each entry is a known pattern with a workaround.
+
+For **project-level errors** (your `ddsim` exited non-zero, a notebook cell threw a NameError, etc.), see [handbook.md §14](handbook.md#14-common-gotchas) instead.
+
+---
+
+## SSHFS occasionally writes zero-byte files
+
+**Symptom.** A `cp` (or git internal write, or `python -m venv`, or any small-file write) onto the `/nashome`-via-SSHFS mount succeeds, but the resulting file is **zero bytes** even though `ls` shows the correct size. Reading the file later reveals it's all NULs.
+
+Hit during this session on: `elements.xml` (33 KB → 33 KB of NULs after `cp`), `analysis/dashboard.py` (Write tool wrote 0 bytes), `.git/objects/<hash>` (git's internal store, hit twice during `git commit`).
+
+**Workaround.**
+
+- For copying files: prefer `rsync -a` over `cp -r`. Rsync writes atomically (write-to-tempfile, rename) which dodges the issue on most attempts.
+- For git operations: don't do `git init` / `git add` / `git commit` on the `/nashome`-mounted tree. Instead, rsync the working tree to a local-FS path (`/tmp/CALOMAPS-push/`), run git there, push from there, then `git clone` back from github to `/nashome` if you want a local checkout.
+- After git operations on SSHFS, `git fsck --full` is cheap insurance against zero-byte objects.
+
+**Diagnose.** `file path/to/suspect.xml` reports `data` (binary) instead of `ASCII text`; `xxd <file> | head` shows `00 00 00 …`.
+
+---
+
+## CVMFS Key4hep ships a CPU-only PyTorch
+
+**Symptom.** In any environment that has the CVMFS Key4hep 2026-02-01 stack loaded, `torch.cuda.is_available()` returns `False` even on a GPU node. Worse, `torch.cuda.get_device_name(0)` raises `AssertionError: Torch not compiled with CUDA enabled` — the CVMFS torch was built without CUDA support at all.
+
+**Workaround.** Install a CUDA-enabled torch into a venv that's *first* in your `sys.path`. See [handbook.md §11.2](handbook.md#112-training-new-models-on-the-gpu) for the full recipe. The short version:
+
+```bash
+/cvmfs/sw.hsf.org/key4hep/releases/2026-02-01/x86_64-almalinux9-gcc14.2.0-opt/python/3.13.8-z2dydk/bin/python3.13 \
+    -m venv --system-site-packages /tmp/cu_torch_env
+/tmp/cu_torch_env/bin/pip install --force-reinstall torch \
+    --index-url https://download.pytorch.org/whl/cu121
+```
+
+Then to actually use the cu121 torch (see next entry).
+
+---
+
+## CVMFS PYTHONPATH shadows your venv's torch
+
+**Symptom.** After `pip install --force-reinstall torch+cu121` into a venv with `--system-site-packages = true`, `import torch` *still* loads the CVMFS CPU-only build. Even from the venv's own Python interpreter.
+
+**Root cause.** When `source ~/setup_calomaps.sh` (or directly `source /cvmfs/.../setup.sh`) runs, it pre-pends ~30 paths to `PYTHONPATH`, including `/cvmfs/.../py-torch/.../site-packages`. That comes **earlier** in `sys.path` than the venv's own site-packages, so `import torch` finds CVMFS first.
+
+**Workaround.** Drop CVMFS torch paths from `sys.path` and prepend the venv's site-packages before `import torch`:
+
+```python
+import sys
+sys.path = [p for p in sys.path if "py-torch" not in p]
+sys.path.insert(0, "/tmp/cu_torch_env/lib/python3.13/site-packages")
+import torch    # now resolves to your venv-installed cu121 build
+```
+
+**Exception.** Inside a JupyterLab notebook using the `Key4hep + GPU` kernel, the kernel spawns without `setup_calomaps.sh` having been sourced — so the venv's torch wins naturally. No shim required in that path.
+
+---
+
+## JupyterHub `/api/kernels` POST returns 500 mid-session
+
+**Symptom.** Spawning a Jupyter kernel via the JupyterHub REST API (`POST /user/<u>/api/kernels`) returns `HTTP 500 Unhandled error` with an empty traceback. The user-server itself is healthy: GET on `/api/contents` works, terminals work, files are accessible — only kernel-spawn fails.
+
+**Workaround.**
+
+- If you're driving things programmatically and need code execution: open a **terminal** via `POST /user/<u>/api/terminals` (which stays healthy), then connect via WebSocket and run shell commands. A Python invocation as a subprocess of the terminal shell works for code execution without a Jupyter kernel.
+- If you can open JupyterLab in a browser: just open a notebook normally — the kernel-spawn path through the UI is different and usually unaffected.
+- Last resort: restart your user-server from the JupyterHub control panel ("Stop My Server" → "Start My Server"). This wipes container-local paths like `/tmp/cu_torch_env`, so re-do any installs.
+
+---
+
+## JupyterHub `/api/contents` PUT returns 500
+
+**Symptom.** `PUT /user/<u>/api/contents/<path>` (used to programmatically write files) returns `HTTP 500` while `GET` on the same endpoint works. The home directory may be quota-pressured (see next entry).
+
+**Workaround.** Write the file via a terminal session instead: `POST /user/<u>/api/terminals` to create a terminal, connect over WebSocket, send a command like `base64 -d <<< '<base64-of-content>' > /path/to/file`.
+
+---
+
+## `/home/<username>` on EAF fills up
+
+**Symptom.** `df -h /home/$USER` shows 100% used, 0 bytes free. Subsequent writes anywhere under `/home` fail with `disk quota exceeded`, including small ones (a 1 KB symlink update).
+
+**Diagnose.** `du -sh ~/.cache/* ~/.conda/* /home/$USER/* 2>/dev/null | sort -hr | head -10`
+
+**Workaround.** The usual large-and-disposable culprits:
+- `~/.cache/pip` — pip's wheel cache. Routinely 2-3 GB. Safe to delete: `rm -rf ~/.cache/pip`.
+- `~/.conda/pkgs` — conda's package cache. Hundreds of MB. Safe to delete (`conda clean --packages` or `rm -rf ~/.conda/pkgs`).
+- Old project data — large `.root` / `.npz` files left behind by previous experiments. Move to `/exp/...` (huge persistent CephFS) or delete.
+
+If you want a persistent-but-isolated install of something big (e.g., a CUDA torch venv) and `/home` is tight, install to `/tmp/<name>` instead — EAF's `/tmp` is an overlay filesystem with several TB free. The cost: `/tmp` is wiped on container restart.
+
+---
+
+## macOS resource-fork files (`._*`) leak into `.git/`
+
+**Symptom.** After `git clone` of a CALOMAPS repo onto a `/nashome` SSHFS mount, `git fsck --full` complains:
+
+```
+error: refs/heads/._main: badRefName: invalid refname format
+error: refs/heads/._main: badRefContent:
+error: refs/._heads: badRefName: invalid refname format
+... etc
+```
+
+**Root cause.** macOS creates `._<name>` shadow files to store extended attributes on filesystems that don't support them natively. SSHFS surfaces these through the mount, and git's ref scanner picks them up as malformed ref names.
+
+**Workaround.** They're harmless noise. Either ignore them, or sweep them out periodically:
+
+```bash
+find .git -name '._*' -type f -delete
+```
+
+(Same applies to any `._*` you find scattered through the work tree. The `.gitignore` already excludes them from being tracked.)
+
+---
+
+## `Key4hep + GPU` Jupyter kernel won't spawn via REST API
+
+**Symptom.** `POST /user/<u>/api/kernels` with `{"name": "my_gpu_env"}` either returns 500 or returns 200 but the WebSocket connection drops immediately when you try to execute code.
+
+**Root cause.** The `my_gpu_env` kernel.json points at `/home/<user>/my_gpu_env/bin/python` directly. That python expects CVMFS to be visible (because `my_gpu_env` inherits `--system-site-packages` from a CVMFS Python). When JupyterLab UI spawns the kernel, CVMFS is pre-set in the spawn environment. When the bare REST API spawns it, CVMFS is **not** pre-set, and the kernel fails on `import` of CVMFS-provided modules.
+
+**Workaround.**
+
+- For interactive notebook work: open the notebook in **JupyterLab UI**, pick the `Key4hep + GPU` kernel from the kernel selector. This path works.
+- For programmatic code execution: use the **`Python (Key4hep)`** kernel (different kernelspec, sources CVMFS in its own launcher) — it spawns cleanly from the REST API. Or use a terminal + subprocess, as in the API-500 workaround above.
+
+---
+
+## File mode bits (the `+x` executable flag) get lost via SSHFS on clone
+
+**Symptom.** Immediately after `git clone` into `/nashome` you have an unstaged "modified" set:
+
+```
+modified:   sim/generate_batched.sh
+modified:   sim/generate_dataset.sh
+```
+
+`git diff` shows no content change, just `old mode 100755 → new mode 100644`. The clone failed to preserve the executable bit.
+
+**Workaround.** Re-add it manually after clone:
+
+```bash
+chmod +x sim/*.sh
+```
+
+Then `git status` is clean again. Permanent fix: `git config core.fileMode false` if you don't want git tracking file modes on this checkout at all — but that hides the issue rather than fixing it.
+
+---
+
+## Where else to check
+
+- **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, cell-19/26 bugs, scripts that wipe data dirs, etc.)
+- **`~/lpc-tools/lpc-setup.html`** — the user's personal LPC/EAF onboarding handbook on their laptop, with broader-than-CALOMAPS Fermilab notes
+- The DD4hep, Geant4, and Key4hep upstream issue trackers if you're hitting something deeper.
