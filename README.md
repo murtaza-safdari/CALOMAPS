@@ -70,8 +70,7 @@ CALOMAPS/
 │   ├── train_ensembles.py             ← CLI entry point (headless training)
 │   └── verify_ensembles.py            ← CLI entry point (regenerate dashboard)
 ├── notebooks/                         ← interactive workflow notebooks
-│   ├── 00_hello_world.ipynb           ← open one ROOT file, inspect, basic plots
-│   ├── 01_geometry_visualization.ipynb ← reverse-engineer the DECAL layout from hits
+│   ├── 00_hello_world.ipynb           ← the detector + its data: geometry, one shower, first-look plots
 │   ├── 02_data_extraction.ipynb       ← parallel uproot extraction → .npz
 │   └── 03_ml_training_and_eval.ipynb  ← train ensembles + dashboard
 └── models/                            ← (gitignored) extracted data + trained checkpoints
