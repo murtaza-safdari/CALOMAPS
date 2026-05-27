@@ -31,7 +31,7 @@ The companion document [DECAL_pipeline.md](DECAL_pipeline.md) is the canonical p
 CALOMAPS is a digital calorimeter (**DECAL**) R&D study. The pipeline:
 
 1. Use a Geant4-based simulation (driven by DD4hep, configured by XML) to fire **photons of varying energies** into a custom electromagnetic calorimeter made of **silicon pixel layers** instead of analog pads.
-2. From the raw hit data, compute four per-event readouts: **visible energy** (analog), **MIP count** (energy-weighted hit count), **raw hit count** (purely digital), and **largest 2D cluster size** on a single layer.
+2. From the raw hit data — restricted to the +y entry segment — compute four per-event readouts: **visible energy** (analog), **MIP count** (MIPs-per-pixel, `Σ round(E_pix/E_MIP)`), **raw hit count** (pixels above ½-MIP threshold, purely digital), and **cluster count** (number of 8-connected pixel clusters, summed over layers).
 3. Train a **Deep Quantile Ensemble** — 20 small networks per readout, trained with Pinball loss at the 15.87 / 50 / 84.13 percentiles — to map true energy → readout, with uncertainty quantification baked in.
 4. Use the trained surrogate to **reconstruct** new shower energies via a **Neyman construction** (a statistical inversion that survives the surrogate curve saturating at high energy).
 5. Produce a **3-panel physics dashboard** showing linearity, resolution, and stochastic terms — the canonical way calorimeter performance is reported in the literature.
@@ -270,17 +270,18 @@ Empirically (from a 10-event smoke run at fixed 50 GeV):
 |---|---|---|
 | Geant4 wall time per event | ~0.9 s | Mostly EM shower simulation |
 | Hits per event | ~6,000–8,500 (mean ≈ 7,700) | One "hit" = one pixel with non-zero energy |
-| Total visible energy per shower | ~7.6 GeV out of 50 GeV true | **Sampling fraction ≈ 15%** (by design — most energy goes into W absorber) |
+| Total visible energy per shower | ~0.7 GeV out of 50 GeV true | **Sampling fraction ≈ 1.4%** (measured from data, not a fixed target — it depends on the Si/W thickness ratio; most energy is absorbed in the W) |
 | Energy per hit | 3 neV — 5 MeV | Landau-shaped — most hits are MIP-like |
 | Hit y-range | **[−1316, +1401] mm** | Spans both the +Y entry face *and* the −Y exit face |
 
 **Why hits on the opposite face?** A 50 GeV EM shower is roughly 95% contained in 28 X₀. The remaining ~5% (and many soft secondaries) escape *into* the air cavity inside the dodecagon, fly across, and strike the **opposite face**. So a single shower deposits hits on both the entry face and (less so) the exit face.
 
-The analysis in `notebooks/01_geometry_visualization.ipynb` and `notebooks/02_data_extraction.ipynb` discards the back-face hits with:
+The extraction in `notebooks/02_data_extraction.ipynb` isolates the **entry segment** — the one dodecagon face the beam enters — keeping only hits in a ±15° wedge around +y at the silicon radius:
 ```python
-mask = (np.abs(x_all) <= 50) & (np.abs(z_all) <= 50) & (y_all >= 1260) & (y_all <= 1420)
+ang = np.degrees(np.arctan2(x, y))                    # angle from +y in the x-y plane
+seg = (np.abs(ang) < 15) & (r > 1264 - 4) & (r < 1403 + 14)   # r = hypot(x, y)
 ```
-This is deliberate (calorimeter response is conventionally measured from the entry face). To study leakage, drop the `y_all >= 1260` clause.
+This is deliberate: a real measurement reads out the module the beam enters, and isolating the segment excludes the cross-cavity leakage (an artifact of this closed test geometry, not of the calorimeter technology). To study leakage instead, widen the wedge or drop the angular cut.
 
 ### 3.7 Geometry summary (cheat sheet)
 
@@ -487,7 +488,7 @@ with uproot.open("/tmp/smoke_test_50GeV.root") as f:
     # at 50 GeV with 100 µm pixels: expect ~6,000-8,500 hits/event
     all_e = np.concatenate([ea.to_numpy() for ea in e])
     print(f"total visible E (all events): {all_e.sum():.2f} GeV")
-    # expect ~76 GeV (10 events × ~7.6 GeV each = ~15% sampling fraction)
+    # expect ~7 GeV (10 events × ~0.7 GeV each ≈ 1.4% sampling fraction for this geometry)
 ```
 
 **Expected smoke-test pass criteria:**
@@ -532,10 +533,10 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 1. Loop over all `sim_photons_part*.root` files in `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/`.
 2. Per event, compute:
    - `E_true` — photon momentum from the truth-level MC particle
-   - `E_vis` — sum of all hit energies (analog readout)
-   - `MIP count` — total hit energy / MIP-scale energy (smooth digital readout)
-   - `hit count` — number of pixels with at least one hit (strict digital)
-   - `cluster size` — largest contiguous lit-pixel cluster on a single layer
+   - `E_vis` — sum of all hit energies in the entry segment (analog readout)
+   - `MIP count` — sum over fired pixels of `round(E_pix / E_MIP)` (MIPs-per-pixel)
+   - `hit count` — number of pixels above the ½-MIP threshold (strict digital)
+   - `cluster count` — number of 8-connected pixel clusters, summed over layers
 3. Save into `models/decal_extracted_data.npz`.
 
 The notebook parallelizes with `ProcessPoolExecutor(max_workers=16)`. Drop to 8 if memory-pressed; bump to 64 if impatient and core-rich.
@@ -720,7 +721,7 @@ Stochastic panel: Analog/MIP flatten at high E (low 1/√E) at σ/E ≈ 0.07 —
 
 ### 13.2 Other diagnostic plots in the notebooks
 
-- **Geometry sanity check** (notebook 01): hit positions, layer reconstruction from data.
+- **Geometry sanity check** (notebook 00): hit positions, layer reconstruction from data.
 - **Longitudinal shower profile**: average energy per layer, binned by truth energy.
 - **Per-readout linearity scatter plots**: each readout vs E_true with a low-E linear fit.
 - **Ensemble quantile dashboards**: how well ensembles agree, quantile bands vs raw data.
