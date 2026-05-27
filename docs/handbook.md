@@ -386,6 +386,17 @@ ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_caloma
 
 The symlink lets you do `source ~/setup_calomaps.sh` from anywhere; the actual launcher lives in the repo.
 
+#### One-time per account: create `~/lib_hack` (required for `ddsim`)
+
+DD4hep dynamically loads `libOpenGL.so.0` at startup. AlmaLinux 9 on EAF ships the same OpenGL implementation under the SONAME `libGL.so.1` (at `/usr/lib64/libGL.so.1`), but not under the `libOpenGL.so.0` name DD4hep wants. Since you don't have `sudo` to install system libraries, the fix is a single user-writable symlink that aliases the missing name to the present one:
+
+```bash
+mkdir -p ~/lib_hack
+ln -s /usr/lib64/libGL.so.1 ~/lib_hack/libOpenGL.so.0
+```
+
+That's it — one symlink. `setup_calomaps.sh` (next step) prepends `~/lib_hack` to `LD_LIBRARY_PATH`, so when DD4hep's dlopen looks for `libOpenGL.so.0`, the loader finds the symlink first and resolves it to AlmaLinux's `libGL.so.1`. If you skip this step, `ddsim` crashes at startup with `error while loading shared libraries: libOpenGL.so.0: cannot open shared object file`. See [troubleshooting.md](troubleshooting.md) for the why behind user-space library injection on shared HPC nodes.
+
 ### 6.4 Source the environment
 
 ```bash
@@ -555,6 +566,29 @@ If you have the `.npz` but no saved ensembles, train once (next subsection).
 The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.backends.cuda.is_built() → False`). You need to install a CUDA-enabled torch into a venv first.
 
 #### Path A — JupyterLab UI (recommended)
+
+##### One-time per account: create `~/my_gpu_env` and register the kernel
+
+The `Key4hep + GPU` kernel in JupyterLab is backed by a Python venv at `~/my_gpu_env/` whose `kernel.json` lives in `~/.local/share/jupyter/kernels/my_gpu_env/`. **A fresh EAF account doesn't have either.** Skip this block if the `Key4hep + GPU` kernel already appears in the JupyterLab kernel selector.
+
+```bash
+# In a JupyterLab terminal:
+source ~/setup_calomaps.sh   # need the CVMFS python on PATH
+
+# Create the venv. --system-site-packages lets it inherit the entire Key4hep
+# stack (uproot, numpy, matplotlib, ...) so we only need to install the one
+# package we want to override (torch) rather than reinstalling everything.
+python -m venv --system-site-packages ~/my_gpu_env
+
+# Register the kernel with JupyterHub. After this, "Key4hep + GPU" appears
+# in the kernel selector and points at ~/my_gpu_env/bin/python.
+~/my_gpu_env/bin/python -m ipykernel install \
+    --user --name=my_gpu_env --display-name="Key4hep + GPU"
+```
+
+**Note**: at this point the venv exists and the kernel is registered, but the venv's `site-packages/` is empty. When you `import torch` from this kernel, you'll get CVMFS's **CPU-only** torch (inherited via `--system-site-packages`). The next step installs GPU torch *into* the venv so it shadows CVMFS — that's the actual fix.
+
+##### Install GPU torch into the kernel
 
 1. Open [`notebooks/03_ml_training_and_eval.ipynb`](../notebooks/03_ml_training_and_eval.ipynb) in JupyterLab.
 2. Switch kernel to **`Key4hep + GPU`**.
