@@ -35,7 +35,7 @@ log_job*.txt
 .vscode/
 .idea/
 
-# ---- Claude / agent state (not part of the public surface) --------------
+# ---- Local IDE / agent / editor state (not part of the public surface) ----
 .claude/
 CLAUDE.md
 
