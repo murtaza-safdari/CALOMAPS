@@ -20,7 +20,7 @@ See [docs/DECAL_pipeline.md](docs/DECAL_pipeline.md) for the full physics writeu
 geometry/SiD_TestBeam.xml + my_custom_ecal.xml
             │
             ▼
-sim/run_sim.py  ──>  ddsim  ──>  ROOT files (1000 × 20 events)
+sim/run_sim.py  ──>  ddsim  ──>  ROOT files (889 × 20 events)
                                       │
                                       ▼
                        notebooks/02_data_extraction.ipynb
@@ -54,7 +54,8 @@ CALOMAPS/
 │   ├── DECAL_pipeline.md              ← PHYSICS writeup (advisor's PDF transcribed)
 │   └── figures/                       ← rendered dashboards + figures
 ├── setup/
-│   └── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env
+│   ├── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env
+│   └── setup_gpu_kernel.sh            ← one-shot: register the GPU kernel for notebook 03
 ├── geometry/                          ← DD4hep XML detector descriptions
 │   ├── SiD_TestBeam.xml               ← top-level compact passed to ddsim
 │   ├── my_custom_ecal.xml             ← our DECAL barrel definition (only modified file)
