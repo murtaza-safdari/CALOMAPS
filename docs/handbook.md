@@ -566,6 +566,8 @@ If you have the `.npz` but no saved ensembles, train once (next subsection).
 
 The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.backends.cuda.is_built() → False`). You need to install a CUDA-enabled torch into a venv first.
 
+**Quick path**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step (venv defaults to `/tmp`, which is wiped on container restart — set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free). The manual steps below explain what it does.
+
 #### Path A — JupyterLab UI (recommended)
 
 ##### One-time per account: create `~/my_gpu_env` and register the kernel
@@ -721,7 +723,7 @@ Stochastic panel: Analog/MIP flatten at high E (low 1/√E) at σ/E ≈ 0.07 —
 
 ### 13.2 Other diagnostic plots in the notebooks
 
-- **Geometry sanity check** (notebook 00): hit positions, layer reconstruction from data.
+- **Geometry sanity check** (notebook 01): hit positions, layer reconstruction from data.
 - **Longitudinal shower profile**: average energy per layer, binned by truth energy.
 - **Per-readout linearity scatter plots**: each readout vs E_true with a low-E linear fit.
 - **Ensemble quantile dashboards**: how well ensembles agree, quantile bands vs raw data.
