@@ -20,7 +20,7 @@ See [docs/DECAL_pipeline.md](docs/DECAL_pipeline.md) for the full physics writeu
 geometry/SiD_TestBeam.xml + my_custom_ecal.xml
             │
             ▼
-sim/run_sim.py  ──>  ddsim  ──>  ROOT files (1000 × 20 events)
+sim/run_sim.py  ──>  ddsim  ──>  ROOT files (889 × 20 events)
                                       │
                                       ▼
                        notebooks/02_data_extraction.ipynb
@@ -54,7 +54,8 @@ CALOMAPS/
 │   ├── DECAL_pipeline.md              ← PHYSICS writeup (advisor's PDF transcribed)
 │   └── figures/                       ← rendered dashboards + figures
 ├── setup/
-│   └── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env
+│   ├── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env
+│   └── setup_gpu_kernel.sh            ← one-shot: register the GPU kernel for notebook 03
 ├── geometry/                          ← DD4hep XML detector descriptions
 │   ├── SiD_TestBeam.xml               ← top-level compact passed to ddsim
 │   ├── my_custom_ecal.xml             ← our DECAL barrel definition (only modified file)
@@ -70,8 +71,7 @@ CALOMAPS/
 │   ├── train_ensembles.py             ← CLI entry point (headless training)
 │   └── verify_ensembles.py            ← CLI entry point (regenerate dashboard)
 ├── notebooks/                         ← interactive workflow notebooks
-│   ├── 00_hello_world.ipynb           ← open one ROOT file, inspect, basic plots
-│   ├── 01_geometry_visualization.ipynb ← reverse-engineer the DECAL layout from hits
+│   ├── 01_detector_and_data.ipynb           ← the detector + its data: geometry, one shower, first-look plots
 │   ├── 02_data_extraction.ipynb       ← parallel uproot extraction → .npz
 │   └── 03_ml_training_and_eval.ipynb  ← train ensembles + dashboard
 └── models/                            ← (gitignored) extracted data + trained checkpoints
@@ -94,7 +94,9 @@ ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_caloma
 source ~/setup_calomaps.sh
 ```
 
-Then open `notebooks/00_hello_world.ipynb` in JupyterLab. You will need simulation data first — run a smoke test per `docs/handbook.md` §8 to confirm your environment.
+Then open `notebooks/01_detector_and_data.ipynb` in JupyterLab. You will need simulation data first — run a smoke test per `docs/handbook.md` §8 to confirm your environment.
+
+The ML notebook (`03_ml_training_and_eval.ipynb`) needs a GPU kernel — register it once with `bash setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
 
 The full setup walkthrough — accounts, EAF spawner profile, the storage map, and the GPU torch install — is in [docs/handbook.md](docs/handbook.md).
 

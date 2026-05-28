@@ -150,6 +150,40 @@ Then `git status` is clean again. Permanent fix: `git config core.fileMode false
 
 ---
 
+## "Key4hep + GPU" kernel dies on launch from nbconvert / freshly-spawned shells
+
+**Symptom.** A GPU kernel whose `kernel.json` runs the venv python directly
+(`~/my_gpu_env/bin/python -m ipykernel_launcher`) starts fine from the JupyterLab
+UI but **dies immediately** when launched by `nbconvert` (or any non-interactive
+spawn), with `No module named ipykernel_launcher` /
+`Kernel died before replying to kernel_info`.
+
+**Root cause.** `ipykernel` (and numpy/scipy/...) live in CVMFS prefixes that are
+only added to `PYTHONPATH` by `source setup_calomaps.sh`. An interactive terminal
+that sourced CVMFS earlier *looks* fine, but a kernel spawned with a clean
+environment never gets those paths — and the venv (created `--system-site-packages`
+from the CVMFS python, which does **not** carry ipykernel in its base
+site-packages) can't find `ipykernel_launcher`.
+
+**Workaround.** Make the GPU kernel **self-contained** and CVMFS-independent:
+install everything the notebook needs *into* the venv with a clean `PYTHONPATH`,
+and launch via a wrapper that clears `PYTHONPATH` so the venv's cu121 torch wins:
+
+```bash
+env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir --ignore-installed \
+    numpy scipy matplotlib ipykernel
+env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir torch \
+    --index-url https://download.pytorch.org/whl/cu121
+# wrapper.sh:   unset PYTHONPATH PYTHONHOME; exec "$VENV/bin/python" -m ipykernel_launcher "$@"
+```
+
+`setup/setup_gpu_kernel.sh` does exactly this. Notebook 03 needs only
+torch/numpy/scipy/matplotlib (no ROOT/uproot), so a self-contained venv covers it
+without CVMFS at all. This supersedes the older `~/my_gpu_env` + `sys.path`-shim
+recipe for the *notebook* path (the shim is still fine for headless scripts).
+
+---
+
 ## Where else to check
 
 - **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, cell-19/26 bugs, scripts that wipe data dirs, etc.)
