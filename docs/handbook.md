@@ -532,7 +532,7 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 
 1. Loop over all `sim_photons_part*.root` files in `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/`.
 2. Per event, compute:
-   - `E_true` — photon momentum from the truth-level MC particle
+   - `E_true` — true photon energy `√(p²+m²)` from the truth-level MC particle
    - `E_vis` — sum of all hit energies in the entry segment (analog readout)
    - `MIP count` — sum over fired pixels of `round(E_pix / E_MIP)` (MIPs-per-pixel)
    - `hit count` — number of pixels above the ½-MIP threshold (strict digital)
@@ -713,7 +713,7 @@ where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic 
 
 - **True Analog** and **MIP Proxy** overlap; rise from σ/E ≈ 0.07 at 10 GeV to ≈ 0.095 at 400 GeV. Best readouts at all energies. MIP tracks analog tightly because at 100 µm pitch each MIP-crossing reliably triggers one hit.
 - **Raw Hits** tracks analog at low E, **diverges upward starting around 100 GeV**, peaks at σ/E ≈ 0.113 near 380 GeV. **Pixel saturation** — exactly the DECAL physics.
-- **Naive 2D Clustering** is the worst, peaking at σ/E ≈ 0.137. Cluster size is dominated by core density and doesn't recover information.
+- **Naive 2D Clustering** is the worst, peaking at σ/E ≈ 0.137. The cluster *count* saturates as the dense core merges adjacent pixels into a few big blobs, so it doesn't recover the lost multiplicity.
 
 The crossover where Hits start losing to Analog at 100 µm pitch is **around 100 GeV**.
 
