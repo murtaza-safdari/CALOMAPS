@@ -20,7 +20,7 @@ See [docs/DECAL_pipeline.md](docs/DECAL_pipeline.md) for the full physics writeu
 geometry/SiD_TestBeam.xml + my_custom_ecal.xml
             │
             ▼
-sim/run_sim.py  ──>  ddsim  ──>  ROOT files (889 × 20 events)
+sim/run_sim.py  ──>  ddsim  ──>  ROOT files (1000 × 20 events)
                                       │
                                       ▼
                        notebooks/02_data_extraction.ipynb

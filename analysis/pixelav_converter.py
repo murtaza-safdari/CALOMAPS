@@ -68,7 +68,7 @@ SCAFFOLD_STATUS = ("scaffold: intermediate track-segment table only; deck writer
 
 # ECal silicon radial extent for the +y wedge (mm); hits live at r in ~[1267, 1403].
 ECAL_RMIN_MM = 1264.0
-ECAL_RMAX_MM = 1410.0
+ECAL_RMAX_MM = 1403.0
 
 # Output length unit relative to mm. PIXELAV's expected unit is UNCONFIRMED (cm vs µm vs
 # mm) — set this once the real deck format is known (e.g. 0.1 for cm, 1000.0 for µm).
