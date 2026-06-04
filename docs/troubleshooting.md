@@ -10,7 +10,7 @@ For **project-level errors** (your `ddsim` exited non-zero, a notebook cell thre
 
 **Symptom.** A `cp` (or git internal write, or `python -m venv`, or any small-file write) onto the `/nashome`-via-SSHFS mount succeeds, but the resulting file is **zero bytes** even though `ls` shows the correct size. Reading the file later reveals it's all NULs.
 
-Hit during this session on: `elements.xml` (33 KB → 33 KB of NULs after `cp`), `analysis/dashboard.py` (Write tool wrote 0 bytes), `.git/objects/<hash>` (git's internal store, hit twice during `git commit`).
+Observed on files such as `elements.xml` (33 KB written back as null bytes after `cp`) and small Python sources written through the mount (0-byte result). Git object writes under `.git/objects/` have also been truncated mid-commit.
 
 **Workaround.**
 
@@ -184,7 +184,7 @@ recipe for the *notebook* path (the shim is still fine for headless scripts).
 
 ---
 
-## DDSim EDM4hep output crashes if the steering file contains non-ASCII characters
+## ddsim EDM4hep output crashes if the steering file contains non-ASCII characters
 
 Writing EDM4hep ROOT output with `ddsim` can abort with
 `cppyy.gbl.dd4hep.unrelated_value_error: ... std::map<string,string> ... is not defined`
@@ -194,7 +194,7 @@ turns into a *silent* C++ `exit(0)` with no traceback at the next metadata assig
 which is easy to misread as an OOM kill or a hang.)
 
 **Root cause:** a **non-ASCII character in the steering file** (an em-dash `-` typed as the
-Unicode em-dash, an en-dash, or a "smart quote" in a comment/docstring). DDSim copies the
+Unicode em-dash, an en-dash, or a "smart quote" in a comment/docstring). ddsim copies the
 entire steering-file text into the run metadata (`SteeringFileContent`), then hands the
 metadata dict to the EDM4hep writer's `RunHeader` (a `std::map<string,string>` property).
 cppyy cannot convert a dict whose values contain non-ASCII bytes and reports it as the map
@@ -216,7 +216,7 @@ output format*, not the EDM4hep fix.)
 ## Geant4 shower cascade is dropped unless you disable the user particle handler
 
 `part.keepAllParticles = True` **alone does not** persist a calorimeter EM shower's
-secondaries. DDSim's default `Geant4TCUserParticleHandler` restricts MC-truth to the inner
+secondaries. ddsim's default `Geant4TCUserParticleHandler` restricts MC-truth to the inner
 *tracking* region; particles born outside it (ECal shower secondaries — at r > 1267 mm in the
 DECAL barrel) get merged into their parent and never written, even with `keepAllParticles`.
 The symptom is "only the primary survived" (1 MCParticle, 0 daughters) despite thousands of
@@ -234,14 +234,14 @@ With both, the complete cascade is retained (~75k particles for a single 50 GeV 
 
 ## EDM4hep podio writer crashes (free(): invalid pointer) on very large events
 
-On key4hep 2026-02-01, writing a *high-multiplicity* EDM4hep event -- e.g. a full shower
+On Key4hep 2026-02-01, writing a *high-multiplicity* EDM4hep event -- e.g. a full shower
 cascade with `keepAllParticles=True` + `userParticleHandler=""` (~80k MCParticles) -- crashes
 at the END of the run with `free(): invalid pointer` inside `podio::ROOTWriter::finish()` ->
 `TFile::Close`. The event data is written first ("Saving EDM4hep event 0"); the abort happens
 during file *finalization*. Standard 1-particle samples are unaffected.
 
 Cause: a podio/ROOT memory bug in the 2026-02-01 podio (1.7), triggered when finalizing a
-file with this many objects/relations. It is **fixed in key4hep 2026-04-08** (newer podio).
+file with this many objects/relations. It is **fixed in Key4hep 2026-04-08** (newer podio).
 
 Fix: generate large-cascade EDM4hep samples under 2026-04-08:
 

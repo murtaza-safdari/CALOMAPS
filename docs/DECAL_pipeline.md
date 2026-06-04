@@ -2,20 +2,20 @@
 
 *Expanded Edition: From Environment Setup to Physics Reconstruction*
 
-*(Transcribed from the user's PDF "DECAL R&D: Complete Simulation to Reconstruction Pipeline (Expanded)" for in-project reference. The PDF is the source of truth if any conflict.)*
+*Physics reference for the DECAL simulation-to-reconstruction pipeline.*
 
-Welcome to the Digital Calorimeter (DECAL) R&D framework. This document provides a foolproof, end-to-end guide. It covers everything from establishing your CVMFS environment and understanding the underlying C++ GEANT4 wrappers, to modifying the detector geometry, calibrating it using deep neural networks, and extracting fundamental physics properties.
+This is the end-to-end physics reference for the DECAL (Digital Electromagnetic Calorimeter) pipeline. It covers establishing the CVMFS environment, the underlying C++ Geant4 wrappers, modifying the detector geometry, calibrating it with deep neural networks, and extracting physics properties.
 
 ## Part 0: The Physics (Why are we doing this?)
 
-Traditional calorimeters measure the **Analog Energy** deposited by a particle shower. However, DECALs propose a radical alternative: **Digital Hit Counting**. Instead of measuring *how much* energy was deposited in a pixel, the readout is binary (1 if hit, 0 if not). Why throw away information? It comes down to two competing physics regimes:
+Traditional calorimeters measure the **Analog Energy** deposited by a particle shower. A DECAL instead uses **digital hit counting**: the per-pixel readout is binary (1 if hit, 0 if not) rather than the analog amplitude. Discarding the analog energy is motivated by two competing physics regimes:
 
 - **The Low-Energy Advantage (Landau Fluctuations):** When a charged particle passes through a microscopically thin layer of silicon, energy loss follows a highly skewed Landau distribution. Rare, explosive energy dumps (Delta rays) cause massive variance in analog readouts. A binary hit-counter acts as a mathematical filter, truncating the Landau tail and dramatically improving resolution at low energies (e.g., < 20 GeV).
 - **The High-Energy Catastrophe (Pixel Saturation):** At high energies (e.g., 400 GeV), the electromagnetic shower becomes incredibly dense. Dozens of secondary particles will strike the exact same silicon pixel. An analog readout measures them all; a binary readout registers a single "1" and saturates. This causes a massive, non-linear collapse in the detector's response.
 
 ## Part 1: Establishing the Simulation Environment
 
-Before modifying any code, you must initialize the software environment. High-Energy Physics relies on a massive software stack called **Key4hep**, which contains GEANT4, ROOT, and DD4hep. Because this software is terabytes in size, it is not installed on your local machine. It is hosted on a globally distributed, read-only network drive called **CVMFS**.
+Before modifying any code, you must initialize the software environment. High-Energy Physics relies on a massive software stack called **Key4hep**, which contains Geant4, ROOT, and DD4hep. Because this software is terabytes in size, it is not installed on your local machine. It is hosted on a globally distributed, read-only network drive called **CVMFS**.
 
 ### 1.1 Initializing Key4hep
 
@@ -25,46 +25,46 @@ Every time you open a new terminal on the Elastic Analysis Facility (EAF) or lxp
 source /cvmfs/sw.hsf.org/key4hep/setup.sh
 ```
 
-This single command sets up your `PATH`, `LD_LIBRARY_PATH`, and `PYTHONPATH` so your terminal knows where GEANT4 and all necessary C++ compilers live.
+This single command sets up your `PATH`, `LD_LIBRARY_PATH`, and `PYTHONPATH` so your terminal knows where Geant4 and all necessary C++ compilers live.
 
 *(Note: this project's `setup_calomaps.sh` pins the release to `-r 2026-02-01` for reproducibility, and also injects `~/lib_hack` into `LD_LIBRARY_PATH` to work around an OpenGL conflict.)*
 
 ## Part 2: Understanding the Hardware (DD4hep XML)
 
-Writing GEANT4 detector geometry directly in C++ is incredibly tedious and error-prone. Instead, we use **DD4hep**, a toolkit that allows you to define your detector using compact XML files. When the simulation runs, DD4hep reads the XML and automatically generates the complex C++ GEANT4 geometry in the background.
+Writing Geant4 detector geometry directly in C++ is tedious and error-prone. Instead, we use **DD4hep**, a toolkit that allows you to define your detector using compact XML files. When the simulation runs, DD4hep reads the XML and automatically generates the complex C++ Geant4 geometry in the background.
 
 ### 2.1 The Baseline DECAL Edits (What we have already changed)
 
 If you open standard calorimeter geometries, you will find coarse analog pads (e.g., 5mm × 5mm). To turn this into a DECAL testbed, **the following fundamental edits have already been made to the baseline XML:**
 
 - **Material:** Active sensor material changed to ultra-thin Silicon to mimic Monolithic Active Pixel Sensors (MAPS).
-- **Segmentation:** `grid_size` shrunk from millimeters down to **25 µm × 25 µm**. This extreme granularity is what allows individual particle tracks to be counted rather than measuring bulk energy.
+- **Segmentation:** `grid_size` shrunk from millimeters down to **100 µm × 100 µm** (this project's pitch, set in `my_custom_ecal.xml`). This fine granularity is what allows individual particle tracks to be counted rather than measuring bulk energy.
 
 ### 2.2 Anatomy of the Readout Block
 
-The most critical section in `my_decal_geom.xml` (or in this project, `my_custom_ecal.xml`) is the `<readout>` block:
+The most critical section in `my_custom_ecal.xml` is the `<readout>` block:
 
 ```xml
 <readout name="ECalBarrelHits">
     <!-- 1. The Physical Pixels -->
-    <segmentation type="CartesianGridXY" grid_size_x="25*um" grid_size_y="25*um"/>
+    <segmentation type="CartesianGridXY" grid_size_x="100*um" grid_size_y="100*um"/>
 
     <!-- 2. The Data Encoding (Bitfield) -->
     <id>system:8,barrel:3,module:4,layer:6,slice:5,x:32:-16,y:-16</id>
 </readout>
 ```
 
-- **Segmentation:** Physically divides the silicon plane. *Experiment here!* Change `25*um` to `50*um` or `10*um` to see how pixel size drives the high-energy saturation catastrophe.
+- **Segmentation:** Physically divides the silicon plane. Adjusting the pitch (e.g. `50*um` or `10*um`) changes the onset of high-energy saturation.
 - **The ID String (Bitfield Encoding):** Detector saves a 3D coordinate by packing it into a single 64-bit integer. `system:8` = 8 bits for system ID; `layer:6` = 6 bits for layer; `x:32:-16` = 32 bits for X pixel index, offset by -16 bits. You generally **do not** need to edit this string — but this is why EDM4hep ROOT files output weirdly nested branch names.
 
-## Part 3: Executing the GEANT4 Simulation
+## Part 3: Executing the Geant4 Simulation
 
-`ddsim` is the command-line tool that acts as the steering wheel for GEANT4. Bash loop to fire electrons across the energy spectrum (generates the dataset for the ML model):
+`ddsim` is the command-line tool that acts as the steering wheel for Geant4. Bash loop to fire electrons across the energy spectrum (generates the dataset for the ML model):
 
 ```bash
 for E in 5 10 20 50 100 200 300 400; do
     echo "Simulating ${E} GeV Electrons..."
-    ddsim --compactFile my_decal_geom.xml \
+    ddsim --compactFile SiD_TestBeam.xml \
           --runType run \
           --events 1000 \
           --enableG4Gun \
@@ -75,13 +75,13 @@ done
 ```
 
 **Command breakdown:**
-- `--compactFile`: tells GEANT4 to build the geometry from your XML.
+- `--compactFile`: tells Geant4 to build the geometry from the XML.
 - `--enableG4Gun`: turns on the built-in particle gun.
 - `--gun.particle e-`: shoots electrons. Try `gamma` or `pi+` to see how hadronic vs electromagnetic showers differ in saturation.
 
 ## Part 4: The EAF Python GPU Overlay Setup
 
-The standard Key4hep environment defaults to CPU-only PyTorch. To train Deep Ensembles quickly, build a Python virtual environment overlay that connects to the physical GPUs on EAF nodes.
+The standard Key4hep environment defaults to CPU-only PyTorch. To train Deep Quantile Ensembles quickly, build a Python virtual environment overlay that connects to the physical GPUs on EAF nodes.
 
 ### 4.1 Build the Virtual Environment
 
@@ -111,13 +111,11 @@ chmod +x wrapper.sh
 
 Open `kernel.json` in that folder and replace the path to the python binary with the path to your new `wrapper.sh` script.
 
-> **⚠ Drift note (2026-05-26):** In the current project's actual install, the CUDA torch install was either never done or didn't persist (`torch.cuda.is_available()` returns False), and the wrapper.sh was never created. The kernel calls `/home/murtazas/my_gpu_env/bin/python` directly. If GPU training matters, re-run the pip install above.
-
 ## Part 5: Software Reconstruction (Jupyter Pipeline)
 
 **Critical workflow rule:** Switching Jupyter kernels clears your RAM. The pipeline is split into two phases:
 
-1. **Extraction (default Key4hep kernel):** Use `uproot` to read the `.root` files, extract True Energy and Visible Signals, save with `np.savez_compressed('decal_data.npz', ...)`.
+1. **Extraction (default Key4hep kernel):** Use `uproot` to read the `.root` files, extract True Energy and Visible Signals, save with `np.savez_compressed('decal_extracted_data.npz', ...)`.
 2. **Machine learning (Key4hep + GPU kernel):** Switch kernels, load the `.npz`, run the PyTorch pipeline.
 
 ### 5.1 The Forward Model (Deep Quantile Ensembles)
