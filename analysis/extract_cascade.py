@@ -27,6 +27,7 @@ br = ["MCParticles.PDG", "MCParticles.mass",
       "MCParticles.vertex.x", "MCParticles.vertex.y", "MCParticles.vertex.z",
       "MCParticles.endpoint.x", "MCParticles.endpoint.y", "MCParticles.endpoint.z",
       "MCParticles.generatorStatus", "MCParticles.simulatorStatus",
+      "MCParticles.daughters_begin", "MCParticles.daughters_end", "_MCParticles_daughters.index",
       "ECalBarrelHits.position.x", "ECalBarrelHits.position.y", "ECalBarrelHits.position.z",
       "ECalBarrelHits.energy"]
 a = t.arrays(br, entry_start=EV, entry_stop=EV + 1)
@@ -42,6 +43,9 @@ vsx, vsy, vsz = g("MCParticles.vertex.x"), g("MCParticles.vertex.y"), g("MCParti
 vex, vey, vez = g("MCParticles.endpoint.x"), g("MCParticles.endpoint.y"), g("MCParticles.endpoint.z")
 gstat = g("MCParticles.generatorStatus").astype(np.int32)
 status = g("MCParticles.simulatorStatus").astype(np.int32)
+dbeg = g("MCParticles.daughters_begin").astype(np.int64)
+dend = g("MCParticles.daughters_end").astype(np.int64)
+dau = g("_MCParticles_daughters.index").astype(np.int64)   # flat list; daughters of particle i = dau[dbeg[i]:dend[i]]
 E = np.sqrt(px**2 + py**2 + pz**2 + mass**2)   # GeV
 hx, hy, hz = g("ECalBarrelHits.position.x"), g("ECalBarrelHits.position.y"), g("ECalBarrelHits.position.z")
 he = g("ECalBarrelHits.energy")   # GeV
@@ -54,6 +58,7 @@ np.savez_compressed(
     pex=pex, pey=pey, pez=pez,
     vsx=vsx, vsy=vsy, vsz=vsz, vex=vex, vey=vey, vez=vez,
     pid=pid, status=status, gstat=gstat,
+    dbeg=dbeg, dend=dend, dau=dau,
     hx=hx, hy=hy, hz=hz, he=he,
     meta=np.array(["gamma", "50.0 GeV", "+Y pencil beam", "keepAllParticles",
                    "userParticleHandler=off", "EDM4hep"]),
