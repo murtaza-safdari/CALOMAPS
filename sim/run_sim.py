@@ -9,8 +9,8 @@ SIM = DD4hepSimulation()
 # SIM.enableGun = True
 
 # Common particle choices:
-#   "gamma"               — photons (default; pure EM showers)
-#   "pi+", "pi-", "proton", "neutron"  — hadrons (wider, longer showers)
+#   "gamma"               - photons (default; pure EM showers)
+#   "pi+", "pi-", "proton", "neutron"  - hadrons (wider, longer showers)
 # SIM.gun.particle = "gamma" 
 
 # Set the energy spectrum using momentum parameters

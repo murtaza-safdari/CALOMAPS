@@ -184,34 +184,34 @@ recipe for the *notebook* path (the shim is still fine for headless scripts).
 
 ---
 
-## DDSim EDM4hep ROOT output silently aborts (dict -> std::map RunHeader/EventParameters)
+## DDSim EDM4hep output crashes if the steering file contains non-ASCII characters
 
-On key4hep 2026-02-01 (DD4hep 1.35), writing **EDM4hep** ROOT output with `ddsim` can make
-the process exit cleanly (status 0) right after `++++ Setting up EDM4hep ROOT Output ++++`,
-**before any event runs, with no output file, and no Python traceback.** It is easy to
-misread as an OOM kill or a hang — it is neither (peak memory stays ~2.5 GiB, no process
-lingers).
+Writing EDM4hep ROOT output with `ddsim` can abort with
+`cppyy.gbl.dd4hep.unrelated_value_error: ... std::map<string,string> ... is not defined`
+(a traceback, exit 1) right after `++++ Setting up EDM4hep ROOT Output ++++`, with no
+output file. (If you try to "fix" it by monkeypatching the RunHeader assignment, it then
+turns into a *silent* C++ `exit(0)` with no traceback at the next metadata assignment,
+which is easy to misread as an OOM kill or a hang.)
 
-Cause: `DDSim.Helper.OutputConfig._configureEDM4HEP` assigns plain Python dicts to map-typed
-writer properties — `RunHeader`, `EventParametersString/Int/Float`, `RunParametersString/...`.
-cppyy cannot convert a dict to `std::map<std::string,std::string>` in this build
-(`...map<string,string>... is not defined`). The `RunHeader` line raises a Python error if
-reached; the `EventParameters*` line is worse — it aborts the process via a silent C++
-`exit(0)`. The baseline `.slcio` (LCIO) path hits the same `addParametersToRunHeader` line,
-so switching to LCIO is **not** an escape.
+**Root cause:** a **non-ASCII character in the steering file** (an em-dash `-` typed as the
+Unicode em-dash, an en-dash, or a "smart quote" in a comment/docstring). DDSim copies the
+entire steering-file text into the run metadata (`SteeringFileContent`), then hands the
+metadata dict to the EDM4hep writer's `RunHeader` (a `std::map<string,string>` property).
+cppyy cannot convert a dict whose values contain non-ASCII bytes and reports it as the map
+type being "not defined". It is **not** a Key4hep build bug, **not** memory/OOM, and **not**
+release-specific (reproduced identically on 2026-02-01 and 2026-04-08; an ASCII steering
+works on both).
 
-Workaround: force DD4hep's **native** ROOT output, which uses `setupROOTOutput` and never
-touches those map properties:
+**Fix:** keep steering files **pure ASCII** -- use `-` not the em-dash, and straight quotes
+`'` `"` not curly ones. One-liner to clean a file:
 
-```python
-SIM.outputConfig.forceDD4HEP = True
+```bash
+python -c "import sys,io; p=sys.argv[1]; io.open(p,'w').write(io.open(p,encoding='utf-8').read().encode('ascii','ignore').decode())" sim/run_sim.py
 ```
 
-The output is a `TTree` named `EVENT` with branches such as `MCParticles`
-(`vector<dd4hep::sim::Geant4Particle*>`) and `ECalBarrelHits`. uproot cannot deserialize the
-custom streamers; read it with PyROOT after `ROOT.gSystem.Load("libDDG4IO")` — see
-`analysis/extract_cascade.py`, which dumps the cascade to a compact `.npz`. The full working
-recipe is in `sim/run_sim_fullcascade.py`.
+(`SIM.outputConfig.forceDD4HEP = True` also sidesteps the crash by writing DD4hep-native
+ROOT instead of EDM4hep -- see `sim/run_sim_fullcascade.py` -- but that's a *different
+output format*, not the EDM4hep fix.)
 
 ## Geant4 shower cascade is dropped unless you disable the user particle handler
 
@@ -231,6 +231,28 @@ SIM.part.keepAllParticles    = True
 
 With both, the complete cascade is retained (~75k particles for a single 50 GeV photon). See
 `sim/run_sim_fullcascade.py`.
+
+## EDM4hep podio writer crashes (free(): invalid pointer) on very large events
+
+On key4hep 2026-02-01, writing a *high-multiplicity* EDM4hep event -- e.g. a full shower
+cascade with `keepAllParticles=True` + `userParticleHandler=""` (~80k MCParticles) -- crashes
+at the END of the run with `free(): invalid pointer` inside `podio::ROOTWriter::finish()` ->
+`TFile::Close`. The event data is written first ("Saving EDM4hep event 0"); the abort happens
+during file *finalization*. Standard 1-particle samples are unaffected.
+
+Cause: a podio/ROOT memory bug in the 2026-02-01 podio (1.7), triggered when finalizing a
+file with this many objects/relations. It is **fixed in key4hep 2026-04-08** (newer podio).
+
+Fix: generate large-cascade EDM4hep samples under 2026-04-08:
+
+```bash
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-04-08
+export LD_LIBRARY_PATH="$HOME/lib_hack:$LD_LIBRARY_PATH"
+```
+
+Reading the output with uproot is release-agnostic, so the analysis notebooks can stay on the
+pinned 2026-02-01. (This is a *different* failure from the non-ASCII-steering EDM4hep crash
+documented above.)
 
 ## Where else to check
 
