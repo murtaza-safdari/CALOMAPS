@@ -23,6 +23,7 @@ EV  = int(sys.argv[3]) if len(sys.argv) > 3 else 0   # cascade files are single-
 t = uproot.open(IN)["events"]
 br = ["MCParticles.PDG", "MCParticles.mass",
       "MCParticles.momentum.x", "MCParticles.momentum.y", "MCParticles.momentum.z",
+      "MCParticles.momentumAtEndpoint.x", "MCParticles.momentumAtEndpoint.y", "MCParticles.momentumAtEndpoint.z",
       "MCParticles.vertex.x", "MCParticles.vertex.y", "MCParticles.vertex.z",
       "MCParticles.endpoint.x", "MCParticles.endpoint.y", "MCParticles.endpoint.z",
       "MCParticles.generatorStatus", "MCParticles.simulatorStatus",
@@ -35,6 +36,8 @@ def g(name):
 pdg = g("MCParticles.PDG").astype(np.int32)
 mass = g("MCParticles.mass")
 px, py, pz = g("MCParticles.momentum.x"), g("MCParticles.momentum.y"), g("MCParticles.momentum.z")
+pex, pey, pez = (g("MCParticles.momentumAtEndpoint.x"), g("MCParticles.momentumAtEndpoint.y"),
+                 g("MCParticles.momentumAtEndpoint.z"))   # momentum at end of track (GeV)
 vsx, vsy, vsz = g("MCParticles.vertex.x"), g("MCParticles.vertex.y"), g("MCParticles.vertex.z")
 vex, vey, vez = g("MCParticles.endpoint.x"), g("MCParticles.endpoint.y"), g("MCParticles.endpoint.z")
 gstat = g("MCParticles.generatorStatus").astype(np.int32)
@@ -48,6 +51,7 @@ os.makedirs(os.path.dirname(OUT), exist_ok=True)
 np.savez_compressed(
     OUT,
     pdg=pdg, mass=mass, px=px, py=py, pz=pz, E=E,
+    pex=pex, pey=pey, pez=pez,
     vsx=vsx, vsy=vsy, vsz=vsz, vex=vex, vey=vey, vez=vez,
     pid=pid, status=status, gstat=gstat,
     hx=hx, hy=hy, hz=hz, he=he,
