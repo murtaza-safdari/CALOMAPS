@@ -98,7 +98,7 @@ def train_one_ensemble(x_data, y_data, device, name="ensemble",
 
     The network actually predicts the *fractional response* y / x, normalized
     by its max value. Returns (models_list, x_max, y_frac_max) — the same
-    triple `load_ensemble` returns, so you can pass it straight to the
+    triple `load_ensemble` returns, so it can be passed directly to the
     dashboard helpers.
 
     Each model gets a fresh random 80/20 train/val split (bootstrap-style).

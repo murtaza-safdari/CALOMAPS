@@ -30,7 +30,7 @@ from g4units import GeV, deg
 SIM = DD4hepSimulation()
 
 # ==========================================
-# PARTICLE GUN -- single fixed-energy photon, +Y pencil beam
+# PARTICLE GUN -- single fixed-energy photon, +y pencil beam
 # ==========================================
 SIM.enableGun = True
 SIM.gun.particle = "gamma"
