@@ -321,7 +321,7 @@ We want each event to be statistically identical modulo energy. That way the res
 
 A more realistic study (a real collider experiment) would smear the gun. That's a good follow-up: train on the pencil beam, then re-simulate with smearing and see how the surrogate generalizes.
 
-### 4.2 A note on the ddsim gun log (confusing but harmless)
+### 4.2 Reading the ddsim gun log
 
 ```
 Gun INFO Shoot [3] ... dir:( 0.000  0.000  1.000)       ← +Z??
@@ -616,7 +616,7 @@ Why this works: the JupyterLab launcher invokes `~/my_gpu_env/bin/python` direct
 
 From a CVMFS-sourced terminal, `sys.path` already has CVMFS torch ahead of any venv. Workarounds:
 
-- **Use the `sys.path` shim** (see [§11.3](#113-why-the-syspath-hack-path-b-only)). [`analysis/train_ensembles.py`](../analysis/train_ensembles.py) has it baked in.
+- **Use the `sys.path` shim** (see [§11.3](#113-why-the-syspath-workaround-path-b-only)). [`analysis/train_ensembles.py`](../analysis/train_ensembles.py) has it baked in.
 - **Install to `/tmp/cu_torch_env/`** instead of `~/my_gpu_env/` if `/home/<u>` is full (the 4.4 GB install often doesn't fit in EAF's 23 GB home quota).
 
 Full recipe:
@@ -645,7 +645,7 @@ print('device:', torch.cuda.get_device_name(0))"
 
 `/tmp` on EAF is overlay, several TB free, but **wiped on container restart** — re-do the install each fresh session.
 
-### 11.3 Why the `sys.path` hack (Path B only)
+### 11.3 Why the `sys.path` workaround (Path B only)
 
 When `setup_calomaps.sh` is sourced, CVMFS pre-pends ~30 `/cvmfs/.../site-packages/` paths to `PYTHONPATH`, including the CPU-only CVMFS torch. Even from inside a venv, `import torch` finds CVMFS first because it's earlier in `sys.path`.
 

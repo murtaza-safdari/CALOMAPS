@@ -13,7 +13,7 @@ echo "Loading Key4hep environment..."
 # library ABI (e.g. torch major versions, ROOT minor versions) and can break
 # saved-model loading or notebook output schemas. The current pin was tested
 # end-to-end with the smoke sim and the dashboard regen on 2026-05-26.
-# When you do bump (every ~6 months is a reasonable cadence): re-run
+# To bump the release pin (roughly every 6 months): re-run
 #   1. `ddsim ... -N 10 ...`     (smoke sim, see handbook.md §8)
 #   2. notebooks/02_data_extraction.ipynb on a small subset
 #   3. analysis/verify_ensembles.py end-to-end
@@ -35,7 +35,7 @@ echo "Navigating to simulation working directory..."
 cd "${CALOMAPS_HOME}/sim"
 
 echo
-echo "Environment ready. You can now run ddsim."
+echo "Environment ready; run ddsim to start a simulation."
 echo "  CALOMAPS_HOME      = $CALOMAPS_HOME"
 echo "  CALOMAPS_DATA_BASE = $CALOMAPS_DATA_BASE"
 echo "  cwd                = $(pwd)"

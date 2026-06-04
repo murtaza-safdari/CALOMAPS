@@ -101,7 +101,7 @@ def main():
         m = reco["MIP"][2][idx]
         h = reco["Hits"][2][idx]
         c = reco["Cluster"][2][idx]
-        print(f"  E={energy:>3d} GeV:  analog={a:.4f}  mip={m:.4f}  hits={h:.4f}  cluster={c:.4f}")
+        print(f"  E={energy:>3d} GeV:  analog={a:.4f}  MIP={m:.4f}  hits={h:.4f}  cluster={c:.4f}")
 
 
 if __name__ == "__main__":
