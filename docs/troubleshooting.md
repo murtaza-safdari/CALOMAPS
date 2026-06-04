@@ -184,6 +184,54 @@ recipe for the *notebook* path (the shim is still fine for headless scripts).
 
 ---
 
+## DDSim EDM4hep ROOT output silently aborts (dict -> std::map RunHeader/EventParameters)
+
+On key4hep 2026-02-01 (DD4hep 1.35), writing **EDM4hep** ROOT output with `ddsim` can make
+the process exit cleanly (status 0) right after `++++ Setting up EDM4hep ROOT Output ++++`,
+**before any event runs, with no output file, and no Python traceback.** It is easy to
+misread as an OOM kill or a hang — it is neither (peak memory stays ~2.5 GiB, no process
+lingers).
+
+Cause: `DDSim.Helper.OutputConfig._configureEDM4HEP` assigns plain Python dicts to map-typed
+writer properties — `RunHeader`, `EventParametersString/Int/Float`, `RunParametersString/...`.
+cppyy cannot convert a dict to `std::map<std::string,std::string>` in this build
+(`...map<string,string>... is not defined`). The `RunHeader` line raises a Python error if
+reached; the `EventParameters*` line is worse — it aborts the process via a silent C++
+`exit(0)`. The baseline `.slcio` (LCIO) path hits the same `addParametersToRunHeader` line,
+so switching to LCIO is **not** an escape.
+
+Workaround: force DD4hep's **native** ROOT output, which uses `setupROOTOutput` and never
+touches those map properties:
+
+```python
+SIM.outputConfig.forceDD4HEP = True
+```
+
+The output is a `TTree` named `EVENT` with branches such as `MCParticles`
+(`vector<dd4hep::sim::Geant4Particle*>`) and `ECalBarrelHits`. uproot cannot deserialize the
+custom streamers; read it with PyROOT after `ROOT.gSystem.Load("libDDG4IO")` — see
+`analysis/extract_cascade.py`, which dumps the cascade to a compact `.npz`. The full working
+recipe is in `sim/run_sim_fullcascade.py`.
+
+## Geant4 shower cascade is dropped unless you disable the user particle handler
+
+`part.keepAllParticles = True` **alone does not** persist a calorimeter EM shower's
+secondaries. DDSim's default `Geant4TCUserParticleHandler` restricts MC-truth to the inner
+*tracking* region; particles born outside it (ECal shower secondaries — at r > 1267 mm in the
+DECAL barrel) get merged into their parent and never written, even with `keepAllParticles`.
+The symptom is "only the primary survived" (1 MCParticle, 0 daughters) despite thousands of
+silicon hits proving the shower happened.
+
+Fix: disable the user particle handler so the region cut is removed, and keep all particles:
+
+```python
+SIM.part.userParticleHandler = ""
+SIM.part.keepAllParticles    = True
+```
+
+With both, the complete cascade is retained (~75k particles for a single 50 GeV photon). See
+`sim/run_sim_fullcascade.py`.
+
 ## Where else to check
 
 - **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, cell-19/26 bugs, scripts that wipe data dirs, etc.)
