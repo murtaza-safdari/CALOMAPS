@@ -31,7 +31,7 @@ The companion document [DECAL_pipeline.md](DECAL_pipeline.md) is the canonical p
 CALOMAPS is a digital calorimeter (**DECAL**) R&D study. The pipeline:
 
 1. Use a Geant4-based simulation (driven by DD4hep, configured by XML) to fire **photons of varying energies** into a custom electromagnetic calorimeter made of **silicon pixel layers** instead of analog pads.
-2. From the raw hit data — restricted to the +y entry segment — compute four per-event readouts: **visible energy** (analog), **MIP count** (MIPs-per-pixel, `Σ round(E_pix/E_MIP)`), **raw hit count** (pixels above ½-MIP threshold, purely digital), and **cluster count** (number of 8-connected pixel clusters, summed over layers).
+2. From the raw hit data — restricted to the +y entry segment — compute four per-event readouts: **visible energy** (analog), **MIP count** (MIPs-per-pixel, `Σ max(1, round(E_pix/E_MIP))`), **raw hit count** (pixels above ½-MIP threshold, purely digital), and **cluster count** (number of 8-connected pixel clusters, summed over layers).
 3. Train a **Deep Quantile Ensemble** — 20 small networks per readout, trained with Pinball loss at the 15.87 / 50 / 84.13 percentiles — to map true energy → readout, with uncertainty quantification baked in.
 4. Use the trained surrogate to **reconstruct** new shower energies via a **Neyman construction** (a statistical inversion that survives the surrogate curve saturating at high energy).
 5. Produce a **3-panel physics dashboard** showing linearity, resolution, and stochastic terms — the canonical way calorimeter performance is reported in the literature.
@@ -534,7 +534,7 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 2. Per event, compute:
    - `E_true` — true photon energy `√(p²+m²)` from the truth-level MC particle
    - `E_vis` — sum of all hit energies in the entry segment (analog readout)
-   - `MIP count` — sum over fired pixels of `round(E_pix / E_MIP)` (MIPs-per-pixel)
+   - `MIP count` — sum over fired pixels of `max(1, round(E_pix / E_MIP))` (MIPs-per-pixel)
    - `hit count` — number of pixels above the ½-MIP threshold (strict digital)
    - `cluster count` — number of 8-connected pixel clusters, summed over layers
 3. Save into `models/decal_extracted_data.npz`.
@@ -547,7 +547,7 @@ The notebook parallelizes with `ProcessPoolExecutor(max_workers=16)`. Drop to 8 
 
 The model in [`analysis/quantilenet.py`](../analysis/quantilenet.py):
 
-- **Architecture**: `Linear(1→32) → SiLU → Linear(32→64) → SiLU → Linear(64→32) → SiLU → Linear(32→3)`. ~3000 parameters.
+- **Architecture**: `Linear(1→32) → SiLU → Linear(32→64) → SiLU → Linear(64→32) → SiLU → Linear(32→3)`. 4,355 parameters.
 - **Targets**: predict **fractional response** `E_signal / E_true` normalized by its max — works for any signal unit.
 - **Loss**: Pinball at the 15.87 / 50 / 84.13 percentiles (symmetric 1-σ Gaussian percentiles, but no Gaussianity assumed).
 - **Ensemble**: 20 networks per readout, each with its own 80/20 train/val split (bootstrap-style).
