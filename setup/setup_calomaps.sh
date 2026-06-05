@@ -4,38 +4,74 @@
 #
 # What it does:
 #   1. Loads Key4hep 2026-02-01 from CVMFS (Geant4, DD4hep, uproot, ROOT, PyTorch CPU)
-#   2. Injects the OpenGL workaround library (~/lib_hack) for DD4hep visualization
-#   3. Exports CALOMAPS_HOME (project root) and CALOMAPS_DATA_BASE (where ROOT data lives)
-#   4. cd's into the simulation working directory
+#   2. Ensures the OpenGL workaround library (~/lib_hack) exists, then injects it
+#   3. Makes sim/*.sh executable (the +x bit is lost on a fresh SSHFS clone)
+#   4. Exports CALOMAPS_HOME and CALOMAPS_DATA_BASE, creating the data dir if needed
+#   5. cd's into the simulation working directory
+#
+# Safe to source repeatedly. It only *warns* (never `exit`s) on a problem, so a
+# missing piece won't kill your interactive shell.
 
-echo "Loading Key4hep environment..."
+# --- 1. Key4hep from CVMFS -------------------------------------------------
 # Key4hep release pin. Don't bump casually: new releases occasionally change
 # library ABI (e.g. torch major versions, ROOT minor versions) and can break
 # saved-model loading or notebook output schemas. The current pin was tested
 # end-to-end with the smoke sim and the dashboard regen on 2026-05-26.
-# To bump the release pin (roughly every 6 months): re-run
+# When you do bump (every ~6 months is a reasonable cadence): re-run
 #   1. `ddsim ... -N 10 ...`     (smoke sim, see handbook.md §8)
 #   2. notebooks/02_data_extraction.ipynb on a small subset
 #   3. analysis/verify_ensembles.py end-to-end
 # and confirm no regressions before merging the new pin.
-source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01
+KEY4HEP_RELEASE="2026-02-01"
+if [ ! -d "/cvmfs/sw.hsf.org/key4hep" ]; then
+  echo "WARNING: /cvmfs/sw.hsf.org/key4hep not found — is CVMFS mounted? (EAF images have it.)"
+fi
+echo "Loading Key4hep environment ($KEY4HEP_RELEASE)..."
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$KEY4HEP_RELEASE"
 
+# --- 2. OpenGL workaround lib (~/lib_hack) ---------------------------------
+# ddsim links libOpenGL.so.0; AlmaLinux 9 ships GL as libGL.so.1. Without this shim
+# ddsim dies at startup with "libOpenGL.so.0: cannot open shared object file". We
+# create the symlink automatically the first time, so it's one less manual step.
+if [ ! -e "$HOME/lib_hack/libOpenGL.so.0" ]; then
+  for _gl in /usr/lib64/libGL.so.1 /usr/lib/x86_64-linux-gnu/libGL.so.1; do
+    if [ -e "$_gl" ]; then
+      mkdir -p "$HOME/lib_hack"
+      ln -sf "$_gl" "$HOME/lib_hack/libOpenGL.so.0"
+      echo "Created OpenGL shim: ~/lib_hack/libOpenGL.so.0 -> $_gl"
+      break
+    fi
+  done
+  if [ ! -e "$HOME/lib_hack/libOpenGL.so.0" ]; then
+    echo "WARNING: couldn't find libGL.so.1 to build ~/lib_hack/libOpenGL.so.0 — ddsim may fail to start."
+  fi
+fi
 echo "Injecting OpenGL library hack..."
 export LD_LIBRARY_PATH="$HOME/lib_hack:$LD_LIBRARY_PATH"
 
-# Where the simulation output datasets live. Override by exporting before sourcing.
-export CALOMAPS_DATA_BASE="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}"
-
-# Project root on /nashome (cloned from github). First letter of $USER picks the
-# /nashome/<X>/<username>/ bucket.
+# --- 3. Project root + executable sim scripts ------------------------------
+# First letter of $USER picks the /nashome/<X>/<username>/ bucket.
 USER_LETTER="${USER:0:1}"
 export CALOMAPS_HOME="${CALOMAPS_HOME:-/nashome/${USER_LETTER}/${USER}/CALOMAPS}"
+# A fresh `git clone` onto the SSHFS /nashome mount drops the +x bit on shell
+# scripts. Restore it so generate_*.sh can be run directly.
+if [ -d "${CALOMAPS_HOME}/sim" ]; then
+  chmod +x "${CALOMAPS_HOME}"/sim/*.sh 2>/dev/null || true
+fi
 
+# --- 4. Data directory -----------------------------------------------------
+# Where the simulation output datasets live. Override by exporting before sourcing.
+export CALOMAPS_DATA_BASE="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}"
+mkdir -p "$CALOMAPS_DATA_BASE" 2>/dev/null || true
+
+# --- 5. Go to the sim working directory ------------------------------------
 echo "Navigating to simulation working directory..."
-cd "${CALOMAPS_HOME}/sim"
+cd "${CALOMAPS_HOME}/sim" 2>/dev/null \
+  || echo "WARNING: ${CALOMAPS_HOME}/sim not found — is CALOMAPS_HOME set correctly?"
 
 echo
-echo "Environment ready; run ddsim to start a simulation."
+echo "Environment ready. You can now run ddsim."
 echo "  CALOMAPS_HOME      = $CALOMAPS_HOME"
 echo "  CALOMAPS_DATA_BASE = $CALOMAPS_DATA_BASE"
+echo "  Key4hep release    = $KEY4HEP_RELEASE"
 echo "  cwd                = $(pwd)"
