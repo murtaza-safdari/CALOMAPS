@@ -306,8 +306,8 @@ Configured in [`sim/run_sim.py`](../sim/run_sim.py).
 
 | Parameter | Value | Notes |
 |---|---|---|
-| Particle | `gamma` (photon) | Pure EM showers, no track-reconstruction complications |
-| Spectrum | uniform momentum, 5–400 GeV | Spans Landau-dominated low E and saturation-dominated high E |
+| Particle | `gamma` (photon), default | Pure EM showers; override with `CALOMAPS_GUN_PARTICLE` (e.g. `pi+`, `pi-`, `proton`) — no file edits |
+| Spectrum | uniform momentum, 5–400 GeV | Override with `CALOMAPS_GUN_PMIN_GEV` / `_PMAX_GEV`, or `_ENERGY_GEV` for a mono-energetic beam |
 | Origin | (0, 0, 0) — the IP | Far from the calorimeter; photon flies through air first |
 | θ (polar angle) | 90° (fixed) | Perpendicular to beam axis |
 | φ (azimuthal angle) | 90° (fixed) | → direction vector is +Y |
@@ -332,8 +332,8 @@ The first line ("Shoot") is the gun's *intrinsic* axis before angles are applied
 
 ### 4.3 Suggested experiments with the gun
 
-- **Change particle type**: `SIM.gun.particle = "pi+"` or `"proton"`. Hadronic showers are wider and longer.
-- **Add angle smearing**: `phiMin = 85 deg, phiMax = 95 deg` gives a 10° fan of incident angles.
+- **Change particle type**: set `CALOMAPS_GUN_PARTICLE=pi+` (or `pi-`, `proton`) in front of `ddsim` or the generate scripts — no file edits. Hadronic showers are wider and longer. See notebook 00 §4 for the full gun-variable set (`CALOMAPS_GUN_PARTICLE` / `_PMIN_GEV` / `_PMAX_GEV` / `_ENERGY_GEV`).
+- **Add angle smearing**: in `run_sim.py`, `phiMin = 85 deg, phiMax = 95 deg` gives a 10° fan of incident angles.
 - **Move the gun**: shift `SIM.gun.position` to `(0, 0, 500*mm)` to study z-dependence.
 
 ---
@@ -387,16 +387,20 @@ ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_caloma
 
 The symlink lets you do `source ~/setup_calomaps.sh` from anywhere; the actual launcher lives in the repo.
 
-#### One-time per account: create `~/lib_hack` (required for `ddsim`)
+#### The `~/lib_hack` OpenGL shim (now automatic)
 
-DD4hep dynamically loads `libOpenGL.so.0` at startup. AlmaLinux 9 on EAF ships the same OpenGL implementation under the SONAME `libGL.so.1` (at `/usr/lib64/libGL.so.1`), but not under the `libOpenGL.so.0` name DD4hep wants. Since you don't have `sudo` to install system libraries, the fix is a single user-writable symlink that aliases the missing name to the present one:
+DD4hep dynamically loads `libOpenGL.so.0` at startup. AlmaLinux 9 on EAF ships the same OpenGL implementation under the SONAME `libGL.so.1` (at `/usr/lib64/libGL.so.1`), but not under the `libOpenGL.so.0` name DD4hep wants. Since you don't have `sudo` to install system libraries, the fix is a single user-writable symlink that aliases the missing name to the present one.
+
+**You no longer do this by hand.** `setup_calomaps.sh` (next step) creates `~/lib_hack/libOpenGL.so.0 → /usr/lib64/libGL.so.1` automatically the first time you source it, and prepends `~/lib_hack` to `LD_LIBRARY_PATH`. When DD4hep's `dlopen` looks for `libOpenGL.so.0`, the loader finds the symlink and resolves it to AlmaLinux's `libGL.so.1`. Without the shim, `ddsim` crashes at startup with `error while loading shared libraries: libOpenGL.so.0: cannot open shared object file`.
+
+If the auto-create ever fails (e.g. `libGL.so.1` lives somewhere unusual), the script prints a warning and you can fall back to the manual symlink:
 
 ```bash
 mkdir -p ~/lib_hack
 ln -s /usr/lib64/libGL.so.1 ~/lib_hack/libOpenGL.so.0
 ```
 
-That's it — one symlink. `setup_calomaps.sh` (next step) prepends `~/lib_hack` to `LD_LIBRARY_PATH`, so when DD4hep's dlopen looks for `libOpenGL.so.0`, the loader finds the symlink first and resolves it to AlmaLinux's `libGL.so.1`. If you skip this step, `ddsim` crashes at startup with `error while loading shared libraries: libOpenGL.so.0: cannot open shared object file`. See [troubleshooting.md](troubleshooting.md) for the why behind user-space library injection on shared HPC nodes.
+See [troubleshooting.md](troubleshooting.md) for the why behind user-space library injection on shared HPC nodes.
 
 ### 6.4 Source the environment
 
@@ -407,12 +411,13 @@ source ~/setup_calomaps.sh
 What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 
 1. `source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01` — loads Key4hep (Geant4, ROOT, DD4hep, uproot, NumPy, PyTorch CPU). ~30 GB from CVMFS.
-2. `export LD_LIBRARY_PATH=$HOME/lib_hack:$LD_LIBRARY_PATH` — OpenGL workaround for DD4hep visualization.
-3. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` — where simulation data lives.
+2. Creates `~/lib_hack/libOpenGL.so.0` if missing, then prepends `~/lib_hack` to `LD_LIBRARY_PATH` — the OpenGL workaround for DD4hep (see above).
+3. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit, which a fresh `git clone` onto the SSHFS mount drops.
 4. `export CALOMAPS_HOME=/nashome/<X>/<username>/CALOMAPS` — project root, derived from `$USER`.
-5. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
+5. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` (and `mkdir -p` it) — where simulation data lives.
+6. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
 
-Source once per terminal. Notebooks don't need it — the JupyterLab kernel inherits CVMFS at spawn.
+The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't kill your shell. Source once per terminal. Notebooks don't need it — the JupyterLab kernel inherits CVMFS at spawn.
 
 ### 6.5 Editing files
 
@@ -446,7 +451,7 @@ The 21 GB simulation data is not visible via the mount (it lives in `/home/<user
 │       (~4 MB source tree)     │    │   /home/<u>/                  │
 │                               │    │   ├── CALOMAPS-data/  ← 21 GB │
 │       not laptop-visible:     │    │   ├── lib_hack/                │
-│                               │    │   ├── my_gpu_env/              │
+│                               │    │   ├── calomaps_gpu_env/              │
 │                               │    │   └── setup_calomaps.sh        │
 │                               │    │      (symlink → repo)          │
 │       /cvmfs/...              │    │   /cvmfs/sw.hsf.org/key4hep/  │
@@ -524,6 +529,15 @@ Defaults: 1000 jobs × 20 events each = **20,000 events**, uniform momentum 5–
 
 For energy-range studies, [`sim/generate_dataset.sh`](../sim/generate_dataset.sh) is a simpler 200×100 variant.
 
+**Other particles**: prefix either script with `CALOMAPS_GUN_PARTICLE` and it writes its own dataset directory — no file edits, and the photon default is untouched:
+
+```bash
+CALOMAPS_GUN_PARTICLE=pi+ bash $CALOMAPS_HOME/sim/generate_batched.sh
+# -> $CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV_piplus/sim_piplus_part*.root
+```
+
+Both scripts resolve the geometry + steering by absolute path, so they run correctly from any directory.
+
 ---
 
 ## 10. Data extraction
@@ -566,9 +580,11 @@ If you have the `.npz` but no saved ensembles, train once (next subsection).
 
 The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.backends.cuda.is_built() → False`). You need to install a CUDA-enabled torch into a venv first.
 
-**Quick path**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step (venv defaults to `/tmp`, which is wiped on container restart — set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free). The manual steps below explain what it does.
+**Recommended path (one command)**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step, then asserts `torch.cuda.is_available()` so a failed install is obvious. The venv defaults to `/tmp` (wiped on container restart — just re-run); set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free. Then open notebook 03 and pick the **Key4hep + GPU** kernel.
 
-#### Path A — JupyterLab UI (recommended)
+The two manual paths below explain what that script automates — use them only if you want to do it by hand or are debugging.
+
+#### Path A — manual UI walkthrough (what the script automates)
 
 ##### One-time per account: create `~/my_gpu_env` and register the kernel
 
