@@ -1,9 +1,11 @@
 #!/bin/bash
 
 # --- BATCH CONFIGURATION ---
-TOTAL_JOBS=1000             # Total number of root files you want
-EVENTS_PER_JOB=20           # Keeps memory footprint low per file
-CONCURRENT_JOBS=20          # How many jobs to run simultaneously
+# Sizable via env so you can make a small dataset to iterate quickly, then a big one:
+#   CALOMAPS_NJOBS=40 CALOMAPS_GUN_PARTICLE=pi+ bash generate_batched.sh   # 40 files
+TOTAL_JOBS="${CALOMAPS_NJOBS:-1000}"            # Total number of root files you want
+EVENTS_PER_JOB="${CALOMAPS_NEVENTS:-20}"        # Keeps memory footprint low per file
+CONCURRENT_JOBS="${CALOMAPS_NCONCURRENT:-20}"   # How many jobs to run simultaneously
 
 # --- PARTICLE / DATASET ---
 # The particle type is read from CALOMAPS_GUN_PARTICLE (default "gamma") and passed
