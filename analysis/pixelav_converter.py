@@ -27,7 +27,7 @@ order -- correct for inward and outward tracks alike, and robust to scattering/c
 
 GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified from data:
 the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers at
-constant radius. The depth/normal axis w is RADIAL (per face); the across-pitch axis u is
+constant depth (perpendicular face distance). The depth/normal axis w is the per-face across-pitch axis u is
 tangential (x-y plane); v is the cylinder-z axis. The per-face normal azimuth phi_n is derived
 from the hit position, so the local transform is general (not +y-hardcoded).
 
@@ -69,7 +69,8 @@ def load_cascade(npz_path):
 
 
 def si_layer_centers():
-    """Radii (mm) of the 30 silicon-sensor centres, from geometry/my_custom_ecal.xml."""
+    """Per-layer Si depths (mm): perpendicular (face-normal) distance from the barrel axis to
+    each sensor mid-plane (the apothem, built from ECAL_RMIN_MM); compared against the local depth w."""
     r, centers = ECAL_RMIN_MM, []
     for nrep, w in [(20, 2.5), (10, 5.0)]:
         pitch = w + 0.25 + 0.32 + 0.05 + 0.30 + 0.33   # W + air + Si + Cu + Kapton + air
