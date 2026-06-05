@@ -71,7 +71,8 @@ CALOMAPS/
 │   ├── train_ensembles.py             ← CLI entry point (headless training)
 │   └── verify_ensembles.py            ← CLI entry point (regenerate dashboard)
 ├── notebooks/                         ← interactive workflow notebooks
-│   ├── 01_detector_and_data.ipynb           ← the detector + its data: geometry, one shower, first-look plots
+│   ├── 00_simulate_your_samples.ipynb ← primer: generate your own samples (any particle via env vars)
+│   ├── 01_detector_and_data.ipynb     ← the detector + its data: geometry, one shower, first-look plots
 │   ├── 02_data_extraction.ipynb       ← parallel uproot extraction → .npz
 │   └── 03_ml_training_and_eval.ipynb  ← train ensembles + dashboard
 └── models/                            ← (gitignored) extracted data + trained checkpoints
@@ -89,12 +90,14 @@ The 21 GB of raw simulation ROOT files live **outside the repo**, at `$CALOMAPS_
 ```bash
 # In a JupyterLab terminal:
 cd /nashome/${USER:0:1}/$USER/
-git clone https://github.com/<your-github-handle>/CALOMAPS.git
+git clone https://github.com/murtaza-safdari/CALOMAPS.git
 ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_calomaps.sh
 source ~/setup_calomaps.sh
 ```
 
-Then open `notebooks/01_detector_and_data.ipynb` in JupyterLab. You will need simulation data first — run a smoke test per `docs/handbook.md` §8 to confirm your environment.
+`setup_calomaps.sh` is safe to source repeatedly; it creates the `~/lib_hack` OpenGL shim and the data directory for you. Confirm your environment with the smoke test in `docs/handbook.md` §8.
+
+New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`), then `01 → 02 → 03` study the reconstruction.
 
 The ML notebook (`03_ml_training_and_eval.ipynb`) needs a GPU kernel — register it once with `bash setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
 
