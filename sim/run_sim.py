@@ -20,6 +20,9 @@ SIM = DD4hepSimulation()
 # Examples:
 #   CALOMAPS_GUN_PARTICLE=pi+ ddsim --compactFile SiD_TestBeam.xml --steeringFile run_sim.py -N 100 ...
 #   CALOMAPS_GUN_PARTICLE=pi- CALOMAPS_GUN_ENERGY_GEV=50 ddsim ... -N 1 ...
+# NOTE: ddsim exec()s this steering file with separate globals/locals, so a helper
+# FUNCTION defined here cannot see the module-level `import os` (NameError at call time).
+# Keep all env parsing inline at module level.
 PARTICLE = os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma")
 PMIN     = float(os.environ.get("CALOMAPS_GUN_PMIN_GEV", "5.0"))
 PMAX     = float(os.environ.get("CALOMAPS_GUN_PMAX_GEV", "400.0"))
@@ -32,7 +35,12 @@ SIM.gun.position = (0, 0, 0)
 # Energy: a fixed energy if CALOMAPS_GUN_ENERGY_GEV is set, otherwise a uniform
 # momentum spectrum between PMIN and PMAX.
 if ENERGY:
-    SIM.gun.energy = float(ENERGY) * GeV
+    # Mono-energetic beam: pin BOTH energy and a degenerate momentum window so the fixed
+    # energy is unambiguous regardless of ddsim's gun apply-order.
+    _e = float(ENERGY)
+    SIM.gun.energy = _e * GeV
+    SIM.gun.momentumMin = _e * GeV
+    SIM.gun.momentumMax = _e * GeV
 else:
     SIM.gun.momentumMin = PMIN * GeV
     SIM.gun.momentumMax = PMAX * GeV
