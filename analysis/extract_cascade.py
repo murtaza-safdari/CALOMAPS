@@ -4,9 +4,13 @@ Reads the EDM4hep output of run_sim_fullcascade.py with uproot (no ROOT/PyROOT n
 and writes a numpy archive the visualization notebook (04) loads with plain numpy.
 
 Units: EDM4hep stores momentum / mass / hit energy in GeV, positions / vertices in mm.
-The per-step hit truth (CaloHitContribution: PDG, energy, stepPosition, link to MCParticle)
-is reachable via ECalBarrelHits.contributions_{begin,end}; it is left for experiment "B" /
-the PIXELAV converter and is not extracted here.
+
+Per-step hit truth (experiment "B"): when run_sim_fullcascade.py sets enableDetailedShowerMode,
+each ECalBarrelHitsContributions entry (one Geant4 step deposit) carries PDG, energy, stepLength,
+stepPosition (mm) and a link to the producing MCParticle. Those are extracted here -- cbeg/cend
+index the per-hit contribution ranges, and the flat contribution arrays are cpdg/cE/cslen/
+csx/csy/csz/cmc -- and feed analysis/pixelav_converter.py. Without detailed mode the position/PDG
+fields come out zero (only energy + the MCParticle link are written).
 
 Usage: python extract_cascade.py [in.root] [out.npz] [event_index]
 """
@@ -29,7 +33,13 @@ br = ["MCParticles.PDG", "MCParticles.mass",
       "MCParticles.generatorStatus", "MCParticles.simulatorStatus",
       "MCParticles.daughters_begin", "MCParticles.daughters_end", "_MCParticles_daughters.index",
       "ECalBarrelHits.position.x", "ECalBarrelHits.position.y", "ECalBarrelHits.position.z",
-      "ECalBarrelHits.energy"]
+      "ECalBarrelHits.energy", "ECalBarrelHits.cellID",
+      "ECalBarrelHits.contributions_begin", "ECalBarrelHits.contributions_end",
+      "ECalBarrelHitsContributions.PDG", "ECalBarrelHitsContributions.energy",
+      "ECalBarrelHitsContributions.stepLength", "ECalBarrelHitsContributions.time",
+      "ECalBarrelHitsContributions.stepPosition.x", "ECalBarrelHitsContributions.stepPosition.y",
+      "ECalBarrelHitsContributions.stepPosition.z",
+      "_ECalBarrelHitsContributions_particle.index"]
 a = t.arrays(br, entry_start=EV, entry_stop=EV + 1)
 def g(name):
     return np.asarray(a[name][0])
@@ -51,6 +61,19 @@ hx, hy, hz = g("ECalBarrelHits.position.x"), g("ECalBarrelHits.position.y"), g("
 he = g("ECalBarrelHits.energy")   # GeV
 pid = np.arange(len(pdg), dtype=np.int64)
 
+# --- per-step hit contributions (experiment "B"; populated only with enableDetailedShowerMode) ---
+cellID = g("ECalBarrelHits.cellID").astype(np.uint64)
+cbeg = g("ECalBarrelHits.contributions_begin").astype(np.int64)
+cend = g("ECalBarrelHits.contributions_end").astype(np.int64)
+cpdg = g("ECalBarrelHitsContributions.PDG").astype(np.int32)
+cE = g("ECalBarrelHitsContributions.energy")                       # GeV deposited in the step
+cslen = g("ECalBarrelHitsContributions.stepLength")               # mm
+ctime = g("ECalBarrelHitsContributions.time")                  # ns; orders steps within a crossing
+csx = g("ECalBarrelHitsContributions.stepPosition.x")            # mm, global
+csy = g("ECalBarrelHitsContributions.stepPosition.y")
+csz = g("ECalBarrelHitsContributions.stepPosition.z")
+cmc = g("_ECalBarrelHitsContributions_particle.index").astype(np.int64)   # -> index into MCParticles
+
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 np.savez_compressed(
     OUT,
@@ -59,12 +82,16 @@ np.savez_compressed(
     vsx=vsx, vsy=vsy, vsz=vsz, vex=vex, vey=vey, vez=vez,
     pid=pid, status=status, gstat=gstat,
     dbeg=dbeg, dend=dend, dau=dau,
-    hx=hx, hy=hy, hz=hz, he=he,
-    meta=np.array(["gamma", "50.0 GeV", "+Y pencil beam", "keepAllParticles",
-                   "userParticleHandler=off", "EDM4hep"]),
+    hx=hx, hy=hy, hz=hz, he=he, cellID=cellID,
+    cbeg=cbeg, cend=cend, cpdg=cpdg, cE=cE, cslen=cslen, ctime=ctime, csx=csx, csy=csy, csz=csz, cmc=cmc,
+    meta=np.array(["gamma", "50.0 GeV", "+y pencil beam", "keepAllParticles",
+                   "userParticleHandler=off", "enableDetailedShowerMode", "EDM4hep"]),
 )
+_detailed = bool(np.any((csx != 0) | (csy != 0) | (csz != 0)))
 print(f"saved {OUT}")
-print(f"  n_particles={len(pdg)}  n_hits={len(hx)}")
+print(f"  n_particles={len(pdg)}  n_hits={len(hx)}  n_contributions={len(cpdg)}")
 print(f"  particle E range (GeV): {E.min():.4f} .. {E.max():.2f}")
 print(f"  total hit energy deposited (GeV): {he.sum():.4f}")
+print(f"  contribution stepPosition populated: {_detailed}"
+      + ("" if _detailed else "  <-- WARN: detailed mode NOT active; experiment-B (Variant A) unavailable"))
 print(f"  file size: {os.path.getsize(OUT)/1024:.0f} KB")
