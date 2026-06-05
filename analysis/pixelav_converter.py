@@ -227,7 +227,7 @@ def write_intermediate(segs, out_prefix):
     return out_prefix + ".json", out_prefix + ".csv"
 
 
-def write_pixelav_deck(segs, out_path, layout="smartpix"):
+def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
     layout='smartpix' (default): the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
@@ -256,14 +256,18 @@ def write_pixelav_deck(segs, out_path, layout="smartpix"):
                          (ca, cb, p, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
                           pid_to_pixelav(s["pdg"])))
         elif layout == "badeaa3":
+            # 7-col format read by ppixelav2_list_trkpy_n_2f.c (the driver we build).
+            # Axis map: modx -> vect[0] = PIXELAV x(21-px) = our v; mody -> vect[1] =
+            # PIXELAV y(13-px, Lorentz) = our u. Entry is written full-truth in um; the
+            # patched driver (analysis/pixelav/) reduces it mod-pitch to the sub-pixel impact.
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f" %
-                         (ca, cb, p, s["flipped"], eu_um, ev_um, p))
+                         (ca, cb, p, s["flipped"], ev_um, eu_um, p))
         else:
             raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
     with open(out_path, "w") as f:
         f.write("\n".join(lines) + ("\n" if lines else ""))
     legend = {"smartpix": "cot_alpha cot_beta ppion flipped ylocal[um] zglobal[um] pT hittime[ps] PID",
-              "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um] mody[um] pT"}[layout]
+              "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um]=v_entry mody[um]=u_entry pT"}[layout]
     with open(out_path + ".columns.txt", "w") as f:
         f.write(f"# PIXELAV track-list ({layout}); lengths in microns; entry point is a LABEL "
                 f"(stock PIXELAV randomizes impact -- see docs/pixelav_reference.md)\n{legend}\n")
@@ -273,7 +277,7 @@ def write_pixelav_deck(segs, out_path, layout="smartpix"):
 def main():
     home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     argv = sys.argv[1:]
-    variant, layout, pos = "auto", "smartpix", []
+    variant, layout, pos = "auto", "badeaa3", []
     i = 0
     while i < len(argv):
         a = argv[i]
