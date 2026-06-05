@@ -21,7 +21,9 @@ std::map<string,string> conversion -- see docs/troubleshooting.md.
 
 Read the output with uproot (see analysis/extract_cascade.py). The per-step hit truth a
 pixel-level simulation (PIXELAV / experiment "B") needs lives in the ECalBarrelHits
-'contributions' (CaloHitContribution: PDG, energy, stepPosition, + a link to MCParticle).
+'contributions' (CaloHitContribution: PDG, energy, stepPosition, stepLength, + a link to
+MCParticle). Those per-step fields are populated ONLY because enableDetailedShowerMode is set
+below; without it the contributions carry energy + the particle link but zero position.
 """
 import os
 from DDSim.DD4hepSimulation import DD4hepSimulation
@@ -55,6 +57,15 @@ SIM.part.keepAllParticles = True       # keep every Geant4 track as an MCParticl
 SIM.part.minimalKineticEnergy = 1.0    # MeV; sane floor for when keepAllParticles=False
 SIM.part.printEndTracking = False
 SIM.part.printStartTracking = False
+
+# ==========================================
+# CALORIMETER HIT DETAIL -- per-step truth for PIXELAV (experiment "B")
+# ==========================================
+# enableDetailedShowerMode puts the calorimeter sensitive actions in DETAILED_MODE
+# (HitCreationMode=2), the only mode under which the EDM4hep writer fills each
+# CaloHitContribution PDG, stepPosition and stepLength (SIMPLE_MODE leaves them zero).
+# NOTE: SIM.part.enableDetailedHitsAndParticleInfo is a different knob and does NOT do this.
+SIM.enableDetailedShowerMode = True
 
 # ==========================================
 # OUTPUT -- EDM4hep ROOT (.root + default => EDM4hep)

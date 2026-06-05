@@ -1,87 +1,62 @@
-"""DD4hep shower cascade  ->  PIXELAV track-segment input  (SCAFFOLD).
+"""DD4hep shower cascade  ->  PIXELAV track-segment input.
 
-PIXELAV (M. Swartz) is a detailed silicon-pixel charge-transport simulation behind the
-CMS SiPixelTemplate / generic-error templates. KEY POINT (often misunderstood): PIXELAV
-is NOT an energy-deposit consumer. Given a charged track's geometry + kinematics it
-GENERATES its own ionization internally (Bichsel dE/dx + Landau straggling + delta-ray
-production), then drifts/diffuses/traps the e-h pairs through the sensor's E and B fields
-to produce the induced pixel signal. So we feed it TRACK SEGMENTS, never the Geant4
-energy deposits. This dictates the converter's whole shape.
+PIXELAV (M. Swartz) is a detailed silicon-pixel charge-transport simulation behind the CMS
+SiPixelTemplate / generic-error templates. KEY POINT: PIXELAV is NOT an energy-deposit
+consumer. Given a charged track's geometry + kinematics it GENERATES its own ionization
+internally (Bichsel dE/dx + Landau straggling + delta rays), then drifts/diffuses/traps the
+e-h pairs through the sensor's E and B fields. So we feed it TRACK SEGMENTS, not energy.
 
-PIXELAV is effectively TWO stages — do not conflate them:
+PIXELAV is effectively TWO stages:
+  STAGE A -- sensor/field model (one-time, per sensor; authored by hand, NOT by this
+  converter): 3-D E-field map, thickness, bias/depletion V, temperature, mobility/Hall model,
+  B-field, pixel pitch, trapping/radiation-damage params.
+  STAGE B -- per-track event input (THIS CONVERTER), one record per charged-track crossing of
+  a sensor, in that sensor's LOCAL frame:
+    - local entry point (u, v)         [u across-pitch, v along cylinder-z]
+    - cot(alpha)=p_u/p_w, cot(beta)=p_v/p_w   (w = sensor radial normal / depth axis)
+    - momentum magnitude |p|           (sets betagamma / dE/dx regime: MIP vs soft e-)
+    - particle type / charge
 
-  STAGE A — sensor/field model (one-time, per sensor; authored by hand, NOT by this
-  converter): 3-D electric-field map (or params to build it), sensor thickness, bias /
-  depletion voltage, temperature, mobility/Hall model, magnetic-field vector, pixel
-  pitch (x,y), trapping/radiation-damage params. This is the classic config deck.
+EXPERIMENT "B" (implemented here, Variant A): run_sim_fullcascade.py sets
+enableDetailedShowerMode, so every Geant4 step deposit (CaloHitContribution) carries its
+global stepPosition + time + a link to the producing MCParticle; extract_cascade.py saves
+these (cbeg/cend, cmc, cE, cpdg, ctime, csx/csy/csz). For each (MCParticle, face) we time-order
+the steps and split them into per-Si-layer runs; each run is one sensor crossing. The entry
+point is the earliest-in-time step and the direction is the entry->exit displacement in time
+order -- correct for inward and outward tracks alike, and robust to scattering/curvature.
 
-  STAGE B — per-track event input (THE FILE THIS CONVERTER WRITES): one record per
-  charged-track crossing of a sensor, in that sensor's LOCAL frame:
-    - local entry point (u, v) on the entry face          [across-pitch, along-z]
-    - direction as cot(alpha) = p_u/p_w and cot(beta) = p_v/p_w, w = sensor-normal/depth.
-      (The standard CMS convention writes this as cot(alpha)=px/pz, cot(beta)=py/pz for a
-      Z-NORMAL sensor. Our +y test wedge has the depth axis w=y, NOT z — see the geometry
-      note below, where the implemented formula is cot(alpha)=px/py, cot(beta)=pz/py.)
-      PIXELAV propagates the straight line across the FULL depletion depth itself, so it
-      wants entry + 2 cot angles (NOT an arbitrary exit z).
-    - momentum magnitude |p| (sets the betagamma / dE/dx regime: MIP vs soft e-)
-    - particle type / charge (MEDIUM confidence it matters beyond |p|; confirm in source)
+GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified from data:
+the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers at
+constant radius. The depth/normal axis w is RADIAL (per face); the across-pitch axis u is
+tangential (x-y plane); v is the cylinder-z axis. The per-face normal azimuth phi_n is derived
+from the hit position, so the local transform is general (not +y-hardcoded).
 
-UNITS ARE UNCONFIRMED (cm vs µm vs mm): Swartz's code works largely in cm, while CMS
-template tooling often quotes µm. Do NOT hardcode — see LENGTH_UNIT_MM below and confirm
-against the real PIXELAV source before trusting absolute scales.
-
-THE GAP (why this is a scaffold, not the finished converter):
-  Experiment "A" gives us each shower particle's *production* 4-vector + vertex, and the
-  calorimeter hits (energy deposits). PIXELAV wants the track's *local entry/exit and
-  direction as it crosses a specific sensor*. Bridging that needs the per-sensor
-  step-level truth (experiment "B"): associate each silicon hit with the track that made
-  it (the Geant4Calorimeter::Hit `truth` MonteCarloContrib carries the depositing track
-  id), and use the hit's entry/exit step points. Until "B" is extracted, this module:
-    * implements the local-frame direction math for the +y test wedge (exact there),
-    * builds an APPROXIMATE per-track record from the cascade (production vertex as a
-      proxy entry point, production momentum as the direction),
-    * emits an intermediate, well-defined track-segment table (CSV/JSON),
-    * STUBS write_pixelav_deck() until the real deck format is confirmed from source.
-
-Geometry note: in this single-photon test the beam is +y and the struck sensors' normal
-is ~ +y, so the local depth axis w = y, the across-pitch axis u = x and the along-z axis
-v = z. Hence cot(alpha) = px/py and cot(beta) = pz/py. For off-normal sensors (general
-barrel position) a per-sensor rotation is required — stubbed in global_to_local().
+STILL STUBBED: write_pixelav_deck() -- the exact PIXELAV input-deck syntax (field order,
+header, length unit cm/mm/um) needs Swartz's PIXELAV source or one known-good deck. The
+per-crossing records are complete and in mm; the deck writer applies LENGTH_UNIT_MM and
+prepends the Stage-A block once that format is known.
 
 Usage:
-    python pixelav_converter.py [cascade.npz] [out_prefix]
+    python pixelav_converter.py [cascade.npz] [out_prefix] [--variant A|B|auto]
 """
 import os, sys, json
 import numpy as np
 
-# ==========================================================================================
-# ⚠️  SCAFFOLD — NOT THE FINISHED CONVERTER.
-#   * Output is an INTERMEDIATE track-segment table (JSON/CSV), NOT a runnable PIXELAV deck.
-#   * write_pixelav_deck() raises NotImplementedError (deck format pending Swartz source).
-#   * Track selection + entry point are APPROXIMATE (production vertex as proxy; one record
-#     per charged track entering the ECal, NOT per silicon-layer crossing). The faithful
-#     version needs experiment "B" (Geant4 step-level truth). See module docstring.
-# ==========================================================================================
-SCAFFOLD_STATUS = ("scaffold: intermediate track-segment table only; deck writer stubbed; "
-                   "approximate production-vertex entry, +y-wedge geometry")
-
-# ECal silicon radial extent for the +y wedge (mm); hits live at r in ~[1267, 1403].
 ECAL_RMIN_MM = 1264.0
 ECAL_RMAX_MM = 1403.0
+N_FACES = 12
+FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
+SI_THICK_MM = 0.32
 
-# Output length unit relative to mm. PIXELAV's expected unit is UNCONFIRMED (cm vs µm vs
-# mm) — set this once the real deck format is known (e.g. 0.1 for cm, 1000.0 for µm).
+# PIXELAV deck length unit relative to mm (cm vs um vs mm is UNCONFIRMED). Records are stored in
+# mm; this is applied ONLY when serializing the deck (write_pixelav_deck), so the intermediate
+# table stays unit-consistent. Set e.g. 0.1 for cm, 1000.0 for um once the deck format is known.
 LENGTH_UNIT_MM = 1.0
 
-# PROPER granularity (TODO): each (particle, silicon-LAYER) crossing is a separate
-# PIXELAV track. The DECAL has 30 Si layers; a shower track pierces several. The faithful
-# converter ("approx-rays" mode) ray-casts each charged track's production->end segment
-# against every layer slab (straight lines; B=0) and emits one record per crossing, in
-# that sensor's local frame. The fully-correct path ("stepB") uses Geant4 step-level
-# truth (experiment "B"): per G4Step in a sensitive Si cell, the pre/post-step local
-# points + momentum, associated to the cellID. This scaffold ships the simplest mode
-# (one record per charged track entering the ECal, production vertex as proxy entry).
+# Species PIXELAV should NOT process: neutrals (no primary ionization) and nuclei (slow recoils,
+# not minimum-ionizing tracks). Nuclei use PDG |code| > 1e9, which is why they are excluded here
+# even though they are formally charged -- intentional for a pixel MIP simulation.
+_NEUTRAL_PDGS = {22, 2112, -2112, 130, 310, 311, -311, 12, -12, 14, -14, 16, -16}
 
 
 def load_cascade(npz_path):
@@ -89,73 +64,146 @@ def load_cascade(npz_path):
         return np.load(npz_path, allow_pickle=True)
     except (FileNotFoundError, OSError, ValueError) as e:
         raise FileNotFoundError(
-            f"Cannot load cascade .npz '{npz_path}': {e}. "
-            f"Run analysis/extract_cascade.py first."
+            f"Cannot load cascade .npz '{npz_path}': {e}. Run analysis/extract_cascade.py first."
         ) from None
 
 
-def select_silicon_tracks(d):
-    """Charged tracks that plausibly cross the ECal silicon.
-
-    Approximation (pending experiment 'B' hit-truth association): a charged particle
-    (e+/e-) whose PRODUCTION vertex lies inside the ECal radial band is treated as a
-    track that enters the silicon there. The proper version selects tracks that have an
-    associated silicon hit and uses the hit entry/exit step points.
-
-    WARNING: the radius check below uses the production-vertex Y only — valid ONLY for the
-    +y pencil-beam wedge (where depth == y). For a general barrel sensor at another azimuth,
-    replace `vsy` with the true radius and the per-sensor transform (see global_to_local).
-    """
-    pdg = d["pdg"]
-    charged = (pdg == 11) | (pdg == -11)
-    # for the +y wedge, "radius into the calorimeter" is the production-vertex y
-    vsy = d["vsy"]
-    in_ecal = (vsy > ECAL_RMIN_MM) & (vsy < ECAL_RMAX_MM)
-    return np.where(charged & in_ecal)[0]
+def si_layer_centers():
+    """Radii (mm) of the 30 silicon-sensor centres, from geometry/my_custom_ecal.xml."""
+    r, centers = ECAL_RMIN_MM, []
+    for nrep, w in [(20, 2.5), (10, 5.0)]:
+        pitch = w + 0.25 + 0.32 + 0.05 + 0.30 + 0.33   # W + air + Si + Cu + Kapton + air
+        for _ in range(nrep):
+            centers.append(r + w + 0.25 + 0.16)        # Si mid-plane = after W + air + half-Si
+            r += pitch
+    return np.array(centers)
 
 
-def global_to_local(px, py, pz, vsx, vsy, vsz):
-    """Map a global momentum + vertex to the local sensor frame.
-
-    EXACT for the +y test wedge (sensor normal w=y, u=x, v=z). For a general barrel
-    sensor at azimuth phi this needs the sensor rotation R(phi); that lookup (from the
-    DD4hep cellID / segmentation) is the main TODO for the production converter.
-
-    Returns (u, v, cot_alpha, cot_beta) with depth axis = y.
-    """
-    # local entry point on the sensor face (proxy = production vertex transverse coords)
-    u = vsx   # across pitch
-    v = vsz   # along beam-z
-    # direction cosines relative to the depth axis (y)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        cot_alpha = np.where(py != 0, px / py, np.inf)
-        cot_beta = np.where(py != 0, pz / py, np.inf)
-    return u, v, cot_alpha, cot_beta
+def face_phi(x, y):
+    """Outward-normal azimuth (rad) of the dodecagon face a global (x,y) point sits on."""
+    phi = np.degrees(np.arctan2(y, x))
+    k = np.round((phi - FACE_PHI0_DEG) / (360.0 / N_FACES))
+    return np.radians(FACE_PHI0_DEG + k * (360.0 / N_FACES))
 
 
-def build_track_segments(d):
-    """Build the intermediate per-track-segment table from the cascade (approximate)."""
-    idx = select_silicon_tracks(d)
-    px, py, pz = d["px"][idx], d["py"][idx], d["pz"][idx]
-    u, v, cot_a, cot_b = global_to_local(px, py, pz, d["vsx"][idx], d["vsy"][idx], d["vsz"][idx])
-    pmag = np.sqrt(px**2 + py**2 + pz**2)
+def to_local(x, y, z, phi_n):
+    """Global (x,y,z) -> sensor-local (u across-pitch, v along-z, w radial/depth)."""
+    c, s = np.cos(phi_n), np.sin(phi_n)
+    w = x * c + y * s          # radial (depth / normal)
+    u = -x * s + y * c         # tangential (across pitch)
+    v = z                      # cylinder-z
+    return u, v, w
+
+
+def is_charged(pdg):
+    pdg = np.asarray(pdg)
+    return (~np.isin(pdg, list(_NEUTRAL_PDGS))) & (np.abs(pdg) < 1_000_000_000)
+
+
+def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, variant, flags):
+    cot_a, cot_b = (float(du / dw), float(dv / dw)) if abs(dw) > 1e-9 else (float("inf"), float("inf"))
+    if abs(dw) <= 1e-9:
+        flags = (flags + "|grazing").strip("|")
+    return {
+        "track_id": int(mc), "layer_id": int(lay), "pdg": int(pdg), "p_GeV": float(p_mag),
+        "entry_u": float(eu), "entry_v": float(ev),           # mm (sensor-local)
+        "cot_alpha": cot_a, "cot_beta": cot_b,
+        "sensor_normal_phi": float(phi_n), "depth_w_mm": float(ew),
+        "energy_dep_GeV": float(edep), "n_steps": int(nstep),
+        "variant": variant, "flags": flags,
+    }
+
+
+# ==========================================================================================
+# Variant A -- per-sensor crossings from time-ordered Geant4 step-level truth (experiment "B")
+# ==========================================================================================
+def build_segments_A(d):
+    cmc = np.asarray(d["cmc"]); ct = np.asarray(d["ctime"])
+    csx, csy, csz = np.asarray(d["csx"]), np.asarray(d["csy"]), np.asarray(d["csz"]); cE = np.asarray(d["cE"])
+    pdg_all = d["pdg"]; px_all, py_all, pz_all = d["px"], d["py"], d["pz"]
+    assert cmc.size == 0 or (cmc.min() >= 0 and cmc.max() < len(pdg_all)), "contribution->MCParticle index out of range"
+
+    centers = si_layer_centers()
+    phin = face_phi(csx, csy)
+    wdep = csx * np.cos(phin) + csy * np.sin(phin)               # DEPTH = projection on face normal
+    layer = np.argmin(np.abs(wdep[:, None] - centers[None, :]), axis=1)  # layers sit at constant depth, not r
+    face = np.round((np.degrees(phin) - FACE_PHI0_DEG) / (360.0 / N_FACES)).astype(int) % N_FACES
+
+    groups = {}
+    for j in range(len(cmc)):
+        groups.setdefault((int(cmc[j]), int(face[j])), []).append(j)
+
+    segs, n_neutral, n_single = [], 0, 0
+    for (mc, fc), js in groups.items():
+        pdg = int(pdg_all[mc])
+        if not bool(is_charged(pdg)):
+            n_neutral += 1
+            continue
+        js = sorted(js, key=lambda k: ct[k])                     # time order
+        phi_n = float(np.radians(FACE_PHI0_DEG + fc * (360.0 / N_FACES)))
+        p_mag = float(np.sqrt(px_all[mc]**2 + py_all[mc]**2 + pz_all[mc]**2))
+        # split the time-ordered steps into maximal runs of constant Si layer = one crossing each
+        runs, cur = [], [js[0]]
+        for k in js[1:]:
+            if layer[k] == layer[cur[-1]]:
+                cur.append(k)
+            else:
+                runs.append(cur)
+                cur = [k]
+        runs.append(cur)
+        for run in runs:
+            lay = int(layer[run[0]])
+            e, x = run[0], run[-1]                               # entry = earliest time, exit = latest
+            disp = np.array([csx[x] - csx[e], csy[x] - csy[e], csz[x] - csz[e]])
+            flags = ""
+            if np.linalg.norm(disp) > 0.02:                      # time-ordered traversal vector
+                du, dv, dw = to_local(disp[0], disp[1], disp[2], phi_n)
+            else:                                                # single/co-located steps -> production momentum
+                du, dv, dw = to_local(px_all[mc], py_all[mc], pz_all[mc], phi_n)
+                flags = "dir_from_momentum"; n_single += 1
+            eu, ev, ew = to_local(csx[e], csy[e], csz[e], phi_n)
+            segs.append(_record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
+                                float(cE[run].sum()), len(run), "A", flags))
+    segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
+    return segs, {"neutral_groups_skipped": n_neutral, "dir_from_momentum": n_single}
+
+
+# ==========================================================================================
+# Variant B -- fallback when no step positions: pixel hits + MCParticle momentum (coarser)
+# ==========================================================================================
+def build_segments_B(d):
+    cbeg, cend, cmc, cE = np.asarray(d["cbeg"]), np.asarray(d["cend"]), np.asarray(d["cmc"]), np.asarray(d["cE"])
+    hx, hy, hz = np.asarray(d["hx"]), np.asarray(d["hy"]), np.asarray(d["hz"])
+    pdg_all = d["pdg"]; px_all, py_all, pz_all = d["px"], d["py"], d["pz"]
+    centers = si_layer_centers()
+    hit_of = np.full(len(cmc), -1, dtype=np.int64)               # contribution -> hit (pixel)
+    for h in range(len(cbeg)):
+        hit_of[cbeg[h]:cend[h]] = h
+    phiH = face_phi(hx, hy); wH = hx * np.cos(phiH) + hy * np.sin(phiH)   # hit depth (face normal)
+    layerH = np.argmin(np.abs(wH[:, None] - centers[None, :]), axis=1)
+    groups = {}
+    for j in range(len(cmc)):
+        h = int(hit_of[j])
+        if h < 0:                                                # contribution outside any hit range -> skip
+            continue
+        groups.setdefault((int(cmc[j]), int(layerH[h])), []).append(j)
     segs = []
-    for k, i in enumerate(idx):
-        segs.append({
-            "track_id": int(d["pid"][i]),
-            "pdg": int(d["pdg"][i]),
-            "p_GeV": float(pmag[k]),
-            "entry_u": float(u[k] * LENGTH_UNIT_MM),   # local across-pitch (unit = LENGTH_UNIT_MM)
-            "entry_v": float(v[k] * LENGTH_UNIT_MM),   # local along-z
-            "cot_alpha": float(cot_a[k]),
-            "cot_beta": float(cot_b[k]),
-            "depth_y_mm": float(d["vsy"][i]),
-        })
-    return segs
+    for (mc, lay), js in groups.items():
+        pdg = int(pdg_all[mc])
+        if not bool(is_charged(pdg)):
+            continue
+        js = np.array(js); hh = hit_of[js]; wgt = cE[js]; wsum = wgt.sum() if wgt.sum() > 0 else 1.0
+        ex = float((hx[hh]*wgt).sum()/wsum); ey = float((hy[hh]*wgt).sum()/wsum); ez = float((hz[hh]*wgt).sum()/wsum)
+        phi_n = float(face_phi(ex, ey))
+        eu, ev, ew = to_local(ex, ey, ez, phi_n)
+        du, dv, dw = to_local(px_all[mc], py_all[mc], pz_all[mc], phi_n)
+        segs.append(_record(mc, lay, pdg, float(np.sqrt(px_all[mc]**2+py_all[mc]**2+pz_all[mc]**2)),
+                            eu, ev, ew, phi_n, du, dv, dw, float(wgt.sum()), len(js), "B", "pixel_centroid"))
+    segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
+    return segs, {}
 
 
 def write_intermediate(segs, out_prefix):
-    """Emit the well-defined intermediate track-segment table (JSON + CSV)."""
     with open(out_prefix + ".json", "w") as f:
         json.dump(segs, f, indent=2)
     if segs:
@@ -168,35 +216,65 @@ def write_intermediate(segs, out_prefix):
 
 
 def write_pixelav_deck(segs, out_path):
-    """STUB: emit a PIXELAV input deck.
+    """STUB: emit a runnable PIXELAV deck.
 
-    Deliberately not implemented — the exact PIXELAV deck syntax (field order, header,
-    units) is not web-documented and must be confirmed against M. Swartz's PIXELAV
-    source / a known-good example deck. Once confirmed, map each segment's
-    (entry_u, entry_v, cot_alpha, cot_beta, p_GeV, pdg) onto the per-track lines and
-    prepend the sensor/run configuration block. See module docstring + open questions.
+    Not implemented: the exact PIXELAV deck syntax (field order, header, and length unit
+    cm/mm/um) is not web-documented and must be confirmed against M. Swartz's PIXELAV source
+    or a known-good example deck. Once confirmed, scale the mm lengths (entry_u, entry_v) by
+    LENGTH_UNIT_MM, map each segment's (entry_u, entry_v, cot_alpha, cot_beta, p_GeV, pdg) onto
+    the per-track lines, and prepend the Stage-A sensor/field block. The complete per-crossing
+    table is available via write_intermediate().
     """
     raise NotImplementedError(
-        "PIXELAV deck format pending Swartz source — see module docstring. "
-        "Intermediate track-segment table is available via write_intermediate()."
+        "PIXELAV deck format pending Swartz source -- see module docstring. "
+        "Per-crossing track table is available via write_intermediate()."
     )
 
 
 def main():
     home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    npz = sys.argv[1] if len(sys.argv) > 1 else os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
-    out_prefix = sys.argv[2] if len(sys.argv) > 2 else os.path.join(home, "models", "pixelav_segments_gamma50_1evt")
+    argv = sys.argv[1:]
+    variant = "auto"; pos = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--variant"):
+            if "=" in a:
+                variant = a.split("=", 1)[1]
+            elif i + 1 < len(argv):
+                variant = argv[i + 1]; i += 1
+        else:
+            pos.append(a)
+        i += 1
+    npz = pos[0] if len(pos) > 0 else os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
+    out_prefix = pos[1] if len(pos) > 1 else os.path.join(home, "models", "pixelav_segments_gamma50_1evt")
     d = load_cascade(npz)
-    n_charged = int(((d["pdg"] == 11) | (d["pdg"] == -11)).sum())
-    segs = build_track_segments(d)
+
+    has_steps = ("csx" in d) and bool(np.any((d["csx"] != 0) | (d["csy"] != 0) | (d["csz"] != 0)))
+    if variant == "auto":
+        variant = "A" if has_steps else "B"
+    if variant == "A" and not has_steps:
+        print("WARNING: Variant A requested but stepPosition is zero/absent -> falling back to B.")
+        variant = "B"
+
+    segs, stats = build_segments_A(d) if variant == "A" else build_segments_B(d)
     j, c = write_intermediate(segs, out_prefix)
-    print(f"[{SCAFFOLD_STATUS}]")
+
+    n_charged = int(is_charged(d["pdg"]).sum())
     print(f"cascade: {npz}")
-    print(f"selected {len(segs)} / {n_charged} charged tracks in ECal band "
-          f"[{ECAL_RMIN_MM}, {ECAL_RMAX_MM}] mm (approx, +y wedge)")
-    if not segs:
-        print("WARNING: zero tracks selected — check geometry band vs this event/detector.")
-    print(f"wrote intermediate track-segment table:\n  {j}\n  {c}")
+    print(f"variant {variant}: {len(segs)} per-sensor charged-track crossings "
+          f"(from {n_charged} charged MCParticles, {len(d['cpdg'])} step-contributions)")
+    if stats:
+        print(f"  stats: {stats}")
+    if segs:
+        layers = sorted({s['layer_id'] for s in segs})
+        per_layer = {L: sum(1 for s in segs if s['layer_id'] == L) for L in layers}
+        print(f"  crossings span layers {layers[0]}..{layers[-1]}; layer counts: "
+              + ", ".join(f"L{L}:{per_layer[L]}" for L in layers[:6]) + (" ..." if len(layers) > 6 else ""))
+        print(f"  example record: {segs[0]}")
+    else:
+        print("WARNING: zero crossings -- check the cascade / geometry.")
+    print(f"wrote per-crossing table:\n  {j}\n  {c}")
     print("PIXELAV deck writer is STUBBED (write_pixelav_deck) pending the deck format.")
 
 
