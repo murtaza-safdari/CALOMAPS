@@ -556,16 +556,30 @@ EDM4hep's `CaloHitContribution` carries no momentum, so `run_sim_trackermom.py` 
 out as a Geant4 tracker via one line — `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'`
 — and the resulting `SimTrackerHit`s carry the true Geant4 momentum at each crossing.
 
-Run both (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
+**One command (recommended)** — [`sim/make_pixelav_inputs.sh`](../sim/make_pixelav_inputs.sh)
+runs the whole chain (it replaces the five manual steps below) for any particle/energy via the
+same env vars, and prints the output paths:
 
 ```bash
 source ~/setup_calomaps.sh                       # Key4hep + lib_hack + CALOMAPS_* env
 export CALOMAPS_DATA_BASE=/tmp/calomaps-data      # off-quota; /home has a 23 GB per-user cap
+bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh                            # gamma 50 GeV (deck only)
+CALOMAPS_GUN_PARTICLE=pi+ bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh --fullcascade   # pi+, + calo cascade
+```
+
+It produces the hand-off package (the 7-column deck + per-crossing records + the `.npz`). The
+from-scratch recipe is in [pixelav_handoff.md](pixelav_handoff.md); validate a produced package
+with [notebooks/05c_pixelav_input_inspection.ipynb](../notebooks/05c_pixelav_input_inspection.ipynb).
+
+The five manual steps it automates, for reference (EAF terminal; `ddsim` needs `lib_hack` on
+`LD_LIBRARY_PATH`, §6.3):
+
+```bash
 cd $CALOMAPS_HOME/geometry
-ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_fullcascade.py --numberOfEvents 1
-ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py  --numberOfEvents 1
-python ../analysis/extract_cascade.py            # -> models/fullcascade_*.npz  (cascade + step truth)
+ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py  --numberOfEvents 1   # tracker SD (PIXELAV source)
+ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_fullcascade.py --numberOfEvents 1   # calo cascade (nb04 / 05b)
 python ../analysis/extract_trackermom.py         # -> models/trackermom_*.npz   (per-crossing momentum)
+python ../analysis/extract_cascade.py            # -> models/fullcascade_*.npz  (cascade + step truth)
 python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* (auto-picks Variant C)
 ```
 
