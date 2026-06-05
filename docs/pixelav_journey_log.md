@@ -189,3 +189,39 @@ cd $RUN && ./ppixelav2_list_trkpy_real_entry 1 track_list.txt clusters.out seedf
   binary's cluster orientation.
 - Per-crossing momentum (needs per-step truth) and a TCAD field map (`TCADtoPixelAV`) to replace
   the simple uniform E-field.
+
+---
+
+## 10. Fixes pass (2026-06-05) — the §9 caveats addressed
+
+All four limitations flagged in §8/§9 were fixed this journey (branches `shower-4vector-outputs`
+for the sim/momentum work, `pixelav-integration` for the PIXELAV-side fixes, then merged):
+
+1. **Per-crossing momentum is now real** (was: the producing particle's production momentum). The
+   ECal Si is read out as a Geant4 tracker — `sim/run_sim_trackermom.py`,
+   `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'` — so each `SimTrackerHit` is
+   one crossing carrying the true Geant4 momentum. `analysis/extract_trackermom.py` pulls it and
+   `pixelav_converter.build_segments_C` (Variant C, auto-selected) builds the crossings. nb05 §9
+   validates it: |p| on/below the production diagonal, softening with depth, monotone loss along the
+   leading track. (See handbook §10.1 for the run recipe.)
+
+2. **dE/dx is species-correct** (was: every track treated as a pion at its face-value momentum).
+   `write_pixelav_deck` feeds the **βγ-matched** pion momentum `ppion = p·m_π/m_particle` (~273× for
+   e±) so a soft shower electron ionises like the relativistic particle it is (plateau ~MIP), not
+   like a slow pion on the 1/β² rise. The `pT` column keeps the real |p| as a label.
+
+3. **Overflow fixed** (was: the 150k-e-h `NEHSTORE` cap dropped ~66% of crossings). `NEHSTORE`
+   150k→1M in the patched driver — the 1M static arrays need `ulimit -s unlimited` (the 8 MB default
+   stack segfaults), now baked into `setup_pixelav.sh` and the run recipe. Combined with fix 2 (soft
+   electrons no longer over-ionise into overflow), nearly all crossings are retained.
+
+4. **B = 0 confirmed appropriate** (was: flagged as a simplification). The test-beam `<fields>` block
+   in `SiD_TestBeam.xml` sets the solenoid to 0 T, so the field-free shower and the B=0 sensor are
+   consistent — no Lorentz drift in either. The uniform drift field + analytic Ramo weighting remain
+   the documented simple model (nb06 §6); a TCAD field map via `TCADtoPixelAV` is the next fidelity
+   step (it would refine cluster *shapes*, not the charge scale).
+
+Notebook 06 was rebuilt around these: it now explains what a cluster is, how its shape encodes the
+track, the transport physics (time development, path-length charge growth), the downstream
+observables (charge spectrum, cluster size, and the charge-weighted **position resolution**), and
+justifies the Stage-A assumptions.
