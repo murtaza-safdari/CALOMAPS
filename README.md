@@ -20,7 +20,7 @@ See [docs/DECAL_pipeline.md](docs/DECAL_pipeline.md) for the full physics writeu
 geometry/SiD_TestBeam.xml + my_custom_ecal.xml
             │
             ▼
-sim/run_sim.py  ──>  ddsim  ──>  ROOT files (889 × 20 events)
+sim/run_sim.py  ──>  ddsim  ──>  ROOT files (1000 × 20 events)
                                       │
                                       ▼
                        notebooks/02_data_extraction.ipynb
@@ -99,7 +99,7 @@ source ~/setup_calomaps.sh
 
 New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`), then `01 → 02 → 03` study the reconstruction.
 
-The ML notebook (`03_ml_training_and_eval.ipynb`) needs a GPU kernel — register it once with `bash setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
+The ML notebook (`03_ml_training_and_eval.ipynb`) needs a GPU kernel — register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
 
 The full setup walkthrough — accounts, EAF spawner profile, the storage map, and the GPU torch install — is in [docs/handbook.md](docs/handbook.md).
 

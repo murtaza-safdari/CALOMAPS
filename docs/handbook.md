@@ -31,7 +31,7 @@ The companion document [DECAL_pipeline.md](DECAL_pipeline.md) is the canonical p
 CALOMAPS is a digital calorimeter (**DECAL**) R&D study. The pipeline:
 
 1. Use a Geant4-based simulation (driven by DD4hep, configured by XML) to fire **photons of varying energies** into a custom electromagnetic calorimeter made of **silicon pixel layers** instead of analog pads.
-2. From the raw hit data — restricted to the +y entry segment — compute four per-event readouts: **visible energy** (analog), **MIP count** (MIPs-per-pixel, `Σ round(E_pix/E_MIP)`), **raw hit count** (pixels above ½-MIP threshold, purely digital), and **cluster count** (number of 8-connected pixel clusters, summed over layers).
+2. From the raw hit data — restricted to the +y entry segment — compute four per-event readouts: **visible energy** (analog), **MIP count** (MIPs-per-pixel, `Σ max(1, round(E_pix/E_MIP))`), **raw hit count** (pixels above ½-MIP threshold, purely digital), and **cluster count** (number of 8-connected pixel clusters, summed over layers).
 3. Train a **Deep Quantile Ensemble** — 20 small networks per readout, trained with Pinball loss at the 15.87 / 50 / 84.13 percentiles — to map true energy → readout, with uncertainty quantification baked in.
 4. Use the trained surrogate to **reconstruct** new shower energies via a **Neyman construction** (a statistical inversion that survives the surrogate curve saturating at high energy).
 5. Produce a **3-panel physics dashboard** showing linearity, resolution, and stochastic terms — the canonical way calorimeter performance is reported in the literature.
@@ -419,6 +419,12 @@ What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 
 The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't kill your shell. Source once per terminal. Notebooks don't need it — the JupyterLab kernel inherits CVMFS at spawn.
 
+#### Notebook kernels
+
+- **Notebooks 00, 01, 02** (CPU) run on the Key4hep stack. In the JupyterLab kernel selector pick **`python3`** — on the EAF image this is the CVMFS Key4hep build (it ships `uproot`, `numpy`, `awkward`) — or **`Python (Key4hep)`** if that entry is present (a hand-registered alias for the same stack). Either works.
+- **Notebook 03** (GPU training) needs the **`Key4hep + GPU`** kernel from `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2).
+- If neither CPU entry has `uproot`, register one yourself after sourcing the env: `python -m ipykernel install --user --name key4hep --display-name "Python (Key4hep)"`.
+
 ### 6.5 Editing files
 
 - **JupyterLab browser**: open files directly. Simple but slow for greps.
@@ -470,14 +476,15 @@ Goal: confirm in ~30 seconds that your environment works end-to-end.
 In a JupyterLab terminal (after sourcing `setup_calomaps.sh`):
 
 ```bash
-ddsim \
+CALOMAPS_GUN_ENERGY_GEV=50 ddsim \
   --compactFile $CALOMAPS_HOME/geometry/SiD_TestBeam.xml \
   --steeringFile $CALOMAPS_HOME/sim/run_sim.py \
   -N 10 \
   --random.seed 42 \
-  --gun.momentumMin "50*GeV" --gun.momentumMax "50*GeV" \
   --outputFile /tmp/smoke_test_50GeV.root
 ```
+
+(`CALOMAPS_GUN_ENERGY_GEV=50` gives a clean mono-energetic 50 GeV beam — the project's own gun mechanism, §4 — instead of the default 5–400 GeV spectrum.)
 
 Inspect the output:
 
@@ -525,7 +532,7 @@ Defaults: 1000 jobs × 20 events each = **20,000 events**, uniform momentum 5–
 
 **Rough timing**: ~30 minutes to 2 hours wall time depending on EAF load.
 
-⚠️ **Before running**: the script's first step is `rm -f $OUT_DIR/sim_photons_part*.root` — it nukes the existing dataset. If you want to keep the current 21 GB, change `DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run.
+⚠️ **Before running**: the script's first step is `rm -f $OUT_DIR/sim_<particle>_part*.root` (e.g. `sim_photons_part*` for gamma) — it nukes the existing dataset for that particle. If you want to keep the current 21 GB, change `DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run.
 
 For energy-range studies, [`sim/generate_dataset.sh`](../sim/generate_dataset.sh) is a simpler 200×100 variant.
 
@@ -548,7 +555,7 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 2. Per event, compute:
    - `E_true` — true photon energy `√(p²+m²)` from the truth-level MC particle
    - `E_vis` — sum of all hit energies in the entry segment (analog readout)
-   - `MIP count` — sum over fired pixels of `round(E_pix / E_MIP)` (MIPs-per-pixel)
+   - `MIP count` — sum over fired pixels of `max(1, round(E_pix / E_MIP))` (MIPs-per-pixel; every fired pixel counts as ≥1 MIP)
    - `hit count` — number of pixels above the ½-MIP threshold (strict digital)
    - `cluster count` — number of 8-connected pixel clusters, summed over layers
 3. Save into `models/decal_extracted_data.npz`.
@@ -561,7 +568,7 @@ The notebook parallelizes with `ProcessPoolExecutor(max_workers=16)`. Drop to 8 
 
 The model in [`analysis/quantilenet.py`](../analysis/quantilenet.py):
 
-- **Architecture**: `Linear(1→32) → SiLU → Linear(32→64) → SiLU → Linear(64→32) → SiLU → Linear(32→3)`. ~3000 parameters.
+- **Architecture**: `Linear(1→32) → SiLU → Linear(32→64) → SiLU → Linear(64→32) → SiLU → Linear(32→3)`. 4,355 parameters.
 - **Targets**: predict **fractional response** `E_signal / E_true` normalized by its max — works for any signal unit.
 - **Loss**: Pinball at the 15.87 / 50 / 84.13 percentiles (symmetric 1-σ Gaussian percentiles, but no Gaussianity assumed).
 - **Ensemble**: 20 networks per readout, each with its own 80/20 train/val split (bootstrap-style).
@@ -580,9 +587,9 @@ If you have the `.npz` but no saved ensembles, train once (next subsection).
 
 The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.backends.cuda.is_built() → False`). You need to install a CUDA-enabled torch into a venv first.
 
-**Recommended path (one command)**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step, then asserts `torch.cuda.is_available()` so a failed install is obvious. The venv defaults to `/tmp` (wiped on container restart — just re-run); set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free. Then open notebook 03 and pick the **Key4hep + GPU** kernel.
+**Recommended path (one command)**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step, then asserts `torch.cuda.is_available()` so a failed install is obvious. The venv defaults to `/tmp` (wiped on container restart — just re-run); set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free. Then open notebook 03 and pick the **Key4hep + GPU** kernel.
 
-The two manual paths below explain what that script automates — use them only if you want to do it by hand or are debugging.
+The script's canonical names are venv `calomaps_gpu_env` and kernel dir `calomaps_gpu` (display name **Key4hep + GPU**). The two manual paths below explain what it automates — use them only to do it by hand or to debug; note they use *different* example names (`my_gpu_env`, `cu_torch_env`), so don't mix a hand-built install with the script's.
 
 #### Path A — manual UI walkthrough (what the script automates)
 
@@ -780,7 +787,7 @@ EAF `/tmp/` is overlay container storage, wiped on container restart. For long-l
 Sourcing `setup_calomaps.sh` in a shell that already loaded Key4hep produces this warning. Harmless; env vars stay valid.
 
 ### Pre-existing generate scripts wipe the data dir
-Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` start with `rm -f $OUT_DIR/sim_photons_part*.root`. To preserve an existing dataset, change `DATASET_NAME` or comment out the rm.
+Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` start with `rm -f $OUT_DIR/sim_<particle>_part*.root` (gamma → `sim_photons_part*`). To preserve an existing dataset, change `DATASET_NAME` (or `CALOMAPS_DATASET_NAME`) or comment out the rm.
 
 ### CMS image vs GPU image
 The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS uses) doesn't — `/uscms_data/` is invisible. CALOMAPS doesn't need it. Make sure you spawn the GPU profile.
