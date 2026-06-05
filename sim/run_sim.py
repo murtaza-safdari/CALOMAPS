@@ -1,56 +1,61 @@
 from DDSim.DD4hepSimulation import DD4hepSimulation
 from g4units import GeV, mm, deg
+import os
 
 SIM = DD4hepSimulation()
 
 # ==========================================
 # PARTICLE GUN CONFIGURATION
 # ==========================================
-# SIM.enableGun = True
-
-# Common particle choices:
-#   "gamma"               - photons (default; pure EM showers)
-#   "pi+", "pi-", "proton", "neutron"  - hadrons (wider, longer showers)
-# SIM.gun.particle = "gamma" 
-
-# Set the energy spectrum using momentum parameters
-# SIM.gun.distribution = "uniform"
-# SIM.gun.momentumMin = 5.0 * GeV   # Changed from energyMin
-# SIM.gun.momentumMax = 100.0 * GeV # Changed from energyMax
-# SIM.gun.energy = 50.0 * GeV
-
-# Aim radially outward to hit the ECal Barrel directly
-# SIM.gun.position = (0, 0, 0)
-# Shoot toward the +y face (the "top" of the barrel)
-# SIM.gun.direction = (0, 1, 0) 
-# To target a specific Z-slice instead:
-# SIM.gun.position = (0, 0, 100) # Offset slightly in Z to avoid the central 'crack'
+# Particle type and energy are read from environment variables so the SAME steering
+# file can generate photons, pions, protons, ... without editing this file. The
+# defaults reproduce the original photon spectrum (gamma, 5-400 GeV) exactly, so
+# existing datasets and notebooks are unaffected.
+#
+#   CALOMAPS_GUN_PARTICLE   particle name           (default "gamma"; e.g. "pi+", "pi-", "proton")
+#   CALOMAPS_GUN_PMIN_GEV   momentum spectrum min   (default 5.0)
+#   CALOMAPS_GUN_PMAX_GEV   momentum spectrum max   (default 400.0)
+#   CALOMAPS_GUN_ENERGY_GEV if set, a mono-energetic beam at this energy (overrides PMIN/PMAX)
+#
+# Examples:
+#   CALOMAPS_GUN_PARTICLE=pi+ ddsim --compactFile SiD_TestBeam.xml --steeringFile run_sim.py -N 100 ...
+#   CALOMAPS_GUN_PARTICLE=pi- CALOMAPS_GUN_ENERGY_GEV=50 ddsim ... -N 1 ...
+PARTICLE = os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma")
+PMIN     = float(os.environ.get("CALOMAPS_GUN_PMIN_GEV", "5.0"))
+PMAX     = float(os.environ.get("CALOMAPS_GUN_PMAX_GEV", "400.0"))
+ENERGY   = os.environ.get("CALOMAPS_GUN_ENERGY_GEV", "")  # set for a mono-energetic beam
 
 SIM.enableGun = True
-SIM.gun.particle = "gamma" 
-# SIM.gun.energy = 50.0 * GeV
-SIM.gun.momentumMin = 5.0 * GeV   
-SIM.gun.momentumMax = 400.0 * GeV
+SIM.gun.particle = PARTICLE
 SIM.gun.position = (0, 0, 0)
-# SIM.gun.position = (0, 0, 100 * mm) # Shifted 100mm in Z
-# SIM.gun.direction = (0, 1, 0)
 
-# FORCE PENCIL BEAM ALONG +y AXIS (Theta=90, Phi=90)
+# Energy: a fixed energy if CALOMAPS_GUN_ENERGY_GEV is set, otherwise a uniform
+# momentum spectrum between PMIN and PMAX.
+if ENERGY:
+    SIM.gun.energy = float(ENERGY) * GeV
+else:
+    SIM.gun.momentumMin = PMIN * GeV
+    SIM.gun.momentumMax = PMAX * GeV
+
+# Pencil beam along the +y axis (theta=90, phi=90) so it hits the "top" barrel face.
+# To target a specific z-slice instead, set SIM.gun.position = (0, 0, 100 * mm).
 SIM.gun.distribution = "uniform"
 SIM.gun.phiMin = 90 * deg
 SIM.gun.phiMax = 90 * deg
-# SIM.gun.phiMin = 75 * deg
-# SIM.gun.phiMax = 75 * deg
 SIM.gun.thetaMin = 90 * deg
 SIM.gun.thetaMax = 90 * deg
 
 # ==========================================
 # PHYSICS & TRACKING
 # ==========================================
-# Standard physics list for calorimeter performance
-SIM.physicsList = "FTFP_BERT" 
+# FTFP_BERT: standard calorimeter physics list (EM + hadronic).
+SIM.physicsList = "FTFP_BERT"
 
 # ==========================================
 # OUTPUT
 # ==========================================
-SIM.outputFile = "sim_data_gamma_5_100GeV.slcio"
+# Standalone default name (derived from the particle). The batch scripts
+# generate_dataset.sh / generate_batched.sh override this with --outputFile.
+_tag = {"gamma": "photons", "pi+": "piplus", "pi-": "piminus"}.get(
+    PARTICLE, PARTICLE.replace("+", "plus").replace("-", "minus"))
+SIM.outputFile = "sim_data_%s.root" % _tag
