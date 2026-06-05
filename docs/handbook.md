@@ -541,6 +541,38 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 
 The notebook parallelizes with `ProcessPoolExecutor(max_workers=16)`. Drop to 8 if memory-pressed; bump to 64 if impatient and core-rich.
 
+### 10.1 Cascade + per-crossing-momentum extraction (experiment "B", PIXELAV inputs)
+
+The PIXELAV pipeline (notebooks 04–06) needs the full shower cascade and, per charged-track sensor
+crossing, the entry point, direction and **momentum**. Two single-event `ddsim` runs of the same
+50 GeV photon (same seed 424242 → identical shower), both steered from `sim/`, produce it:
+
+| Run | Steering | Si readout | Gives |
+|-----|----------|-----------|-------|
+| Calorimeter cascade | `run_sim_fullcascade.py` | calorimeter (detailed mode) | MCParticle cascade + per-step `CaloHitContribution` (position, PDG, time) |
+| Tracker momentum | `run_sim_trackermom.py` | **tracker** (`Geant4TrackerWeightedAction`) | one `SimTrackerHit` per crossing **with momentum** |
+
+EDM4hep's `CaloHitContribution` carries no momentum, so `run_sim_trackermom.py` reads the ECal Si
+out as a Geant4 tracker via one line — `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'`
+— and the resulting `SimTrackerHit`s carry the true Geant4 momentum at each crossing.
+
+Run both (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
+
+```bash
+source ~/setup_calomaps.sh                       # Key4hep + lib_hack + CALOMAPS_* env
+export CALOMAPS_DATA_BASE=/tmp/calomaps-data      # off-quota; /home has a 23 GB per-user cap
+cd $CALOMAPS_HOME/geometry
+ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_fullcascade.py --numberOfEvents 1
+ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py  --numberOfEvents 1
+python ../analysis/extract_cascade.py            # -> models/fullcascade_*.npz  (cascade + step truth)
+python ../analysis/extract_trackermom.py         # -> models/trackermom_*.npz   (per-crossing momentum)
+python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* (auto-picks Variant C)
+```
+
+`pixelav_converter.py` auto-selects **Variant C** (tracker hits → real per-crossing `|p|`, direction
+and entry) when the trackermom `.npz` is present, else falls back to Variant A (calo step truth,
+production momentum). Notebook 05 §9 validates the per-crossing momentum.
+
 ---
 
 ## 11. Training the deep-ensemble surrogate

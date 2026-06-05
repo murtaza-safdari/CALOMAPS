@@ -215,6 +215,40 @@ def build_segments_B(d):
     return segs, {}
 
 
+# ==========================================================================================
+# Variant C -- per-crossing records from tracker-SD SimTrackerHits (REAL Geant4 momentum)
+# ==========================================================================================
+def build_segments_C(d):
+    """One record per Si crossing from the tracker-readout sim (sim/run_sim_trackermom.py): the
+    ECal Si is read out as a Geant4 tracker, so each SimTrackerHit is one combined sensor crossing
+    carrying the TRUE Geant4 momentum at that crossing. So |p|, the direction (cot a/b) and the
+    entry point are all real per-crossing truth -- no production-momentum fallback, no step
+    time-ordering needed (Geant4TrackerWeightedAction already combines the crossing's steps)."""
+    thx, thy, thz = np.asarray(d["thx"]), np.asarray(d["thy"]), np.asarray(d["thz"])
+    tpx, tpy, tpz = np.asarray(d["tpx"]), np.asarray(d["tpy"]), np.asarray(d["tpz"])
+    tedep, ttime, tmc = np.asarray(d["tedep"]), np.asarray(d["ttime"]), np.asarray(d["tmc"]).astype(int)
+    pdg_all = d["pdg"]
+    assert tmc.size == 0 or (tmc.min() >= 0 and tmc.max() < len(pdg_all)), "trackerhit->MCParticle index out of range"
+    centers = si_layer_centers()
+    phin = face_phi(thx, thy)
+    wdep = thx * np.cos(phin) + thy * np.sin(phin)                       # depth = projection on face normal
+    layer = np.argmin(np.abs(wdep[:, None] - centers[None, :]), axis=1)  # layers sit at constant depth, not r
+    segs, n_neutral = [], 0
+    for j in range(len(thx)):
+        mc = int(tmc[j]); pdg = int(pdg_all[mc])
+        if not bool(is_charged(pdg)):
+            n_neutral += 1
+            continue
+        phi_n = float(phin[j])
+        eu, ev, ew = to_local(float(thx[j]), float(thy[j]), float(thz[j]), phi_n)   # entry point (local)
+        du, dv, dw = to_local(float(tpx[j]), float(tpy[j]), float(tpz[j]), phi_n)    # momentum -> local frame
+        p_mag = float(np.sqrt(tpx[j]**2 + tpy[j]**2 + tpz[j]**2))                     # REAL |p| at the crossing
+        segs.append(_record(mc, int(layer[j]), pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
+                            float(tedep[j]), 1, "C", "tracker_hit", float(ttime[j])))
+    segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
+    return segs, {"neutral_hits_skipped": n_neutral, "n_tracker_hits": int(len(thx))}
+
+
 def write_intermediate(segs, out_prefix):
     with open(out_prefix + ".json", "w") as f:
         json.dump(segs, f, indent=2)
@@ -286,25 +320,35 @@ def main():
         else:
             pos.append(a)
         i += 1
-    npz = pos[0] if len(pos) > 0 else os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
+    default_npz = os.path.join(home, "models", "trackermom_gamma50_1evt.npz")   # prefer real-momentum source
+    if not os.path.exists(default_npz):
+        default_npz = os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
+    npz = pos[0] if len(pos) > 0 else default_npz
     out_prefix = pos[1] if len(pos) > 1 else os.path.join(home, "models", "pixelav_segments_gamma50_1evt")
     d = load_cascade(npz)
 
+    has_tracker = ("thx" in d) and len(np.atleast_1d(d["thx"])) > 0
     has_steps = ("csx" in d) and bool(np.any((d["csx"] != 0) | (d["csy"] != 0) | (d["csz"] != 0)))
     if variant == "auto":
+        variant = "C" if has_tracker else ("A" if has_steps else "B")   # C = real per-crossing momentum
+    if variant == "C" and not has_tracker:
+        print("WARNING: Variant C requested but tracker hits absent -> falling back.")
         variant = "A" if has_steps else "B"
     if variant == "A" and not has_steps:
         print("WARNING: Variant A requested but stepPosition is zero/absent -> falling back to B.")
         variant = "B"
 
-    segs, stats = build_segments_A(d) if variant == "A" else build_segments_B(d)
+    builder = {"A": build_segments_A, "B": build_segments_B, "C": build_segments_C}[variant]
+    segs, stats = builder(d)
     j, c = write_intermediate(segs, out_prefix)
     deck, n_deck, n_skip = write_pixelav_deck(segs, out_prefix + ".pixelav.txt", layout=layout)
 
     n_charged = int(is_charged(d["pdg"]).sum())
+    n_src = len(np.atleast_1d(d["thx"])) if ("thx" in d) else (len(d["cpdg"]) if "cpdg" in d else 0)
+    src_label = "tracker-hit crossings" if ("thx" in d) else "step-contributions"
     print(f"cascade: {npz}")
     print(f"variant {variant}: {len(segs)} per-sensor charged-track crossings "
-          f"(from {n_charged} charged MCParticles, {len(d['cpdg'])} step-contributions)")
+          f"(from {n_charged} charged MCParticles, {n_src} {src_label})")
     if stats:
         print(f"  stats: {stats}")
     if segs:
