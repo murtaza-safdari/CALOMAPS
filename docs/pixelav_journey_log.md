@@ -225,3 +225,55 @@ Notebook 06 was rebuilt around these: it now explains what a cluster is, how its
 track, the transport physics (time development, path-length charge growth), the downstream
 observables (charge spectrum, cluster size, and the charge-weighted **position resolution**), and
 justifies the Stage-A assumptions.
+
+---
+
+## 11. Readout complementarity, the in-shower digitisation question, and the 05a/05b split (2026-06-05)
+
+After the per-crossing-momentum work (§10) we examined whether the tracker-SD readout is the right
+and sufficient PIXELAV input, how it relates to the calorimeter readout, and the field's best practice.
+
+**Two readouts, one shower.** The ECal Si is read out two ways: calorimeter SD -> `SimCalorimeterHit`
++ `CaloHitContribution` (energy per pixel + per-step deposits; NO momentum; used by nb01-04); tracker
+SD (`Geant4TrackerWeightedAction`) -> `SimTrackerHit` (one per crossing: momentum, energy-weighted
+~mid-plane position, `pathLength`, `eDep`, time, MCParticle link). The sensitive detector is a passive
+observer -- verified by byte-identical MCParticle cascades (78,270 particles, identical momenta and
+vertices) between the two same-seed runs.
+
+**PIXELAV wants the mid-plane impact.** The patched driver reduces `modx/mody` mod-pitch as the sub-
+pixel MID-PLANE impact and projects to the faces itself via the direction. The tracker energy-weighted
+position IS the mid-plane, so it feeds PIXELAV directly; back-projecting to the entry face would
+double-project. => the tracker SD alone is the natural, sufficient PIXELAV input. The combined
+calo+tracker SD idea was evaluated and dropped (DD4hep needs a custom plugin / untested `collections=`
+path, and it buys nothing for PIXELAV).
+
+**Primary vs secondary = birth point, not generator status.** All crossings are Geant4 shower
+secondaries (the 50 GeV photon does not ionize). The discriminator is the production vertex: born
+OUTSIDE the sensor (entering track, ~83%, median KE ~8 MeV, ~96% full traversal) vs born INSIDE (delta
+ray, ~16%, median KE ~0.1 MeV, mostly `pathLength` < 320 um). `pathLength` (a SimTrackerHit field)
+identifies partials: < 320 um = not a full traversal.
+
+**Best practice (literature pass).** The in-shower per-pixel response is a DEPOSIT-driven problem
+(Allpix2: Geant4 per-step deposits -> drift/diffuse -> threshold), not track-driven; EPICAL-2 (the
+FoCal demonstrator, 24 ALPIDE MAPS layers + W -- geometrically close to our DECAL) is the precedent.
+PIXELAV is track-driven: it assumes a through-going primary and regenerates its own delta rays
+(Bichsel), so feeding it every Geant4 crossing (a) mishandles partials and (b) double-counts ionization
+(Geant4 deltas + PIXELAV's internal deltas).
+
+**Quantified on our event.** Collected PIXELAV charge = ~0.8 GeV-equiv (Sum neh within the 13x21
+window; ~1.07 GeV of raw generated e-h) vs the true Geant4 Si deposit 0.53 GeV -> ~1.6x over (2x on the
+raw). The per-crossing charge is correct (perpendicular MIP -> 26,900 e-h); only the full-shower SUM
+over-counts.
+
+**Decisions (2026-06-05).**
+1. Keep all crossings (no filter applied); document the filter fix -- feed only born-outside
+   full-traversal primaries (~80%) and raise the Geant4 Si production (range) cut so Geant4 does not
+   pre-produce the deltas PIXELAV regenerates (cuts-per-region, since the calo path wants a fine cut)
+   -- in nb06 §5c.
+2. Position PIXELAV as the per-crossing characterisation tool (cluster shape, charge sharing, eta,
+   single-hit resolution -- nb06 §1/§2/§5b), NOT a full-shower digitiser. The full-shower digital
+   readout stays the deposit-driven calorimeter path (nb01-03; Allpix2 is the citable higher-fidelity
+   upgrade, validated against EPICAL-2/FoCal).
+3. Split notebook 05 into two co-equal methods: `05a_pixelav_inputs_tracker.ipynb` (tracker SD,
+   momentum) and `05b_pixelav_inputs_calo.ipynb` (calo SD, step-energy truth, entry-face). The
+   readout complementarity is documented in 05a §2b and the 05b intro.
