@@ -20,13 +20,14 @@ PIXELAV is effectively TWO stages:
       3x3 pixels internally, so the entry point is carried only as a LABEL (for matching) unless
       the PIXELAV wrapper is patched to read it. See docs/pixelav_reference.md.
 
-EXPERIMENT "B" (implemented here, Variant A): run_sim_fullcascade.py sets
-enableDetailedShowerMode, so every Geant4 step deposit (CaloHitContribution) carries its
-global stepPosition + time + a link to the producing MCParticle; extract_cascade.py saves
-these (cbeg/cend, cmc, cE, cpdg, ctime, csx/csy/csz). For each (MCParticle, face) we time-order
-the steps and split them into per-Si-layer runs; each run is one sensor crossing. The entry
-point is the earliest-in-time step and the direction is the entry->exit displacement in time
-order -- correct for inward and outward tracks alike, and robust to scattering/curvature.
+EXPERIMENT "B": one record per charged-track sensor crossing. PRIMARY = Variant C (auto-selected):
+run_sim_trackermom.py reads the Si out as a Geant4 tracker, so each SimTrackerHit is one crossing
+carrying the REAL momentum; build_segments_C turns them into records (entry, cot a/b, |p|, type) with
+no reconstruction. FALLBACK = Variant A (calorimeter only): run_sim_fullcascade.py sets
+enableDetailedShowerMode, so CaloHitContributions carry stepPosition + time (but NO momentum);
+build_segments_A time-orders the steps per (MCParticle, face) into per-layer crossings, taking the
+direction from the entry->exit displacement and the momentum from the production 4-vector. Variant B
+is the coarsest pixel-centroid fallback. main() selects C if tracker hits are present, else A, else B.
 
 GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified from data:
 the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers sit at
@@ -34,9 +35,10 @@ constant DEPTH (perpendicular face distance). The depth/normal axis w is the per
 direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-z axis. The
 per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
 
-DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'smartpix' = the
-9-column ppixelav2_custom.c format (the Smart Pixels lineage we target); 'badeaa3' = the
-7-column pion-only format. Lengths are written in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
+DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'badeaa3' = the 7-column
+ppixelav2_list_trkpy_n_2f.c format (the driver we build); 'smartpix' = the 9-column ppixelav2_custom.c
+format. ppion is the betagamma-matched pion momentum p*(m_pi/m_particle) so PIXELAV's pion dE/dx
+reproduces the real particle's ionisation. Lengths in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
 
 Usage:
     python pixelav_converter.py [cascade.npz] [out_prefix] [--variant A|B|auto] [--layout smartpix|badeaa3]
@@ -67,6 +69,21 @@ _PIXELAV_PID = {11: 11, -11: 11, 13: 13, -13: 13, 211: 211, -211: 211}
 
 def pid_to_pixelav(pdg):
     return _PIXELAV_PID.get(int(pdg), 211)   # default to pion (mass-rescale approximation)
+
+
+# Rest masses (GeV) for the betagamma-matched pion momentum below.
+_MASS_GEV = {11: 0.000510999, 13: 0.105658, 211: 0.139570}
+M_PION_GEV = 0.139570
+
+
+def ppion_betagamma_matched(p_gev, pdg):
+    """PIXELAV models every track as a PION for dE/dx (Bichsel pion cross-sections). Ionization
+    depends on betagamma = p/m, not on the species, so to reproduce OUR particle's dE/dx we hand
+    PIXELAV the pion momentum with the SAME betagamma: ppion = p * m_pion / m_particle. For an
+    electron this is ~273*p (its true relativistic plateau); feeding p directly would treat a soft
+    electron as a slow pion and hugely over-ionize via the 1/beta^2 rise. Unknown species -> pion."""
+    m = _MASS_GEV.get(abs(int(pdg)), M_PION_GEV)
+    return p_gev * (M_PION_GEV / m)
 
 
 def load_cascade(npz_path):
@@ -261,13 +278,13 @@ def write_intermediate(segs, out_prefix):
     return out_prefix + ".json", out_prefix + ".csv"
 
 
-def write_pixelav_deck(segs, out_path, layout="smartpix"):
+def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
-    layout='smartpix' (default): the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
-        cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
-    layout='badeaa3': the 7-column ppixelav2_list_trkpy_n_2f.c format (pion-only, no PID)
+    layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (the driver we build)
         cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
+    layout='smartpix': the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
+        cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
 
     Driving fields = cot_alpha, cot_beta, ppion (GeV/c), flipped, PID. The length-label columns
     (ylocal/zglobal or modx/mody) carry the per-crossing truth entry point in MICRONS so it
@@ -285,19 +302,25 @@ def write_pixelav_deck(segs, out_path, layout="smartpix"):
             n_skip += 1
             continue
         eu_um, ev_um, p = s["entry_u"] * U, s["entry_v"] * U, s["p_GeV"]
+        ppion = ppion_betagamma_matched(p, s["pdg"])   # betagamma-matched pion momentum for dE/dx; pT label keeps the real |p|
         if layout == "smartpix":
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f %.4f %d" %
-                         (ca, cb, p, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
+                         (ca, cb, ppion, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
                           pid_to_pixelav(s["pdg"])))
         elif layout == "badeaa3":
+            # 7-col format read by ppixelav2_list_trkpy_n_2f.c (the driver we build).
+            # Axis map: modx -> vect[0] = PIXELAV x(21-px) = our v; mody -> vect[1] =
+            # PIXELAV y(13-px, Lorentz) = our u. Entry is written full-truth in um; the
+            # patched driver (analysis/pixelav/) reduces it mod-pitch to the sub-pixel impact.
+            # ppion is the betagamma-matched pion momentum (dE/dx); the pT column keeps the real |p|.
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f" %
-                         (ca, cb, p, s["flipped"], eu_um, ev_um, p))
+                         (ca, cb, ppion, s["flipped"], ev_um, eu_um, p))
         else:
             raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
     with open(out_path, "w") as f:
         f.write("\n".join(lines) + ("\n" if lines else ""))
     legend = {"smartpix": "cot_alpha cot_beta ppion flipped ylocal[um] zglobal[um] pT hittime[ps] PID",
-              "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um] mody[um] pT"}[layout]
+              "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um]=v_entry mody[um]=u_entry pT"}[layout]
     with open(out_path + ".columns.txt", "w") as f:
         f.write(f"# PIXELAV track-list ({layout}); lengths in microns; entry point is a LABEL "
                 f"(stock PIXELAV randomizes impact -- see docs/pixelav_reference.md)\n{legend}\n")
@@ -307,7 +330,7 @@ def write_pixelav_deck(segs, out_path, layout="smartpix"):
 def main():
     home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     argv = sys.argv[1:]
-    variant, layout, pos = "auto", "smartpix", []
+    variant, layout, pos = "auto", "badeaa3", []
     i = 0
     while i < len(argv):
         a = argv[i]
