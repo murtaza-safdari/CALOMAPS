@@ -571,7 +571,7 @@ python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* 
 
 `pixelav_converter.py` auto-selects **Variant C** (tracker hits → real per-crossing `|p|`, direction
 and entry) when the trackermom `.npz` is present, else falls back to Variant A (calo step truth,
-production momentum). Notebook 05 §9 validates the per-crossing momentum.
+production momentum). Notebook 05 §5 validates the per-crossing momentum.
 
 ---
 

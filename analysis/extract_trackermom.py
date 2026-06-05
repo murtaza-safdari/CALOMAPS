@@ -78,6 +78,6 @@ np.savez_compressed(
 tp = np.sqrt(tpx**2 + tpy**2 + tpz**2)
 print(f"saved {OUT}")
 print(f"  n_particles={len(pdg)}  n_tracker_hits={len(thx)}")
-print(f"  hit |p| (GeV): min={tp.min():.4f}  median={np.median(tp):.4f}  max={tp.max():.2f}")
+print(f"  hit |p| (GeV): min={tp.min():.4f}  median={np.median(tp):.4f}  max={tp.max():.2f}" if len(thx) else "  no tracker hits in this event")
 print(f"  total eDep in Si (GeV): {tedep.sum():.4f}")
 print(f"  file size: {os.path.getsize(OUT)/1024:.0f} KB")

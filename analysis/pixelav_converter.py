@@ -20,13 +20,14 @@ PIXELAV is effectively TWO stages:
       3x3 pixels internally, so the entry point is carried only as a LABEL (for matching) unless
       the PIXELAV wrapper is patched to read it. See docs/pixelav_reference.md.
 
-EXPERIMENT "B" (implemented here, Variant A): run_sim_fullcascade.py sets
-enableDetailedShowerMode, so every Geant4 step deposit (CaloHitContribution) carries its
-global stepPosition + time + a link to the producing MCParticle; extract_cascade.py saves
-these (cbeg/cend, cmc, cE, cpdg, ctime, csx/csy/csz). For each (MCParticle, face) we time-order
-the steps and split them into per-Si-layer runs; each run is one sensor crossing. The entry
-point is the earliest-in-time step and the direction is the entry->exit displacement in time
-order -- correct for inward and outward tracks alike, and robust to scattering/curvature.
+EXPERIMENT "B": one record per charged-track sensor crossing. PRIMARY = Variant C (auto-selected):
+run_sim_trackermom.py reads the Si out as a Geant4 tracker, so each SimTrackerHit is one crossing
+carrying the REAL momentum; build_segments_C turns them into records (entry, cot a/b, |p|, type) with
+no reconstruction. FALLBACK = Variant A (calorimeter only): run_sim_fullcascade.py sets
+enableDetailedShowerMode, so CaloHitContributions carry stepPosition + time (but NO momentum);
+build_segments_A time-orders the steps per (MCParticle, face) into per-layer crossings, taking the
+direction from the entry->exit displacement and the momentum from the production 4-vector. Variant B
+is the coarsest pixel-centroid fallback. main() selects C if tracker hits are present, else A, else B.
 
 GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified from data:
 the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers sit at
@@ -34,9 +35,10 @@ constant DEPTH (perpendicular face distance). The depth/normal axis w is the per
 direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-z axis. The
 per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
 
-DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'smartpix' = the
-9-column ppixelav2_custom.c format (the Smart Pixels lineage we target); 'badeaa3' = the
-7-column pion-only format. Lengths are written in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
+DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'badeaa3' = the 7-column
+ppixelav2_list_trkpy_n_2f.c format (the driver we build); 'smartpix' = the 9-column ppixelav2_custom.c
+format. ppion is the betagamma-matched pion momentum p*(m_pi/m_particle) so PIXELAV's pion dE/dx
+reproduces the real particle's ionisation. Lengths in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
 
 Usage:
     python pixelav_converter.py [cascade.npz] [out_prefix] [--variant A|B|auto] [--layout smartpix|badeaa3]
@@ -279,10 +281,10 @@ def write_intermediate(segs, out_prefix):
 def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
-    layout='smartpix' (default): the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
-        cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
-    layout='badeaa3': the 7-column ppixelav2_list_trkpy_n_2f.c format (pion-only, no PID)
+    layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (the driver we build)
         cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
+    layout='smartpix': the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
+        cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
 
     Driving fields = cot_alpha, cot_beta, ppion (GeV/c), flipped, PID. The length-label columns
     (ylocal/zglobal or modx/mody) carry the per-crossing truth entry point in MICRONS so it
