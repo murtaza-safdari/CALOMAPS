@@ -32,11 +32,17 @@ from g4units import GeV, deg
 SIM = DD4hepSimulation()
 
 # ==========================================
-# PARTICLE GUN -- single fixed-energy photon, +y pencil beam
+# PARTICLE GUN -- single fixed-energy particle, +y pencil beam
 # ==========================================
+# CALOMAPS_GUN_PARTICLE (default gamma) + CALOMAPS_GUN_ENERGY_GEV (default 50; legacy alias
+# CALOMAPS_GUN_GEV accepted) so the SAME steering makes a full cascade for any particle.
+# (No helper functions: ddsim exec()s this file with split globals/locals.)
+_particle = os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma")
+_gev = float(os.environ.get("CALOMAPS_GUN_ENERGY_GEV", os.environ.get("CALOMAPS_GUN_GEV", "50.0")))
+_tag = {"gamma": "gamma", "pi+": "piplus", "pi-": "piminus"}.get(_particle, _particle.replace("+", "plus").replace("-", "minus"))
 SIM.enableGun = True
-SIM.gun.particle = "gamma"
-SIM.gun.energy = 50.0 * GeV
+SIM.gun.particle = _particle
+SIM.gun.energy = _gev * GeV
 SIM.gun.position = (0, 0, 0)
 SIM.gun.distribution = "uniform"
 SIM.gun.phiMin = 90 * deg
@@ -73,4 +79,4 @@ SIM.enableDetailedShowerMode = True
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "fullcascade")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "fullcascade_gamma50_1evt.root")
+SIM.outputFile = os.path.join(_out_dir, "fullcascade_%s%g_1evt.root" % (_tag, _gev))
