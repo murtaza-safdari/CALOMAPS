@@ -19,9 +19,13 @@ set -e
 VENV="${CALOMAPS_GPU_ENV:-/tmp/calomaps_gpu_env}"
 # Prefer the Key4hep python on PATH (robust to release-pin bumps); fall back to the
 # pinned 2026-02-01 interpreter if PATH isn't set up (e.g. setup_calomaps.sh not sourced).
-PYBIN="${CALOMAPS_PYBIN:-$(command -v python3.13 || true)}"
-if [ -z "$PYBIN" ] || ! echo "$PYBIN" | grep -q cvmfs; then
-  PYBIN=/cvmfs/sw.hsf.org/key4hep/releases/2026-02-01/x86_64-almalinux9-gcc14.2.0-opt/python/3.13.8-z2dydk/bin/python3.13
+if [ -n "${CALOMAPS_PYBIN:-}" ]; then
+  PYBIN="$CALOMAPS_PYBIN"                          # explicit override: trust it as-is
+else
+  PYBIN="$(command -v python3.13 || true)"         # auto-detect the Key4hep python on PATH
+  if [ -z "$PYBIN" ] || ! echo "$PYBIN" | grep -q cvmfs; then
+    PYBIN=/cvmfs/sw.hsf.org/key4hep/releases/2026-02-01/x86_64-almalinux9-gcc14.2.0-opt/python/3.13.8-z2dydk/bin/python3.13
+  fi
 fi
 KDIR="$HOME/.local/share/jupyter/kernels/calomaps_gpu"
 
