@@ -5,17 +5,20 @@ SiPixelTemplate / generic-error templates. KEY POINT: PIXELAV is NOT an energy-d
 consumer. Given a charged track's geometry + kinematics it GENERATES its own ionization
 internally (Bichsel dE/dx + Landau straggling + delta rays), then drifts/diffuses/traps the
 e-h pairs through the sensor's E and B fields. So we feed it TRACK SEGMENTS, not energy.
+Full background, sources and the input-deck spec: docs/pixelav_reference.md.
 
 PIXELAV is effectively TWO stages:
-  STAGE A -- sensor/field model (one-time, per sensor; authored by hand, NOT by this
-  converter): 3-D E-field map, thickness, bias/depletion V, temperature, mobility/Hall model,
-  B-field, pixel pitch, trapping/radiation-damage params.
+  STAGE A -- sensor/field model (one-time, per sensor; authored by hand or via TCADtoPixelAV,
+  NOT by this converter): 3-D E-field map, thickness, bias/depletion V, temperature,
+  mobility/Hall model, B-field, pixel pitch, trapping/radiation-damage params.
   STAGE B -- per-track event input (THIS CONVERTER), one record per charged-track crossing of
   a sensor, in that sensor's LOCAL frame:
-    - local entry point (u, v)         [u across-pitch, v along cylinder-z]
     - cot(alpha)=p_u/p_w, cot(beta)=p_v/p_w   (w = sensor radial normal / depth axis)
     - momentum magnitude |p|           (sets betagamma / dE/dx regime: MIP vs soft e-)
-    - particle type / charge
+    - particle type
+    - local entry point (u, v)  -- NOTE: stock PIXELAV randomizes the impact over the central
+      3x3 pixels internally, so the entry point is carried only as a LABEL (for matching) unless
+      the PIXELAV wrapper is patched to read it. See docs/pixelav_reference.md.
 
 EXPERIMENT "B" (implemented here, Variant A): run_sim_fullcascade.py sets
 enableDetailedShowerMode, so every Geant4 step deposit (CaloHitContribution) carries its
@@ -26,18 +29,17 @@ point is the earliest-in-time step and the direction is the entry->exit displace
 order -- correct for inward and outward tracks alike, and robust to scattering/curvature.
 
 GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified from data:
-the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers at
-constant depth (perpendicular face distance). The depth/normal axis w is the per-face across-pitch axis u is
-tangential (x-y plane); v is the cylinder-z axis. The per-face normal azimuth phi_n is derived
-from the hit position, so the local transform is general (not +y-hardcoded).
+the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers sit at
+constant DEPTH (perpendicular face distance). The depth/normal axis w is the per-face radial
+direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-z axis. The
+per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
 
-STILL STUBBED: write_pixelav_deck() -- the exact PIXELAV input-deck syntax (field order,
-header, length unit cm/mm/um) needs Swartz's PIXELAV source or one known-good deck. The
-per-crossing records are complete and in mm; the deck writer applies LENGTH_UNIT_MM and
-prepends the Stage-A block once that format is known.
+DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'smartpix' = the
+9-column ppixelav2_custom.c format (the Smart Pixels lineage we target); 'badeaa3' = the
+7-column pion-only format. Lengths are written in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
 
 Usage:
-    python pixelav_converter.py [cascade.npz] [out_prefix] [--variant A|B|auto]
+    python pixelav_converter.py [cascade.npz] [out_prefix] [--variant A|B|auto] [--layout smartpix|badeaa3]
 """
 import os, sys, json
 import numpy as np
@@ -48,15 +50,23 @@ N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
 SI_THICK_MM = 0.32
 
-# PIXELAV deck length unit relative to mm (cm vs um vs mm is UNCONFIRMED). Records are stored in
-# mm; this is applied ONLY when serializing the deck (write_pixelav_deck), so the intermediate
-# table stays unit-consistent. Set e.g. 0.1 for cm, 1000.0 for um once the deck format is known.
-LENGTH_UNIT_MM = 1.0
+# PIXELAV length unit relative to mm. PIXELAV works in MICRONS (firmly sourced from the source;
+# see docs/pixelav_reference.md), so mm -> um is x1000. Records are stored in mm; this factor is
+# applied ONLY when serializing the deck, so the intermediate table stays mm-consistent.
+LENGTH_UNIT_MM = 1000.0
 
 # Species PIXELAV should NOT process: neutrals (no primary ionization) and nuclei (slow recoils,
 # not minimum-ionizing tracks). Nuclei use PDG |code| > 1e9, which is why they are excluded here
 # even though they are formally charged -- intentional for a pixel MIP simulation.
 _NEUTRAL_PDGS = {22, 2112, -2112, 130, 310, 311, -311, 12, -12, 14, -14, 16, -16}
+
+# Map our PDG codes to the PIXELAV PID column (the ppixelav2_custom.c wrapper handles 211/13/11;
+# for non-pions it only rescales momentum by the mass ratio -- the dE/dx model stays pion-like).
+_PIXELAV_PID = {11: 11, -11: 11, 13: 13, -13: 13, 211: 211, -211: 211}
+
+
+def pid_to_pixelav(pdg):
+    return _PIXELAV_PID.get(int(pdg), 211)   # default to pion (mass-rescale approximation)
 
 
 def load_cascade(npz_path):
@@ -101,7 +111,7 @@ def is_charged(pdg):
     return (~np.isin(pdg, list(_NEUTRAL_PDGS))) & (np.abs(pdg) < 1_000_000_000)
 
 
-def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, variant, flags):
+def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, variant, flags, time_ns):
     cot_a, cot_b = (float(du / dw), float(dv / dw)) if abs(dw) > 1e-9 else (float("inf"), float("inf"))
     if abs(dw) <= 1e-9:
         flags = (flags + "|grazing").strip("|")
@@ -109,8 +119,9 @@ def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, var
         "track_id": int(mc), "layer_id": int(lay), "pdg": int(pdg), "p_GeV": float(p_mag),
         "entry_u": float(eu), "entry_v": float(ev),           # mm (sensor-local)
         "cot_alpha": cot_a, "cot_beta": cot_b,
+        "flipped": int(dw >= 0),       # entry-face / depth-sign flag (1=outward; verify vs the binary)
         "sensor_normal_phi": float(phi_n), "depth_w_mm": float(ew),
-        "energy_dep_GeV": float(edep), "n_steps": int(nstep),
+        "energy_dep_GeV": float(edep), "n_steps": int(nstep), "time_ns": float(time_ns),
         "variant": variant, "flags": flags,
     }
 
@@ -164,7 +175,7 @@ def build_segments_A(d):
                 flags = "dir_from_momentum"; n_single += 1
             eu, ev, ew = to_local(csx[e], csy[e], csz[e], phi_n)
             segs.append(_record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
-                                float(cE[run].sum()), len(run), "A", flags))
+                                float(cE[run].sum()), len(run), "A", flags, float(ct[e])))
     segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
     return segs, {"neutral_groups_skipped": n_neutral, "dir_from_momentum": n_single}
 
@@ -199,7 +210,7 @@ def build_segments_B(d):
         eu, ev, ew = to_local(ex, ey, ez, phi_n)
         du, dv, dw = to_local(px_all[mc], py_all[mc], pz_all[mc], phi_n)
         segs.append(_record(mc, lay, pdg, float(np.sqrt(px_all[mc]**2+py_all[mc]**2+pz_all[mc]**2)),
-                            eu, ev, ew, phi_n, du, dv, dw, float(wgt.sum()), len(js), "B", "pixel_centroid"))
+                            eu, ev, ew, phi_n, du, dv, dw, float(wgt.sum()), len(js), "B", "pixel_centroid", 0.0))
     segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
     return segs, {}
 
@@ -216,34 +227,62 @@ def write_intermediate(segs, out_prefix):
     return out_prefix + ".json", out_prefix + ".csv"
 
 
-def write_pixelav_deck(segs, out_path):
-    """STUB: emit a runnable PIXELAV deck.
+def write_pixelav_deck(segs, out_path, layout="smartpix"):
+    """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
-    Not implemented: the exact PIXELAV deck syntax (field order, header, and length unit
-    cm/mm/um) is not web-documented and must be confirmed against M. Swartz's PIXELAV source
-    or a known-good example deck. Once confirmed, scale the mm lengths (entry_u, entry_v) by
-    LENGTH_UNIT_MM, map each segment's (entry_u, entry_v, cot_alpha, cot_beta, p_GeV, pdg) onto
-    the per-track lines, and prepend the Stage-A sensor/field block. The complete per-crossing
-    table is available via write_intermediate().
+    layout='smartpix' (default): the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
+        cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
+    layout='badeaa3': the 7-column ppixelav2_list_trkpy_n_2f.c format (pion-only, no PID)
+        cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
+
+    Driving fields = cot_alpha, cot_beta, ppion (GeV/c), flipped, PID. The length-label columns
+    (ylocal/zglobal or modx/mody) carry the per-crossing truth entry point in MICRONS so it
+    survives into the PIXELAV output for matching -- but NOTE stock PIXELAV randomizes the impact
+    over the central 3x3 pixels and does NOT consume them unless the wrapper is patched (see
+    docs/pixelav_reference.md). hittime is written in ps. Grazing tracks (non-finite or |cot|>10)
+    are skipped, as PIXELAV itself skips them. Also writes <out_path>.columns.txt (a legend; NOT
+    read by PIXELAV's fscanf).
     """
-    raise NotImplementedError(
-        "PIXELAV deck format pending Swartz source -- see module docstring. "
-        "Per-crossing track table is available via write_intermediate()."
-    )
+    U = LENGTH_UNIT_MM
+    lines, n_skip = [], 0
+    for s in segs:
+        ca, cb = s["cot_alpha"], s["cot_beta"]
+        if not (np.isfinite(ca) and np.isfinite(cb)) or abs(ca) > 10.0 or abs(cb) > 10.0:
+            n_skip += 1
+            continue
+        eu_um, ev_um, p = s["entry_u"] * U, s["entry_v"] * U, s["p_GeV"]
+        if layout == "smartpix":
+            lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f %.4f %d" %
+                         (ca, cb, p, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
+                          pid_to_pixelav(s["pdg"])))
+        elif layout == "badeaa3":
+            lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f" %
+                         (ca, cb, p, s["flipped"], eu_um, ev_um, p))
+        else:
+            raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
+    with open(out_path, "w") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+    legend = {"smartpix": "cot_alpha cot_beta ppion flipped ylocal[um] zglobal[um] pT hittime[ps] PID",
+              "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um] mody[um] pT"}[layout]
+    with open(out_path + ".columns.txt", "w") as f:
+        f.write(f"# PIXELAV track-list ({layout}); lengths in microns; entry point is a LABEL "
+                f"(stock PIXELAV randomizes impact -- see docs/pixelav_reference.md)\n{legend}\n")
+    return out_path, len(lines), n_skip
 
 
 def main():
     home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     argv = sys.argv[1:]
-    variant = "auto"; pos = []
+    variant, layout, pos = "auto", "smartpix", []
     i = 0
     while i < len(argv):
         a = argv[i]
         if a.startswith("--variant"):
-            if "=" in a:
-                variant = a.split("=", 1)[1]
-            elif i + 1 < len(argv):
-                variant = argv[i + 1]; i += 1
+            variant = a.split("=", 1)[1] if "=" in a else (argv[i + 1] if i + 1 < len(argv) else variant)
+            i += 0 if "=" in a else 1
+        elif a.startswith("--layout"):
+            layout = a.split("=", 1)[1] if "=" in a else (argv[i + 1] if i + 1 < len(argv) else layout)
+            i += 0 if "=" in a else 1
         else:
             pos.append(a)
         i += 1
@@ -260,6 +299,7 @@ def main():
 
     segs, stats = build_segments_A(d) if variant == "A" else build_segments_B(d)
     j, c = write_intermediate(segs, out_prefix)
+    deck, n_deck, n_skip = write_pixelav_deck(segs, out_prefix + ".pixelav.txt", layout=layout)
 
     n_charged = int(is_charged(d["pdg"]).sum())
     print(f"cascade: {npz}")
@@ -276,7 +316,8 @@ def main():
     else:
         print("WARNING: zero crossings -- check the cascade / geometry.")
     print(f"wrote per-crossing table:\n  {j}\n  {c}")
-    print("PIXELAV deck writer is STUBBED (write_pixelav_deck) pending the deck format.")
+    print(f"wrote PIXELAV deck ({layout}, lengths in um): {deck}  "
+          f"[{n_deck} tracks, {n_skip} grazing skipped]  (+ {deck}.columns.txt)")
 
 
 if __name__ == "__main__":
