@@ -69,6 +69,21 @@ def pid_to_pixelav(pdg):
     return _PIXELAV_PID.get(int(pdg), 211)   # default to pion (mass-rescale approximation)
 
 
+# Rest masses (GeV) for the betagamma-matched pion momentum below.
+_MASS_GEV = {11: 0.000510999, 13: 0.105658, 211: 0.139570}
+M_PION_GEV = 0.139570
+
+
+def ppion_betagamma_matched(p_gev, pdg):
+    """PIXELAV models every track as a PION for dE/dx (Bichsel pion cross-sections). Ionization
+    depends on betagamma = p/m, not on the species, so to reproduce OUR particle's dE/dx we hand
+    PIXELAV the pion momentum with the SAME betagamma: ppion = p * m_pion / m_particle. For an
+    electron this is ~273*p (its true relativistic plateau); feeding p directly would treat a soft
+    electron as a slow pion and hugely over-ionize via the 1/beta^2 rise. Unknown species -> pion."""
+    m = _MASS_GEV.get(abs(int(pdg)), M_PION_GEV)
+    return p_gev * (M_PION_GEV / m)
+
+
 def load_cascade(npz_path):
     try:
         return np.load(npz_path, allow_pickle=True)
@@ -285,17 +300,19 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
             n_skip += 1
             continue
         eu_um, ev_um, p = s["entry_u"] * U, s["entry_v"] * U, s["p_GeV"]
+        ppion = ppion_betagamma_matched(p, s["pdg"])   # betagamma-matched pion momentum for dE/dx; pT label keeps the real |p|
         if layout == "smartpix":
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f %.4f %d" %
-                         (ca, cb, p, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
+                         (ca, cb, ppion, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
                           pid_to_pixelav(s["pdg"])))
         elif layout == "badeaa3":
             # 7-col format read by ppixelav2_list_trkpy_n_2f.c (the driver we build).
             # Axis map: modx -> vect[0] = PIXELAV x(21-px) = our v; mody -> vect[1] =
             # PIXELAV y(13-px, Lorentz) = our u. Entry is written full-truth in um; the
             # patched driver (analysis/pixelav/) reduces it mod-pitch to the sub-pixel impact.
+            # ppion is the betagamma-matched pion momentum (dE/dx); the pT column keeps the real |p|.
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f" %
-                         (ca, cb, p, s["flipped"], ev_um, eu_um, p))
+                         (ca, cb, ppion, s["flipped"], ev_um, eu_um, p))
         else:
             raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
     with open(out_path, "w") as f:

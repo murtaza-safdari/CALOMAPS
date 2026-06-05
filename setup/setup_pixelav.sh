@@ -15,6 +15,7 @@
 #   pixelav/decal_run/                         ready-to-run DECAL sensor dir (320um/100um)
 # ============================================================================
 set -euo pipefail
+ulimit -s unlimited 2>/dev/null || true   # NEHSTORE=1,000,000 static arrays overflow the 8 MB default stack
 
 WORK="${PIXELAV_WORK:-/tmp/pixelav_journey}"
 SRC="$WORK/pixelav"
@@ -71,5 +72,5 @@ echo "[setup] DONE."
 echo "[setup] DECAL run dir: $RUN"
 echo "[setup] Run our event:"
 echo "        cp $REPO_DIR/models/pixelav_segments_gamma50_1evt.pixelav.txt $RUN/track_list.txt"
-echo "        cd $RUN && ./ppixelav2_list_trkpy_real_entry 1 track_list.txt clusters.out seedfile.txt"
+echo "        cd $RUN && ulimit -s unlimited && ./ppixelav2_list_trkpy_real_entry 1 track_list.txt clusters.out seedfile.txt"
 echo "[setup] (baseline BPix sensor instead: use ppixel2.init/wgt_pot.init in $SRC + ppixelav2_list_trkpy_n_2f)"
