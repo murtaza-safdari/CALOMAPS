@@ -3,8 +3,9 @@
 # ==========================================
 # SIMULATION PARAMETERS
 # ==========================================
-NUM_JOBS=200           # Number of parallel jobs (CPU cores to use)
-EVENTS_PER_JOB=100     # Events per job
+# Sizable via env (CALOMAPS_NJOBS / CALOMAPS_NEVENTS) so you can make a quick small dataset.
+NUM_JOBS="${CALOMAPS_NJOBS:-200}"          # Number of parallel jobs (CPU cores to use)
+EVENTS_PER_JOB="${CALOMAPS_NEVENTS:-100}"  # Events per job
 
 # --- PARTICLE / DATASET ---
 # Particle type is read from CALOMAPS_GUN_PARTICLE (default "gamma") and passed
