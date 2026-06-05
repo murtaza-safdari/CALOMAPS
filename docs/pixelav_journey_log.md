@@ -144,3 +144,48 @@ back-projection from midplane to the entry face intact.
 - [ ] `write_pixelav_deck()` finished (7-col, µm, axis map above) and a deck generated from the
       2,535 crossings.
 - [ ] One-track round-trip to confirm the cot/axis/flip convention; then a full run + plots.
+
+---
+
+## 9. Built + verified (2026-06-05)
+
+Everything in §8 is done; the full pipeline runs on EAF.
+
+**What was built**
+- `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c` — the baseline driver with the random 3×3
+  impact draw replaced by the **real per-crossing entry** (deck `modx`/`mody`, reduced mod-pitch
+  to a sub-pixel midplane offset).
+- `analysis/pixelav/make_decal_stagea.py` — generates the DECAL **Stage-A**: 320 µm thick, 100 µm
+  square pitch, uniform `E_z = −10000 V/cm` (V_bias 320 V), **B = 0**, and an FFT-computed **Ramo
+  weighting potential** (central-pixel weighting rises 0 → 0.046 → 1.0 from backplane to
+  collection). Simple-field model, in lieu of a TCAD map (authorized).
+- `analysis/pixelav_converter.py` — `write_pixelav_deck()` now defaults to the **7-column badeaa3**
+  format and writes the entry with the correct axis pairing (`modx = v_entry`, `mody = u_entry`).
+- `setup/setup_pixelav.sh` — one command rebuilds all of the above plus a ready `decal_run/` dir.
+
+**Verified**
+- *Baseline:* a 4-track synthetic deck → 4 clusters (BPix sensor). After the `wgt_pot.init` fix
+  the weighting loads (no `match problem`) and clusters show real charge sharing.
+- *Real-entry patch:* identical tracks give identical, **injected** entries (e.g. `modx=10,mody=3`
+  → `x-entry=10, y-entry=3`) vs random entries from the upstream driver. The ionization stays
+  stochastic (neh fluctuates) — correct physics.
+- *Our data on our geometry:* the 2,188-crossing deck through the DECAL sensor gives clusters with
+  **neh ≈ 24–29k e-h** (MIP for 320 µm Si, 3.2× the 100 µm BPix), at the injected real entries.
+- *Caveat:* high-momentum crossings (the ~47 GeV primary products) can exceed the 150k-e-h
+  `NEHSTORE` cap and are skipped by PIXELAV; the soft-track bulk is retained. Bump `NEHSTORE` +
+  recompile to keep them. Per-crossing momentum is the MCParticle production momentum (EDM4hep has
+  no per-step momentum) — a flagged approximation for deep crossings.
+
+**Run our event**
+```bash
+bash setup/setup_pixelav.sh
+RUN=/tmp/pixelav_journey/pixelav/decal_run
+cp models/pixelav_segments_gamma50_1evt.pixelav.txt $RUN/track_list.txt
+cd $RUN && ./ppixelav2_list_trkpy_real_entry 1 track_list.txt clusters.out seedfile.txt
+```
+
+**Next (fidelity)**
+- A one-track round-trip to confirm the cot/axis mapping (our u↔y(13px), v↔x(21px)) against the
+  binary's cluster orientation.
+- Per-crossing momentum (needs per-step truth) and a TCAD field map (`TCADtoPixelAV`) to replace
+  the simple uniform E-field.
