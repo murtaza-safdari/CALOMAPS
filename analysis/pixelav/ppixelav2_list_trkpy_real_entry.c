@@ -48,7 +48,7 @@
 
 /* Maximum number of e-h pairs to be stored in static arrays */
 
-#define NEHSTORE 150000
+#define NEHSTORE 1000000
 
 /* Define pixel signal buffer sizes */
 
