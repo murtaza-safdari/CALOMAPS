@@ -1,4 +1,4 @@
-# CALOMAPS — the summer-student branch
+# CALOMAPS — DECAL R&D (student edition)
 
 Welcome. You're about to do real detector R&D: simulate a next-generation **digital
 electromagnetic calorimeter** (DECAL), watch particles shower inside it, and reconstruct
@@ -6,10 +6,10 @@ their energy from what the silicon records — then try to do it *better* than t
 This is not a canned exercise. The clustering capstone in the last notebook is open: there
 is no answer key for it, because the answer isn't known.
 
-This branch (`summer-student`) ships the notebooks as **scaffolds** — the context, the
-plumbing, and the plotting are written for you; the *science* cells are left blank with a
-task, a hint, and the expected result. You fill them in. The fully worked solutions live
-on the **`main`** branch — try first, peek only when you're stuck.
+These notebooks ship as **scaffolds** — the context, the plumbing, and the plotting are
+written for you; the *science* cells are left blank with a task, a hint, and the expected
+result. You fill them in. Try each cell yourself first; if you get genuinely stuck after a
+real attempt, ask your instructor.
 
 ---
 
@@ -62,8 +62,7 @@ separate "student track."
    your environment"): §6.1 accounts, §6.2 spawn an EAF server, §6.3 clone the code and
    create the one-time `~/lib_hack` symlink that `ddsim` needs, §6.4 `source
    setup/setup_calomaps.sh` from a JupyterLab terminal.
-2. **Check out this branch:** `git checkout summer-student`.
-3. **Two kernels.** Notebooks 00/01/02 use the **`Python (Key4hep)`** kernel (CPU is fine).
+2. **Two kernels.** Notebooks 00/01/02 use the **`Python (Key4hep)`** kernel (CPU is fine).
    Notebook 03 trains a neural-net surrogate and wants the **`Key4hep + GPU`** kernel — see
    **`docs/handbook.md` §11.2** for the one-time GPU-kernel recipe, and spawn a GPU server
    when you reach nb03.
@@ -177,21 +176,13 @@ relative gain, for *both* particles — captures the result.
 
 ---
 
-## When you're stuck: the worked solutions
+## When you're stuck
 
-The fully worked notebooks live on the **`main`** branch:
-
-| Scaffold (this branch) | Photon solution (`main`) | Pion solution (`main`) |
-|---|---|---|
-| `01_detector_and_data.ipynb` | `01_detector_and_data.ipynb` | `01b_detector_and_data_pions.ipynb` |
-| `02_data_extraction.ipynb` | `02_data_extraction.ipynb` | `02b_data_extraction_pions.ipynb` |
-| `03_ml_training_and_eval.ipynb` | `03_ml_training_and_eval.ipynb` | `03b_ml_training_and_eval_pions.ipynb` |
-
-Every blank cell tells you which one to look at. **Try first, peek if stuck.** You learn
-the physics by struggling with the cell, not by reading the answer — but a quick look to
-unblock yourself is fine. To see them: `git checkout main`, open the notebook, then
-`git checkout summer-student` to come back. (The capstone has **no** solution on `main` —
-that part is genuinely open.)
+**Try first.** You learn the physics by struggling with a cell, not by reading an answer.
+Each blank cell gives you a task, a hint, and the expected result (the shape of the plot or
+a ballpark number) so you can tell whether you're on track. If you're genuinely stuck after
+a real attempt, ask your instructor. (The capstone is open R&D — there's no answer key for
+it at all.)
 
 ---
 
