@@ -382,11 +382,12 @@ Stages 1-2 happen in a JupyterLab terminal (or via `sim/generate_batched.sh`). S
 ```bash
 # In a JupyterLab terminal:
 cd /nashome/${USER:0:1}/$USER/
-git clone https://github.com/murtaza-safdari/CALOMAPS.git
+# Clone into a folder named CALOMAPS so the paths below (and setup_calomaps.sh) line up:
+git clone https://github.com/murtaza-safdari/CALOMAPS-students.git CALOMAPS
 ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_calomaps.sh
 ```
 
-The symlink lets you do `source ~/setup_calomaps.sh` from anywhere; the actual launcher lives in the repo.
+The symlink lets you do `source ~/setup_calomaps.sh` from anywhere; the actual launcher lives in the repo. (You're already on the right branch — the student repo ships the materials as its `main`, so there's nothing to check out.)
 
 #### The `~/lib_hack` OpenGL shim (now automatic)
 
