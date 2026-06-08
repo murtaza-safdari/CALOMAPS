@@ -34,22 +34,22 @@ are ordered this way:
 
 ---
 
-## Two students, one set of notebooks
+## One branch, two particles
 
-You are one of **two students working this same branch**, each on a different particle:
+The notebooks run on **one particle at a time**, selected by a single variable, `PARTICLE`:
 
-| You are the... | Your particle | `PARTICLE` value | Your showers are... |
-|---|---|---|---|
-| **junior** | photons | `"gamma"` (the default) | clean, compact, *electromagnetic* |
-| **senior** | pions | `"pi+"` | wide, long, fluctuating, *hadronic* (often punch-through) |
+| `PARTICLE` | Showers are... |
+|---|---|
+| `"gamma"` (the default) | clean, compact, *electromagnetic* |
+| `"pi+"` | wide, long, fluctuating, *hadronic* (often a single minimum-ionizing track punching straight through this *EM* calorimeter) |
 
-You run the **exact same notebooks**. The only thing that differs is one variable —
+You run the **exact same notebooks** either way. The only thing that differs is one variable —
 `PARTICLE` — set in a clearly-marked cell near the top of each notebook. Everything else
 (the dataset, the file glob, the output filenames, the trained-model folder) is *derived*
-from it, so your photon run and your partner's pion run never clobber each other.
+from it, so runs on different particles never clobber each other.
 
-Then you **compare**. The photon-vs-pion difference is the headline physics result of the
-whole project — see "Compare with your partner" below.
+The photon-vs-pion difference — a clean EM core versus a messy hadronic shower — is the
+central physics this pipeline reveals (see "Photon vs pion" below).
 
 ---
 
@@ -83,11 +83,11 @@ guide. You run `ddsim` (Geant4 via DD4hep) to shoot your particle into the detec
 write ROOT files. The particle is one environment variable:
 
 ```bash
-# junior (photons) — this is the default:
+# photons — this is the default:
 CALOMAPS_NJOBS=40 CALOMAPS_GUN_PARTICLE=gamma bash sim/generate_batched.sh
 #   -> data_spectrum_100um_400GeV/sim_photons_part*.root
 
-# senior (pions) — same command, one env var changed:
+# pions — same command, one env var changed:
 CALOMAPS_NJOBS=40 CALOMAPS_GUN_PARTICLE=pi+  bash sim/generate_batched.sh
 #   -> data_spectrum_100um_400GeV_piplus/sim_piplus_part*.root
 ```
@@ -136,7 +136,7 @@ break (pixel saturation at high energy).
 In **each** notebook there is a clearly-marked cell near the top:
 
 ```python
-PARTICLE = "gamma"   # junior: "gamma";  senior: "pi+"
+PARTICLE = "gamma"   # "gamma" or "pi+"
 ```
 
 Set it once, run the cell, and the rest of the notebook keys off it:
@@ -148,32 +148,32 @@ FILE_GLOB = "sim_photons_part*.root"     if PARTICLE == "gamma" else "sim_piplus
 
 The output names follow too — nb02 writes `models/decal_extracted_data_gamma.npz` or
 `..._piplus.npz`, and nb03 reads the matching one and trains into a per-particle model
-folder. So you and your partner can run on the same machine without stepping on each other.
-**The only edit you make per-student is that one `PARTICLE` line.** (For nb00, it's the
+folder. So runs on different particles never clobber each other on the same machine.
+**The only edit you make per particle is that one `PARTICLE` line.** (For nb00, it's the
 `CALOMAPS_GUN_PARTICLE` env var instead.)
 
 ---
 
-## Compare with your partner
+## Photon vs pion
 
-The point of having two of you is the **photon-vs-pion comparison**. At three moments, put
-your plots side by side:
+The **photon-vs-pion comparison** is the central physics result of the pipeline. With both
+particles' outputs in hand, put the plots side by side at three moments:
 
-1. **Shower shape (end of nb01).** Compare your densest-layer image, your per-layer slices,
-   and your longitudinal profile. The pion's is visibly wider, longer, patchier — sometimes
+1. **Shower shape (end of nb01).** Compare the densest-layer image, the per-layer slices,
+   and the longitudinal profile. The pion's is visibly wider, longer, patchier — sometimes
    just a single MIP dot per layer (punch-through). The photon's is one tight EM core.
-2. **Sampling fraction & readouts (end of nb02).** Whose visible-vs-true line is steeper?
-   Whose readout clouds are tighter at fixed energy? Whose clustering turns over sooner? The
+2. **Sampling fraction & readouts (end of nb02).** Which visible-vs-true line is steeper?
+   Which readout clouds are tighter at fixed energy? Which clustering turns over sooner? The
    pion relations are looser (hadronic fluctuations) and its longitudinal profile deeper and
    flatter.
-3. **Reconstruction resolution (end of nb03).** Put your dashboards together. **Pion
+3. **Reconstruction resolution (end of nb03).** Put the dashboards together. **Pion
    resolution is worse and less linear** than photon — that's the EM-vs-hadronic story, and
-   comparing the two dashboards *is* the result. Then compare your capstone gains: smarter
+   comparing the two dashboards *is* the result. Then compare the capstone gains: smarter
    clustering usually helps **pions more**, because hadronic showers are exactly the messy,
    multi-core, across-layers objects the naive baseline handles worst.
 
 Write the numbers down. A small table — best baseline σ/E, improved-cluster σ/E, and the
-relative gain, for *both* particles — is the headline output of the project.
+relative gain, for *both* particles — captures the result.
 
 ---
 

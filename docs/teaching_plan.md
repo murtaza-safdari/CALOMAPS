@@ -6,17 +6,17 @@ shows, and what the student scaffold leaves blank. The **canonical** notebooks l
 (`summer-student`) strips the science cells to guided blanks; point students back to the
 canonical notebooks when they're stuck.
 
-## Who works on what
+## The two particles
 
-Two students, both on this branch:
+Both particles run on this branch, selected by `PARTICLE` (env `CALOMAPS_GUN_PARTICLE` in nb00):
 
-| Student | Particle | Sees showers that are... |
-|---------|----------|--------------------------|
-| Junior  | **photons** (`gamma`, the default) | clean, compact, electromagnetic |
-| Senior  | **pions** (`pi+`, `CALOMAPS_GUN_PARTICLE=pi+`) | wide, long, fluctuating, hadronic (often MIP-punch-through in an *EM* calorimeter) |
+| Particle | Sees showers that are... |
+|----------|--------------------------|
+| **photons** (`gamma`, the default) | clean, compact, electromagnetic |
+| **pions** (`pi+`) | wide, long, fluctuating, hadronic (often MIP-punch-through in an *EM* calorimeter) |
 
-They run the **same notebooks** with a different particle and **compare results** at each
-stage — the photon/pion contrast is a first-class learning outcome, not an aside.
+The **same notebooks** run with a different particle; **comparing the photon and pion results**
+at each stage is a first-class learning outcome, not an aside.
 
 ## The learning arc (the spine of every notebook)
 
@@ -34,7 +34,7 @@ contrast**, and **scaffold** (what's given vs what the student writes here).
 ### nb00 — Simulate your own samples (primer)  ·  arc 1
 - **Canonical:** markdown guide + one verify cell. Generate your own `.root` with `ddsim`;
   switch particle with `CALOMAPS_GUN_PARTICLE`; size a quick dataset with `CALOMAPS_NJOBS`.
-- **Contrast:** junior generates `gamma`, senior `pi+` — same command, one env var.
+- **Contrast:** `gamma` vs `pi+` — same command, one env var.
 - **Scaffold:** GIVEN in full (it *is* the "how to make data" instructions). Student task =
   actually generate a small dataset (photons or pions) and run the verify cell on it.
 
@@ -47,8 +47,8 @@ contrast**, and **scaffold** (what's given vs what the student writes here).
   energy profile** (energy vs depth, W transition); (g) reverse-engineer the pitch/layers
   from data; (h) first-look aggregates (E_true spectrum, hits-vs-E, visible-vs-E → sampling fraction).
 - **Contrast:** the pion shower (01b) is visibly wider/longer/patchier and often a single
-  MIP track punching through; sampling fraction is lower and fluctuates more. Students put
-  their (d)/(e)/(f) plots side by side.
+  MIP track punching through; sampling fraction is lower and fluctuates more. Put the
+  (d)/(e)/(f) plots side by side, photon vs pion.
 - **Scaffold:** GIVEN = geometry parse, file open, plotting helpers, all markdown context.
   BLANK (with hints) = the hit selection (the +y wedge), and plots (d), (e), (f); the
   student writes the binning to a pixel grid and the per-layer/longitudinal aggregation.
@@ -76,7 +76,7 @@ contrast**, and **scaffold** (what's given vs what the student writes here).
   stochastic term) **with the four readouts overlaid** so the resolution ranking is explicit;
   closure check.
 - **Contrast:** pion resolution is worse and less linear (hadronic fluctuations, punch-through);
-  comparing the two students' dashboards is the headline photon-vs-pion result.
+  comparing the photon and pion dashboards is the headline result.
 - **Scaffold:** GIVEN = the training/inversion/dashboard machinery (`quantilenet.py`,
   `dashboard.py`) and the load/plot boilerplate. BLANK = wire the chosen readout(s) through
   training → inversion → dashboard, and **the capstone**: replace `naive_clusters()` with a
@@ -91,8 +91,8 @@ merged cores using local density; weighting by deposited charge; or a small lear
 Success = a lower σ/E curve (or better linearity) than the baseline, shown on the dashboard.
 
 ## README / prose guidance (student branch)
-- Lead with the arc above and the two-student split; make the photon/pion comparison explicit
-  ("compare with your partner at the end of each notebook").
+- Lead with the arc above; make the photon/pion comparison explicit (put the photon and pion
+  plots side by side at the end of each notebook).
 - Every scaffold cell states the **task**, a **hint**, and the **expected result** (shape of
   the plot / ballpark number), and links the canonical solution on `main`.
 - Keep the from-scratch EAF setup identical to the collaborator path (handbook §6) — students
