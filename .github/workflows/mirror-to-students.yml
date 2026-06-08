@@ -1,0 +1,43 @@
+name: Mirror to student repo
+
+# Mirrors the summer-student tree to murtaza-safdari/CALOMAPS-students `main` as a single
+# ORPHAN snapshot: no commit history (so old commits that still held the worked solutions
+# can't be recovered) and with `.github/` stripped (so the student repo carries no workflow
+# and no mention of the source branch). Auth: the STUDENT_MIRROR_KEY deploy key (write),
+# registered on the student repo.
+
+on:
+  push:
+    branches: [summer-student]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: summer-student
+          fetch-depth: 1
+
+      - name: Mirror orphan snapshot to student repo main
+        env:
+          DEPLOY_KEY: ${{ secrets.STUDENT_MIRROR_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config user.name "calomaps-mirror"
+          git config user.email "calomaps-mirror@users.noreply.github.com"
+          # Build a tree WITHOUT .github so the student repo stays clean.
+          tmpidx="$(mktemp)"; rm -f "$tmpidx"
+          GIT_INDEX_FILE="$tmpidx" git read-tree HEAD
+          GIT_INDEX_FILE="$tmpidx" git rm -r --cached --quiet .github || true
+          tree="$(GIT_INDEX_FILE="$tmpidx" git write-tree)"
+          rm -f "$tmpidx"
+          snap="$(git commit-tree "$tree" -m 'CALOMAPS student edition - course materials')"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes" \
+            git push --force git@github.com:murtaza-safdari/CALOMAPS-students.git "${snap}:refs/heads/main"
+          echo "Mirrored $(git rev-parse --short HEAD) (.github stripped) -> CALOMAPS-students main as ${snap}"
