@@ -23,6 +23,7 @@ The companion document [DECAL_pipeline.md](DECAL_pipeline.md) is the canonical p
 13. [Interpreting the 3-panel physics dashboard](#13-interpreting-the-3-panel-physics-dashboard)
 14. [Common gotchas (code-level)](#14-common-gotchas-code-level)
 15. [Where to ask for help](#15-where-to-ask-for-help)
+16. [Optional / maintainer reference](#16-optional--maintainer-reference)
 
 ---
 
@@ -412,7 +413,7 @@ What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 
 1. `source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01` — loads Key4hep (Geant4, ROOT, DD4hep, uproot, NumPy, PyTorch CPU). ~30 GB from CVMFS.
 2. Creates `~/lib_hack/libOpenGL.so.0` if missing, then prepends `~/lib_hack` to `LD_LIBRARY_PATH` — the OpenGL workaround for DD4hep (see above).
-3. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit, which a fresh `git clone` onto the SSHFS mount drops.
+3. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit, which a fresh `git clone` onto the `/nashome` mount drops.
 4. `export CALOMAPS_HOME=/nashome/<X>/<username>/CALOMAPS` — project root, derived from `$USER`.
 5. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` (and `mkdir -p` it) — where simulation data lives.
 6. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
@@ -427,45 +428,40 @@ The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't
 
 ### 6.5 Editing files
 
-- **JupyterLab browser**: open files directly. Simple but slow for greps.
-- **Laptop SSHFS**: mount `/nashome/` and use VS Code or any local editor. Faster, but be aware of the SSHFS small-write bug — see [troubleshooting.md](troubleshooting.md).
+Edit everything directly in the **JupyterLab browser** — the file browser opens notebooks,
+scripts, and markdown in the built-in editor. That is the whole workflow; nothing in this
+guide needs a local checkout.
 
-```bash
-# Mac with FUSE-T / macFUSE:
-mkdir -p ~/nashome
-sshfs <username>@cmslpc-el9.fnal.gov:/nashome ~/nashome -o reconnect,defer_permissions
-```
-
-The 21 GB simulation data is not visible via the mount (it lives in `/home/<username>/` on EAF, container-local).
+> Prefer a local editor like VS Code over the browser? An optional SSHFS-mount recipe is in
+> §16.1 (Local laptop setup). It's a maintainer convenience, not part of the normal flow.
 
 ---
 
 ## 7. Storage map — where files actually live
 
+Everything runs inside the EAF JupyterLab container:
+
 ```
-┌──────────────────────────────┐    ┌──────────────────────────────┐
-│  Your laptop                  │    │  EAF JupyterLab container     │
-│                               │    │                               │
-│  ~/nashome/m/<u>/CALOMAPS/    │◄──►│  /nashome/m/<u>/CALOMAPS/     │
-│  ├── geometry/                │SSHFS  ├── geometry/                │
-│  ├── sim/                     │    │  ├── sim/                     │
-│  ├── analysis/                │    │  ├── analysis/                │
-│  ├── notebooks/               │    │  ├── notebooks/               │
-│  ├── docs/                    │    │  ├── docs/                    │
-│  └── setup/                   │    │  └── setup/                   │
-│                               │    │                               │
-│       (~4 MB source tree)     │    │   /home/<u>/                  │
-│                               │    │   ├── CALOMAPS-data/  ← 21 GB │
-│       not laptop-visible:     │    │   ├── lib_hack/                │
-│                               │    │   ├── calomaps_gpu_env/              │
-│                               │    │   └── setup_calomaps.sh        │
-│                               │    │      (symlink → repo)          │
-│       /cvmfs/...              │    │   /cvmfs/sw.hsf.org/key4hep/  │
-│                               │    │       (~30 GB CVMFS)          │
-└──────────────────────────────┘    └──────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│  EAF JupyterLab container                        │
+│                                                  │
+│  /nashome/<X>/<u>/CALOMAPS/      (~4 MB source)  │
+│  ├── geometry/   sim/   analysis/                │
+│  ├── notebooks/  docs/  setup/                   │
+│                                                  │
+│  /home/<u>/                                      │
+│  ├── CALOMAPS-data/   ← 21 GB simulation output  │
+│  ├── lib_hack/                                   │
+│  ├── calomaps_gpu_env/   (if persistent install) │
+│  └── setup_calomaps.sh   (symlink → repo)        │
+│                                                  │
+│  /cvmfs/sw.hsf.org/key4hep/      (~30 GB CVMFS)  │
+└────────────────────────────────────────────────┘
 ```
 
-**Key principle**: source tree on `/nashome` is small and laptop-visible; data lives on `/home/<u>` (EAF only). The two are connected by `$CALOMAPS_DATA_BASE`.
+**Key principle**: the source tree on `/nashome` is small and shared (also reachable from a
+laptop mount — §16.1); the 21 GB of simulation data lives on `/home/<u>`, which is
+**container-local to EAF**. The two are connected by `$CALOMAPS_DATA_BASE`.
 
 ---
 
@@ -589,97 +585,9 @@ The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.back
 
 **Recommended path (one command)**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step, then asserts `torch.cuda.is_available()` so a failed install is obvious. The venv defaults to `/tmp` (wiped on container restart — just re-run); set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free. Then open notebook 03 and pick the **Key4hep + GPU** kernel.
 
-The script's canonical names are venv `calomaps_gpu_env` and kernel dir `calomaps_gpu` (display name **Key4hep + GPU**). The two manual paths below explain what it automates — use them only to do it by hand or to debug; note they use *different* example names (`my_gpu_env`, `cu_torch_env`), so don't mix a hand-built install with the script's.
+> Building the kernel by hand, or debugging what the script does? The manual UI and terminal
+> recipes (and the `sys.path` shim they need) live in **§16.2 — Manual GPU-kernel setup**.
 
-#### Path A — manual UI walkthrough (what the script automates)
-
-##### One-time per account: create `~/my_gpu_env` and register the kernel
-
-The `Key4hep + GPU` kernel in JupyterLab is backed by a Python venv at `~/my_gpu_env/` whose `kernel.json` lives in `~/.local/share/jupyter/kernels/my_gpu_env/`. **A fresh EAF account doesn't have either.** Skip this block if the `Key4hep + GPU` kernel already appears in the JupyterLab kernel selector.
-
-```bash
-# In a JupyterLab terminal:
-source ~/setup_calomaps.sh   # need the CVMFS python on PATH
-
-# Create the venv. --system-site-packages lets it inherit the entire Key4hep
-# stack (uproot, numpy, matplotlib, ...) so we only need to install the one
-# package we want to override (torch) rather than reinstalling everything.
-python -m venv --system-site-packages ~/my_gpu_env
-
-# Register the kernel with JupyterHub. After this, "Key4hep + GPU" appears
-# in the kernel selector and points at ~/my_gpu_env/bin/python.
-~/my_gpu_env/bin/python -m ipykernel install \
-    --user --name=my_gpu_env --display-name="Key4hep + GPU"
-```
-
-**Note**: at this point the venv exists and the kernel is registered, but the venv's `site-packages/` is empty. When you `import torch` from this kernel, you'll get CVMFS's **CPU-only** torch (inherited via `--system-site-packages`). The next step installs GPU torch *into* the venv so it shadows CVMFS — that's the actual fix.
-
-##### Install GPU torch into the kernel
-
-1. Open [`notebooks/03_ml_training_and_eval.ipynb`](../notebooks/03_ml_training_and_eval.ipynb) in JupyterLab.
-2. Switch kernel to **`Key4hep + GPU`**.
-3. In a cell:
-   ```python
-   !pip install --force-reinstall torch torchvision torchaudio \
-       --index-url https://download.pytorch.org/whl/cu121
-   ```
-4. **Restart the kernel.** (Kernel menu → Restart Kernel.)
-5. Verify:
-   ```python
-   import torch
-   print(torch.__version__)             # expect 2.x.x+cu121
-   print(torch.cuda.is_available())     # expect True
-   print(torch.cuda.get_device_name(0)) # expect "NVIDIA A100 ..."
-   ```
-6. Set `RETRAIN = True` in the training cell. Run.
-
-Why this works: the JupyterLab launcher invokes `~/my_gpu_env/bin/python` directly without sourcing CVMFS, so your venv-installed cu121 torch wins on `sys.path`.
-
-#### Path B — Terminal / script (fallback)
-
-From a CVMFS-sourced terminal, `sys.path` already has CVMFS torch ahead of any venv. Workarounds:
-
-- **Use the `sys.path` shim** (see [§11.3](#113-why-the-syspath-hack-path-b-only)). [`analysis/train_ensembles.py`](../analysis/train_ensembles.py) has it baked in.
-- **Install to `/tmp/cu_torch_env/`** instead of `~/my_gpu_env/` if `/home/<u>` is full (the 4.4 GB install often doesn't fit in EAF's 23 GB home quota).
-
-Full recipe:
-
-```bash
-source ~/setup_calomaps.sh
-
-/cvmfs/sw.hsf.org/key4hep/releases/2026-02-01/x86_64-almalinux9-gcc14.2.0-opt/python/3.13.8-z2dydk/bin/python3.13 \
-    -m venv --system-site-packages /tmp/cu_torch_env
-
-/tmp/cu_torch_env/bin/pip install --force-reinstall torch \
-    --index-url https://download.pytorch.org/whl/cu121
-
-# Smoke-test
-/tmp/cu_torch_env/bin/python -c "
-import sys
-sys.path = [p for p in sys.path if 'py-torch' not in p]
-sys.path.insert(0, '/tmp/cu_torch_env/lib/python3.13/site-packages')
-import torch
-print('cuda available:', torch.cuda.is_available())
-print('device:', torch.cuda.get_device_name(0))"
-
-# Train
-/tmp/cu_torch_env/bin/python $CALOMAPS_HOME/analysis/train_ensembles.py
-```
-
-`/tmp` on EAF is overlay, several TB free, but **wiped on container restart** — re-do the install each fresh session.
-
-### 11.3 Why the `sys.path` hack (Path B only)
-
-When `setup_calomaps.sh` is sourced, CVMFS pre-pends ~30 `/cvmfs/.../site-packages/` paths to `PYTHONPATH`, including the CPU-only CVMFS torch. Even from inside a venv, `import torch` finds CVMFS first because it's earlier in `sys.path`.
-
-```python
-import sys
-sys.path = [p for p in sys.path if 'py-torch' not in p]    # drop CVMFS torch
-sys.path.insert(0, '/tmp/cu_torch_env/lib/python3.13/site-packages')  # venv first
-import torch    # now the cu121 build wins
-```
-
-Only needed in **Path B**. In Path A (JupyterLab UI), the kernel spawns without CVMFS pre-sourced, so the venv's own torch wins naturally — no shim required.
 
 ---
 
@@ -803,3 +711,123 @@ The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS us
 - **DD4hep manual**: <https://dd4hep.web.cern.ch/dd4hep/usermanuals/DD4hepManual/DD4hepManual.pdf>
 
 Stuck on physics? Read [DECAL_pipeline.md](DECAL_pipeline.md) cover-to-cover. Stuck on tooling? Re-read this doc, then [troubleshooting.md](troubleshooting.md). Stuck on something not covered? PRs welcome.
+
+## 16. Optional / maintainer reference
+
+The pipeline runs entirely in the EAF browser (§6–§13). The material below is **optional** —
+a local-editing convenience and the by-hand equivalents of the one-command GPU setup. New
+collaborators can skip all of it.
+
+### 16.1 Local laptop setup (SSHFS + VS Code)
+
+If you'd rather edit with a local editor than in the JupyterLab browser, mount `/nashome`
+over SSHFS and point VS Code (or any editor) at it. This is purely a convenience: it is
+**not** required to run the pipeline, and it carries the SSHFS small-write caveat (see
+[troubleshooting.md](troubleshooting.md)).
+
+```bash
+# Mac with FUSE-T / macFUSE:
+mkdir -p ~/nashome
+sshfs <username>@cmslpc-el9.fnal.gov:/nashome ~/nashome -o reconnect,defer_permissions
+```
+
+The mount exposes only the ~4 MB source tree (`/nashome/<X>/<u>/CALOMAPS/`, same files as on
+EAF). The 21 GB simulation data is **not** visible through it — that lives on
+`/home/<username>/` inside the EAF container (see the §7 storage map).
+
+### 16.2 Manual GPU-kernel setup (what `setup_gpu_kernel.sh` automates)
+
+Use these only to build the kernel by hand or to debug; the one-command path in §11.2 is the
+normal route. Note the examples below use *different* names (`my_gpu_env`, `cu_torch_env`)
+than the script's canonical `calomaps_gpu_env` — don't mix a hand-built install with the
+script's.
+
+#### Path A — manual UI walkthrough (what the script automates)
+
+##### One-time per account: create `~/my_gpu_env` and register the kernel
+
+The `Key4hep + GPU` kernel in JupyterLab is backed by a Python venv at `~/my_gpu_env/` whose `kernel.json` lives in `~/.local/share/jupyter/kernels/my_gpu_env/`. **A fresh EAF account doesn't have either.** Skip this block if the `Key4hep + GPU` kernel already appears in the JupyterLab kernel selector.
+
+```bash
+# In a JupyterLab terminal:
+source ~/setup_calomaps.sh   # need the CVMFS python on PATH
+
+# Create the venv. --system-site-packages lets it inherit the entire Key4hep
+# stack (uproot, numpy, matplotlib, ...) so we only need to install the one
+# package we want to override (torch) rather than reinstalling everything.
+python -m venv --system-site-packages ~/my_gpu_env
+
+# Register the kernel with JupyterHub. After this, "Key4hep + GPU" appears
+# in the kernel selector and points at ~/my_gpu_env/bin/python.
+~/my_gpu_env/bin/python -m ipykernel install \
+    --user --name=my_gpu_env --display-name="Key4hep + GPU"
+```
+
+**Note**: at this point the venv exists and the kernel is registered, but the venv's `site-packages/` is empty. When you `import torch` from this kernel, you'll get CVMFS's **CPU-only** torch (inherited via `--system-site-packages`). The next step installs GPU torch *into* the venv so it shadows CVMFS — that's the actual fix.
+
+##### Install GPU torch into the kernel
+
+1. Open [`notebooks/03_ml_training_and_eval.ipynb`](../notebooks/03_ml_training_and_eval.ipynb) in JupyterLab.
+2. Switch kernel to **`Key4hep + GPU`**.
+3. In a cell:
+   ```python
+   !pip install --force-reinstall torch torchvision torchaudio \
+       --index-url https://download.pytorch.org/whl/cu121
+   ```
+4. **Restart the kernel.** (Kernel menu → Restart Kernel.)
+5. Verify:
+   ```python
+   import torch
+   print(torch.__version__)             # expect 2.x.x+cu121
+   print(torch.cuda.is_available())     # expect True
+   print(torch.cuda.get_device_name(0)) # expect "NVIDIA A100 ..."
+   ```
+6. Set `RETRAIN = True` in the training cell. Run.
+
+Why this works: the JupyterLab launcher invokes `~/my_gpu_env/bin/python` directly without sourcing CVMFS, so your venv-installed cu121 torch wins on `sys.path`.
+
+#### Path B — Terminal / script (fallback)
+
+From a CVMFS-sourced terminal, `sys.path` already has CVMFS torch ahead of any venv. Workarounds:
+
+- **Use the `sys.path` shim** (see the `sys.path` hack below). [`analysis/train_ensembles.py`](../analysis/train_ensembles.py) has it baked in.
+- **Install to `/tmp/cu_torch_env/`** instead of `~/my_gpu_env/` if `/home/<u>` is full (the 4.4 GB install often doesn't fit in EAF's 23 GB home quota).
+
+Full recipe:
+
+```bash
+source ~/setup_calomaps.sh
+
+/cvmfs/sw.hsf.org/key4hep/releases/2026-02-01/x86_64-almalinux9-gcc14.2.0-opt/python/3.13.8-z2dydk/bin/python3.13 \
+    -m venv --system-site-packages /tmp/cu_torch_env
+
+/tmp/cu_torch_env/bin/pip install --force-reinstall torch \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Smoke-test
+/tmp/cu_torch_env/bin/python -c "
+import sys
+sys.path = [p for p in sys.path if 'py-torch' not in p]
+sys.path.insert(0, '/tmp/cu_torch_env/lib/python3.13/site-packages')
+import torch
+print('cuda available:', torch.cuda.is_available())
+print('device:', torch.cuda.get_device_name(0))"
+
+# Train
+/tmp/cu_torch_env/bin/python $CALOMAPS_HOME/analysis/train_ensembles.py
+```
+
+`/tmp` on EAF is overlay, several TB free, but **wiped on container restart** — re-do the install each fresh session.
+
+#### Why the `sys.path` hack (Path B only)
+
+When `setup_calomaps.sh` is sourced, CVMFS pre-pends ~30 `/cvmfs/.../site-packages/` paths to `PYTHONPATH`, including the CPU-only CVMFS torch. Even from inside a venv, `import torch` finds CVMFS first because it's earlier in `sys.path`.
+
+```python
+import sys
+sys.path = [p for p in sys.path if 'py-torch' not in p]    # drop CVMFS torch
+sys.path.insert(0, '/tmp/cu_torch_env/lib/python3.13/site-packages')  # venv first
+import torch    # now the cu121 build wins
+```
+
+Only needed in **Path B**. In Path A (JupyterLab UI), the kernel spawns without CVMFS pre-sourced, so the venv's own torch wins naturally — no shim required.
