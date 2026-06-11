@@ -122,7 +122,7 @@ Linearity      both OK            both OK            digital
                                                      (curve bends)
 ```
 
-A central question for the project is: **at what pixel size does this trade-off look most attractive?** You can re-run the simulation at 25 µm, 50 µm, 100 µm, 200 µm pixels and watch the saturation knee move. That's a real publishable result.
+A central question for the project is: **at what pixel size does this trade-off look most attractive?** You can re-run the simulation at 25 µm, 50 µm, 100 µm, 200 µm pixels and watch the saturation knee move — a pitch scan of this kind is a publishable result.
 
 The point of training a neural-network surrogate is that we want the **multiple readout views** to all be useful — and we want to combine them cleverly without making Gaussian assumptions. Pinball-loss quantile training handles asymmetric Landau-like uncertainties; ensembles handle epistemic uncertainty from limited training data.
 
@@ -347,9 +347,9 @@ flowchart TD
     C["Steering file<br/>run_sim.py (gun config)"] --> B
     B["ddsim<br/>(Geant4 via DD4hep)"] --> D["1000 ROOT files<br/>data_spectrum_100um_400GeV/<br/>20 events × 1000 = 20k events"]
     D --> E["notebooks/02_data_extraction.ipynb"]
-    E --> F["decal_extracted_data.npz"]
+    E --> F["decal_extracted_data_&lt;particle&gt;.npz"]
     F --> G["Deep Quantile Ensemble<br/>PyTorch training<br/>(notebooks/03 + Key4hep + GPU kernel)"]
-    G --> H["models/saved_ensembles_gpu_v2/<br/>(4 readouts × 20 models)"]
+    G --> H["models/saved_ensembles_gpu_&lt;particle&gt;/<br/>(4 readouts × 20 models)"]
     H --> I["Neyman inversion (Brent's method)"]
     I --> J["3-panel physics dashboard"]
 
@@ -367,15 +367,16 @@ Stages 1-2 happen in a JupyterLab terminal (or via `sim/generate_batched.sh`). S
 ### 6.1 Accounts
 
 1. **FNAL computing account** + Kerberos principal `<username>@FNAL.GOV` (your advisor sets this up).
-2. **EAF account** — automatic with your FNAL account. Log in at <https://eaf.fnal.gov>.
+2. **EAF account** — automatic with your FNAL account. Log in at <https://eaf.fnal.gov>. The site is reachable from the Fermilab network (on-site WiFi); if the page won't load off-site, that's why.
 
 ### 6.2 Spawn an EAF server
 
 1. <https://eaf.fnal.gov> → Login
 2. Spawner profile: **"GPU A100 10GB"** (or the current GPU non-CMS profile).
 3. Wait ~30s. You land in JupyterLab.
+4. Open a terminal: **File → New → Terminal**.
 
-**Why this profile**: CALOMAPS needs `/nashome` (mounted) and a GPU. The CMS profile mounts `/uscms_data/` (not needed here) and uses a different image.
+**Why this profile**: CALOMAPS needs `/nashome` (mounted) and a GPU. The CMS profile mounts `/uscms_data/` (not needed here) and uses a different image. The GPU itself is only used by notebook 03, but everything runs fine on this one profile.
 
 ### 6.3 Get the code
 
@@ -409,6 +410,11 @@ See [troubleshooting.md](troubleshooting.md) for the why behind user-space libra
 ```bash
 source ~/setup_calomaps.sh
 ```
+
+(`source` runs the script inside your current shell so the variables it sets persist — that's
+why you source it rather than execute it. CVMFS, which it loads software from, is a read-only
+network filesystem that streams pre-installed software on demand; nothing lands in your home
+quota.)
 
 What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 
@@ -548,14 +554,14 @@ Both scripts resolve the geometry + steering by absolute path, so they run corre
 
 Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipynb) with the **`Python (Key4hep)`** kernel (CPU; extraction is I/O-bound). The cells:
 
-1. Loop over all `sim_photons_part*.root` files in `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/`.
+1. Loop over all `sim_<particle>_part*.root` files in the per-particle dataset directory under `$CALOMAPS_DATA_BASE/` (both derived from the notebook's `PARTICLE` cell).
 2. Per event, compute:
    - `E_true` — true photon energy `√(p²+m²)` from the truth-level MC particle
    - `E_vis` — sum of all hit energies in the entry segment (analog readout)
    - `MIP count` — sum over fired pixels of `max(1, round(E_pix / E_MIP))` (MIPs-per-pixel; every fired pixel counts as ≥1 MIP)
    - `hit count` — number of pixels above the ½-MIP threshold (strict digital)
    - `cluster count` — number of 8-connected pixel clusters, summed over layers
-3. Save into `models/decal_extracted_data.npz`.
+3. Save into `models/decal_extracted_data_<particle>.npz` (per-particle: `_gamma` or `_piplus`).
 
 The notebook parallelizes with `ProcessPoolExecutor(max_workers=16)`. Drop to 8 if memory-pressed; bump to 64 if impatient and core-rich.
 
@@ -572,11 +578,9 @@ The model in [`analysis/quantilenet.py`](../analysis/quantilenet.py):
 
 **Total work**: 4 readouts × 20 models × up to 5000 epochs. On an A100 MIG slice: ~10 minutes. On CPU: 30–60 minutes.
 
-### 11.1 Reusing pre-trained models
+### 11.1 Reusing trained models
 
-The repo expects pre-trained ensembles at `models/saved_ensembles_gpu_v2/` (4 files, ~400 KB each). These are **not committed to git** (`.gitignore` excludes `models/`). They're produced by the training step below, or distributed separately.
-
-If you have the `.npz` but no saved ensembles, train once (next subsection).
+Notebook 03 trains ensembles into per-particle directories `models/saved_ensembles_gpu_<tag>/` (4 files, ~400 KB each, per particle). They are gitignored, so a fresh clone has none — train once (next subsection), then reload on later runs with `RETRAIN = False`.
 
 **CPU-loading caveat**: GPU-trained ensembles serialize CUDA tensors. To load on a CPU kernel, `torch.load(...)` needs `map_location=device`. The repo's [`analysis/quantilenet.py::load_ensemble`](../analysis/quantilenet.py) handles this.
 
@@ -637,19 +641,15 @@ $$\frac{\sigma_E}{E} = \frac{a}{\sqrt{E}} \oplus b \oplus \frac{c}{E}$$
 
 where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic noise.
 
-### 13.1 What it actually looks like (current 100 µm config, ~17,780 events)
+### 13.1 Reading your dashboard
 
 **Reconstructed Linearity** (panel 1): all four readouts on `y = 1`. ⚠️ This is **misleading** — it's largely *by construction*. Neyman inversion uses the median surrogate for forward and inverse, so the median is trivially self-consistent. A meaningful linearity test would need (a) a held-out test set or (b) bootstrap-resampled real events.
 
-**Reconstructed Resolution + Stochastic** (panels 2 + 3):
+**Reconstructed Resolution + Stochastic** (panels 2 + 3) — questions to ask of your dashboard:
 
-- **True Analog** and **MIP Proxy** overlap; rise from σ/E ≈ 0.07 at 10 GeV to ≈ 0.095 at 400 GeV. Best readouts at all energies. MIP tracks analog tightly because at 100 µm pitch each MIP-crossing reliably triggers one hit.
-- **Raw Hits** tracks analog at low E, **diverges upward starting around 100 GeV**, peaks at σ/E ≈ 0.113 near 380 GeV. **Pixel saturation** — exactly the DECAL physics.
-- **Naive 2D Clustering** is the worst, peaking at σ/E ≈ 0.137. The cluster *count* saturates as the dense core merges adjacent pixels into a few big blobs, so it doesn't recover the lost multiplicity.
-
-The crossover where Hits start losing to Analog at 100 µm pitch is **around 100 GeV**.
-
-Stochastic panel: Analog/MIP flatten at high E (low 1/√E) at σ/E ≈ 0.07 — non-zero constant *b* ≈ 0.07. Hits and Cluster curve *upward* on the right (high E) — saturation contributing as an effective non-constant constant term.
+- Which readouts overlap, and why might they? Is the best readout at low energy still the best at 400 GeV?
+- Does any curve diverge upward at high energy? At roughly what energy does it depart from Analog, and what does that say about the pixel pitch?
+- On the stochastic panel, which curves flatten to a constant term, and which curve *upward* at high E (low 1/√E)? What physics drives each behaviour?
 
 **Suggested experiment**: pixel-pitch scan (25 / 50 / 100 / 200 µm). The "saturation knee vs pitch" curve is a publishable result.
 
@@ -670,7 +670,7 @@ This section covers **code-level errors**. For **infrastructure-level quirks** (
 ### `Torch not compiled with CUDA enabled`
 CVMFS Key4hep 2026-02-01 torch is a CPU-only build (`torch.backends.cuda.is_built() → False`). Even on a GPU node, this torch can't use it.
 
-**Fix**: install CUDA-enabled torch into your venv. See [§11.2 Path A](#112-training-new-models-on-the-gpu).
+**Fix**: install CUDA-enabled torch into a venv — run `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2). Manual recipes are in §16.2.
 
 ### Loading saved ensembles fails with `Attempting to deserialize object on a CUDA device but torch.cuda.is_available() is False`
 GPU-trained ensembles use CUDA tensors. The repo's [`analysis/quantilenet.py::load_ensemble`](../analysis/quantilenet.py) passes `map_location=device` to `torch.load(...)` to handle this. If you write your own loader, remember the `map_location` argument.
@@ -705,8 +705,7 @@ The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS us
 
 ## 15. Where to ask for help
 
-- **Project advisor**: (fill in with name + email/Slack handle)
-- **Slack channel**: (fill in)
+- **Your instructor / project advisor** — first point of contact for anything project-related.
 - **EAF general help**: `eaf-support@fnal.gov`
 - **Key4hep docs**: <https://key4hep.github.io/>
 - **DD4hep manual**: <https://dd4hep.web.cern.ch/dd4hep/usermanuals/DD4hepManual/DD4hepManual.pdf>

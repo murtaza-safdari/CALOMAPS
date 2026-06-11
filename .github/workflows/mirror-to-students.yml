@@ -31,13 +31,18 @@ jobs:
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
           git config user.name "calomaps-mirror"
           git config user.email "calomaps-mirror@users.noreply.github.com"
-          # Build a tree WITHOUT .github so the student repo stays clean.
+          # Build a tree WITHOUT instructor-only paths so the student repo stays clean:
+          #   .github/               (this workflow; no source-branch mention)
+          #   docs/teaching_plan.md  (instructor reference: scaffold design + expected results)
+          #   docs/figures/          (rendered outputs of the worked notebooks = answer plots)
           tmpidx="$(mktemp)"; rm -f "$tmpidx"
           GIT_INDEX_FILE="$tmpidx" git read-tree HEAD
           GIT_INDEX_FILE="$tmpidx" git rm -r --cached --quiet .github || true
+          GIT_INDEX_FILE="$tmpidx" git rm --cached --quiet docs/teaching_plan.md || true
+          GIT_INDEX_FILE="$tmpidx" git rm -r --cached --quiet docs/figures || true
           tree="$(GIT_INDEX_FILE="$tmpidx" git write-tree)"
           rm -f "$tmpidx"
           snap="$(git commit-tree "$tree" -m 'CALOMAPS student edition - course materials')"
           GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes" \
             git push --force git@github.com:murtaza-safdari/CALOMAPS-students.git "${snap}:refs/heads/main"
-          echo "Mirrored $(git rev-parse --short HEAD) (.github stripped) -> CALOMAPS-students main as ${snap}"
+          echo "Mirrored $(git rev-parse --short HEAD) (instructor paths stripped) -> CALOMAPS-students main as ${snap}"
