@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Infrastructure-level quirks that bite when running CALOMAPS on the Fermilab Elastic Analysis Facility (EAF) and its SSHFS-mounted `/nashome` shared home. Each entry is a known pattern with a workaround.
+Infrastructure-level quirks that bite when running CALOMAPS on the Fermilab Elastic Analysis Facility (EAF). Each entry is a known pattern with a workaround.
 
 For **project-level errors** (your `ddsim` exited non-zero, a notebook cell threw a NameError, etc.), see [handbook.md §14](handbook.md#14-common-gotchas) instead.
 
@@ -8,9 +8,9 @@ For **project-level errors** (your `ddsim` exited non-zero, a notebook cell thre
 
 ## SSHFS occasionally writes zero-byte files
 
-**Symptom.** A `cp` (or git internal write, or `python -m venv`, or any small-file write) onto the `/nashome`-via-SSHFS mount succeeds, but the resulting file is **zero bytes** even though `ls` shows the correct size. Reading the file later reveals it's all NULs.
+*Only applies if you use the optional laptop SSHFS mount (handbook §16.1). On EAF itself, `/nashome` is native NFS and unaffected — skip this entry.*
 
-Hit during this session on: `elements.xml` (33 KB → 33 KB of NULs after `cp`), `analysis/dashboard.py` (Write tool wrote 0 bytes), `.git/objects/<hash>` (git's internal store, hit twice during `git commit`).
+**Symptom.** A `cp` (or git internal write, or `python -m venv`, or any small-file write) onto the `/nashome`-via-SSHFS mount succeeds, but the resulting file is **zero bytes** even though `ls` shows the correct size. Reading the file later reveals it's all NULs.
 
 **Workaround.**
 
@@ -186,6 +186,6 @@ recipe for the *notebook* path (the shim is still fine for headless scripts).
 
 ## Where else to check
 
-- **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, cell-19/26 bugs, scripts that wipe data dirs, etc.)
-- **`~/lpc-tools/lpc-setup.html`** — the user's personal LPC/EAF onboarding handbook on their laptop, with broader-than-CALOMAPS Fermilab notes
+- **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, scripts that wipe data dirs, etc.)
+- **EAF documentation** — <https://eafjupyter.readthedocs.io/>, and `eaf-support@fnal.gov` for facility issues
 - The DD4hep, Geant4, and Key4hep upstream issue trackers if you're hitting something deeper.
