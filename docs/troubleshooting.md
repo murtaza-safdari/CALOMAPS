@@ -184,6 +184,16 @@ recipe for the *notebook* path (the shim is still fine for headless scripts).
 
 ---
 
+## Notebook can't import `uproot` (or find `CALOMAPS_HOME`) — you're on the wrong kernel
+
+**Symptom.** A notebook cell fails with `ModuleNotFoundError: No module named 'uproot'`, or a `FileNotFoundError` on the geometry XML / `.root` data because `CALOMAPS_HOME` resolved somewhere that doesn't exist.
+
+**Cause.** A JupyterLab kernel is launched by the notebook **server**, not by a terminal — so it inherits **nothing** you `source`d in a terminal: not the Key4hep stack that provides `uproot`/`numpy`, and not `$CALOMAPS_HOME` / `$CALOMAPS_DATA_BASE`. The generic **"Python 3 (ipykernel)"** in the picker is the server's bare `/opt/conda` Python and has none of the Key4hep packages. (Subtlety: a *sourced terminal's* `jupyter kernelspec list` shows a **different** set of kernels than the notebook picker — the picker is the server's list. Check the server's view with `/opt/conda/bin/jupyter kernelspec list`.)
+
+**Fix.** Use the kernels whose launcher *sources the environment itself*: **`Key4hep (CPU)`** for notebooks 00–02 and **`Key4hep + GPU`** for notebook 03. `source ~/setup_calomaps.sh` registers `Key4hep (CPU)` (reload the JupyterLab browser tab if the picker doesn't list it yet); `bash setup/setup_gpu_kernel.sh` registers the GPU one. The notebooks are saved to auto-select the right kernel, so this usually only bites if you switch kernels by hand. (The notebooks also self-locate `CALOMAPS_HOME` from the kernel's working directory, so they still work even though the kernel has no `$CALOMAPS_HOME` set.)
+
+---
+
 ## JupyterLab tab hangs / "reloads forever"
 
 **Symptom.** The JupyterLab tab spins or reloads endlessly and never lands in the Lab UI. Reloading the same Lab URL doesn't help — it just keeps retrying. This is almost always a **hung single-user server (your spawned pod)**, not an EAF outage.
