@@ -813,7 +813,7 @@ print('cuda available:', torch.cuda.is_available())
 print('device:', torch.cuda.get_device_name(0))"
 
 # Train
-/tmp/cu_torch_env/bin/python $CALOMAPS_HOME/analysis/train_ensembles.py
+/tmp/cu_torch_env/bin/python $CALOMAPS_HOME/analysis/train_ensembles.py --particle gamma
 ```
 
 `/tmp` on EAF is overlay, several TB free, but **wiped on container restart** — re-do the install each fresh session.

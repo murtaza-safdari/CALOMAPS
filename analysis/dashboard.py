@@ -151,7 +151,7 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     # Panel 1: Reconstructed Linearity
     fig, ax = plt.subplots(figsize=(6, 4.5))
     for key, (et, resp, _) in reco_results.items():
-        ax.plot(et, resp, color=READOUT_COLORS[key], lw=2, label=READOUT_LABELS[key])
+        ax.plot(et, resp, color=READOUT_COLORS.get(key, "gray"), lw=2, label=READOUT_LABELS.get(key, key))
     ax.axhline(1.0, color="black", linestyle="--", alpha=0.5)
     ax.set_ylim(0.8, 1.2)
     ax.set_title("Reconstructed Linearity ($E_{reco}/E_{true}$)", fontsize=13)
@@ -171,7 +171,7 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     fig, axes = plt.subplots(1, 2, figsize=(16, 6.5))
 
     for key, (et, _, res) in reco_results.items():
-        axes[0].plot(et, res, color=READOUT_COLORS[key], lw=2, label=READOUT_LABELS[key])
+        axes[0].plot(et, res, color=READOUT_COLORS.get(key, "gray"), lw=2, label=READOUT_LABELS.get(key, key))
     axes[0].set_title("Reconstructed Resolution ($\\sigma_{reco}/E_{true}$)", fontsize=13)
     axes[0].set_xlabel("True Beam Energy ($E_{true}$) [GeV]")
     axes[0].set_ylabel("Energy Resolution")
@@ -179,8 +179,8 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     axes[0].grid(True, alpha=0.3)
 
     for key, (et, _, res) in reco_results.items():
-        axes[1].plot(1.0 / np.sqrt(et), res, color=READOUT_COLORS[key], lw=2,
-                     label=READOUT_LABELS[key])
+        axes[1].plot(1.0 / np.sqrt(et), res, color=READOUT_COLORS.get(key, "gray"), lw=2,
+                     label=READOUT_LABELS.get(key, key))
     axes[1].set_title("Stochastic Resolution ($\\sigma/E$ vs $1/\\sqrt{E}$)",
                       fontsize=13, pad=40)
     axes[1].set_xlabel("$1/\\sqrt{E_{true}}$ [GeV$^{-1/2}$]")
