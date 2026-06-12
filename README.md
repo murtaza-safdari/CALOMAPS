@@ -40,7 +40,7 @@ Everything runs in a browser JupyterLab session on EAF — no software is instal
 
    `source` runs the script inside your current shell so the variables it sets persist. The script loads the Key4hep software stack (Geant4, ROOT, DD4hep, Python libraries) from CVMFS — a read-only network filesystem that streams pre-installed software on demand, so nothing lands in your home quota — and sets `$CALOMAPS_HOME` (the repo) and `$CALOMAPS_DATA_BASE` (where simulation output goes). It is safe to source repeatedly. Confirm the environment with the smoke test in [docs/handbook.md](docs/handbook.md) §8.
 
-6. **Kernels.** Notebooks 00–02 run on the default **`python3`** kernel — on the EAF image this is the Key4hep stack — or **`Python (Key4hep)`** if that entry appears in your selector. Notebook 03 needs the **`Key4hep + GPU`** kernel: register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (~5 min; re-run it if the server is restarted). Details: handbook §6.4 and §11.2.
+6. **Kernels.** Notebooks 00–02 use the **`Key4hep (CPU)`** kernel, which `setup_calomaps.sh` registered for you in step 5 (reload the JupyterLab browser tab if the picker doesn't list it yet). Don't pick the generic "Python 3 (ipykernel)" — that base Python has no `uproot`. Notebook 03 needs the **`Key4hep + GPU`** kernel: register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (~5 min; re-run if the server restarts). Details: handbook §6.4 and §11.2.
 
 The full setup reference — accounts, spawner profiles, the storage map, and the GPU kernel — is [docs/handbook.md](docs/handbook.md) §6.
 
