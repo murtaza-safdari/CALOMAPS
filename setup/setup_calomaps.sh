@@ -75,11 +75,12 @@ EOF
 [ "$_cpu_was_new" = 1 ] && echo "Registered Jupyter kernel 'Key4hep (CPU)' for nb00/01/02 (reload JupyterLab to see it)."
 
 # --- 3. Project root + executable sim scripts ------------------------------
-# First letter of $USER picks the /nashome/<X>/<username>/ bucket.
-USER_LETTER="${USER:0:1}"
-export CALOMAPS_HOME="${CALOMAPS_HOME:-/nashome/${USER_LETTER}/${USER}/CALOMAPS}"
-# A fresh `git clone` onto the SSHFS /nashome mount drops the +x bit on shell
-# scripts. Restore it so generate_*.sh can be run directly.
+# Locate the repo root from THIS script's own path (resolved through the
+# ~/setup_calomaps.sh symlink), so it works wherever you cloned -- $HOME, /nashome,
+# anywhere. Override by exporting CALOMAPS_HOME before sourcing.
+export CALOMAPS_HOME="${CALOMAPS_HOME:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+# Make the sim driver scripts executable. git usually preserves the +x bit, but
+# some filesystems / mirrored snapshots can drop it, so restore it as a safety net.
 if [ -d "${CALOMAPS_HOME}/sim" ]; then
   chmod +x "${CALOMAPS_HOME}"/sim/*.sh 2>/dev/null || true
 fi
