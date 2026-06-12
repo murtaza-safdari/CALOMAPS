@@ -125,7 +125,7 @@ find .git -name '._*' -type f -delete
 **Workaround.**
 
 - For interactive notebook work: open the notebook in **JupyterLab UI**, pick the `Key4hep + GPU` kernel from the kernel selector. This path works.
-- For programmatic code execution: use the **`Python (Key4hep)`** kernel (different kernelspec, sources CVMFS in its own launcher) — it spawns cleanly from the REST API. Or use a terminal + subprocess, as in the API-500 workaround above.
+- For programmatic code execution: use the **`Key4hep (CPU)`** kernel (different kernelspec, sources CVMFS in its own launcher) — it spawns cleanly from the REST API. Or use a terminal + subprocess, as in the API-500 workaround above.
 
 ---
 
@@ -181,6 +181,22 @@ env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir torch \
 torch/numpy/scipy/matplotlib (no ROOT/uproot), so a self-contained venv covers it
 without CVMFS at all. This supersedes the older `~/my_gpu_env` + `sys.path`-shim
 recipe for the *notebook* path (the shim is still fine for headless scripts).
+
+---
+
+## JupyterLab tab hangs / "reloads forever"
+
+**Symptom.** The JupyterLab tab spins or reloads endlessly and never lands in the Lab UI. Reloading the same Lab URL doesn't help — it just keeps retrying. This is almost always a **hung single-user server (your spawned pod)**, not an EAF outage.
+
+**Workaround.** Go around the dead server via the **Hub control panel**, not the Lab tab:
+
+1. Open the Hub home directly: <https://eaf.fnal.gov/hub/home> (don't reload the Lab tab).
+2. If your server shows **running** → click **Stop My Server**, wait for it to fully stop, then **Start My Server** to respawn a fresh pod. This clears a hung kernel/server in the large majority of cases.
+3. Stuck on **"Spawning… / pending"** for more than ~2–3 min → backend-side (the pod can't schedule, or a CephFS `/home` PVC hiccup), not you. Wait, then retry; if it never comes up it's a facility issue.
+4. Bounced to a **login** page → your SSO/CILogon session expired; re-authenticate.
+5. Even `/hub/home` won't load → facility outage or your network. Recall EAF is only reachable from the Fermilab network/VPN (see "Getting started on EAF" step 1); try another network, and check the EAF status / `#eaf-users` support channel.
+
+Nothing is lost across a restart: `/nashome` (your `$CALOMAPS_HOME`), `/exp`, and CVMFS all persist; only the per-pod `/home/<user>` PVC is container-local (and it survives a restart too). There is no way to "kick" a hung pod from your laptop — the Hub control panel is the only lever.
 
 ---
 
