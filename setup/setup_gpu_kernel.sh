@@ -45,9 +45,9 @@ echo "[1/4] Creating venv at $VENV (python: $PYBIN)"
 
 # Install with a CLEAN PYTHONPATH so packages land in the venv (not shadowed by
 # CVMFS) and torch's deps resolve to the venv copies.
-echo "[2/4] Installing numpy / scipy / matplotlib / ipykernel"
+echo "[2/4] Installing numpy / scipy / matplotlib / ipykernel / uproot / awkward"
 TMPDIR=/tmp env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir --ignore-installed \
-    numpy scipy matplotlib ipykernel
+    numpy scipy matplotlib ipykernel uproot awkward
 echo "[3/4] Installing CUDA (cu121) PyTorch (~4.4 GB; can take several minutes on a busy EAF)"
 TMPDIR=/tmp env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir \
     torch --index-url https://download.pytorch.org/whl/cu121

@@ -121,6 +121,8 @@ READOUT_COLORS = {
     "MIP":     "forestgreen",
     "Hits":    "crimson",
     "Cluster": "darkorchid",
+    "Cluster (baseline)": "darkorchid",
+    "Cluster (improved)": "teal",
 }
 
 READOUT_LABELS = {
@@ -128,6 +130,8 @@ READOUT_LABELS = {
     "MIP":     "MIP Proxy",
     "Hits":    "Raw Hits",
     "Cluster": "Naive 2D Clustering",
+    "Cluster (baseline)": "Cluster (baseline)",
+    "Cluster (improved)": "Cluster (improved)",
 }
 
 
