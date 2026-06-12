@@ -487,7 +487,7 @@ CALOMAPS_GUN_ENERGY_GEV=50 ddsim \
 
 (`CALOMAPS_GUN_ENERGY_GEV=50` gives a clean mono-energetic 50 GeV beam — the project's own gun mechanism, §4 — instead of the default 5–400 GeV spectrum.)
 
-Inspect the output:
+Inspect the output (in a Python session — run `python3` in the same terminal, or a scratch cell on the **Key4hep (CPU)** kernel):
 
 ```python
 import uproot, numpy as np
@@ -526,14 +526,17 @@ The real datasets come from [`sim/generate_batched.sh`](../sim/generate_batched.
 
 ```bash
 source ~/setup_calomaps.sh
-bash $CALOMAPS_HOME/sim/generate_batched.sh
+# Start modest — 40 jobs × 20 events = 800 events (a few minutes, ~1 GB):
+CALOMAPS_NJOBS=40 bash $CALOMAPS_HOME/sim/generate_batched.sh
+# Full production (opt-in) — 1000 jobs × 20 events ≈ 21 GB:
+# bash $CALOMAPS_HOME/sim/generate_batched.sh
 ```
 
-Defaults: 1000 jobs × 20 events each = **20,000 events**, uniform momentum 5–400 GeV, written to `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/sim_photons_part*.root`. Runs in batches of 20 parallel jobs.
+The bare `generate_batched.sh` defaults to 1000 jobs × 20 events = **20,000 events** (~21 GB, near a ~23 GB `/home` quota), uniform momentum 5–400 GeV, written to `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/sim_photons_part*.root`, in batches of 20 parallel jobs — so size it with `CALOMAPS_NJOBS` until you actually need the full set.
 
 **Rough timing**: ~30 minutes to 2 hours wall time depending on EAF load.
 
-⚠️ **Before running**: the script's first step is `rm -f $OUT_DIR/sim_<particle>_part*.root` (e.g. `sim_photons_part*` for gamma) — it nukes the existing dataset for that particle. If you want to keep the current 21 GB, change `DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run.
+⚠️ **Before running**: the script's first step is `rm -f $OUT_DIR/sim_<particle>_part*.root` (e.g. `sim_photons_part*` for gamma) — so re-running **replaces** that particle's dataset rather than adding to it. To keep an existing run, set a different `CALOMAPS_DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run, and check for the `$OUT_DIR/SIM_COMPLETE.txt` marker to confirm it finished.
 
 For energy-range studies, [`sim/generate_dataset.sh`](../sim/generate_dataset.sh) is a simpler 200×100 variant.
 

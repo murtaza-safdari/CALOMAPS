@@ -2,7 +2,7 @@
 
 A research framework for digital electromagnetic calorimeter (DECAL) studies using simulated Monolithic Active Pixel Sensor (MAPS) silicon layers. CALOMAPS pairs a DD4hep / Geant4 simulation of a custom 100 µm-pitch silicon-tungsten ECal barrel with a PyTorch Deep Quantile Ensemble surrogate model and a Neyman-construction energy reconstruction, producing the standard 3-panel calorimeter performance dashboard (linearity, resolution, stochastic term).
 
-The pipeline runs end-to-end on the [Fermilab Elastic Analysis Facility (EAF)](https://eaf.fnal.gov). The analysis notebooks (`01 → 02 → 03`) ship as **scaffolds**: the context, plumbing, and plotting are given; the science cells are left blank, each stating a task, a hint, and a sanity check on the output. Reference solutions are not distributed with this repository. The clustering study at the end of notebook 03 is open — no reference solution exists, because the answer isn't known.
+The pipeline runs end-to-end on the [Fermilab Elastic Analysis Facility (EAF)](https://eaf.fnal.gov). Notebook 00 generates your data; the analysis notebooks (`01 → 02 → 03`) ship as **scaffolds**: the context, plumbing, and plotting are given; the science cells are left blank, each stating a task, a hint, and a sanity check on the output. Reference solutions are not distributed with this repository. The clustering study at the end of notebook 03 is open — no reference solution exists, because the answer isn't known.
 
 ---
 
@@ -44,7 +44,7 @@ Everything runs in a browser JupyterLab session on EAF — no software is instal
 
    > **Disk note:** simulation data goes to `$CALOMAPS_DATA_BASE` (defaults to `~/CALOMAPS-data` on your `/home`, ~23 GB quota). That quota is all you have for now, so keep datasets modest and delete runs you no longer need.
 
-6. **Kernels.** Notebooks 00–02 use the **`Key4hep (CPU)`** kernel, which `setup_calomaps.sh` registered for you in step 5 (reload the JupyterLab browser tab if the picker doesn't list it yet). Don't pick the generic "Python 3 (ipykernel)" — that base Python has no `uproot`. Notebook 03 needs the **`Key4hep + GPU`** kernel: register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (~5 min; re-run if the server restarts). Details: handbook §6.4 and §11.2.
+6. **Kernels.** Notebooks 00–02 use the **`Key4hep (CPU)`** kernel, which `setup_calomaps.sh` registered for you in step 5 (reload the JupyterLab browser tab if the picker doesn't list it yet). Don't pick the generic "Python 3 (ipykernel)" — that base Python has no `uproot`. Notebook 03 needs the **`Key4hep + GPU`** kernel: register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (~5–10 min — downloads ~4.4 GB of CUDA torch, longer on a busy EAF; re-run if the server restarts). Details: handbook §6.4 and §11.2.
 
 The full setup reference — accounts, spawner profiles, the storage map, and the GPU kernel — is [docs/handbook.md](docs/handbook.md) §6.
 
