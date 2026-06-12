@@ -425,13 +425,12 @@ What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 5. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` (and `mkdir -p` it) — where simulation data lives.
 6. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
 
-The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't kill your shell. Source once per terminal. Notebooks don't need it — the JupyterLab kernel inherits CVMFS at spawn.
+The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't kill your shell. Source once per terminal. Sourcing also **registers the `Key4hep (CPU)` Jupyter kernel** that the notebooks use (see below) — a JupyterLab kernel is launched by the notebook server and does **not** inherit a terminal's environment, so it needs a kernel whose launcher sources Key4hep itself.
 
 #### Notebook kernels
 
-- **Notebooks 00, 01, 02** (CPU) run on the Key4hep stack. In the JupyterLab kernel selector pick **`python3`** — on the EAF image this is the CVMFS Key4hep build (it ships `uproot`, `numpy`, `awkward`) — or **`Python (Key4hep)`** if that entry is present (a hand-registered alias for the same stack). Either works.
+- **Notebooks 00, 01, 02** (CPU) use the **`Key4hep (CPU)`** kernel, which `setup_calomaps.sh` registers for you (its launcher sources the Key4hep stack, so `uproot` / `awkward` / `numpy` are importable). The notebooks are saved to select it automatically; if the picker doesn't show it yet, **reload the JupyterLab browser tab** after sourcing. Do **not** pick the generic **`Python 3 (ipykernel)`** — that's the server's base `/opt/conda` Python and has no `uproot`.
 - **Notebook 03** (GPU training) needs the **`Key4hep + GPU`** kernel from `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2).
-- If neither CPU entry has `uproot`, register one yourself after sourcing the env: `python -m ipykernel install --user --name key4hep --display-name "Python (Key4hep)"`.
 
 ### 6.5 Editing files
 
@@ -552,7 +551,7 @@ Both scripts resolve the geometry + steering by absolute path, so they run corre
 
 ## 10. Data extraction
 
-Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipynb) with the **`Python (Key4hep)`** kernel (CPU; extraction is I/O-bound). The cells:
+Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipynb) with the **`Key4hep (CPU)`** kernel (extraction is I/O-bound). The cells:
 
 1. Loop over all `sim_<particle>_part*.root` files in the per-particle dataset directory under `$CALOMAPS_DATA_BASE/` (both derived from the notebook's `PARTICLE` cell).
 2. Per event, compute:

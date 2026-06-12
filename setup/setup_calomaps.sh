@@ -49,6 +49,31 @@ fi
 echo "Injecting OpenGL library hack..."
 export LD_LIBRARY_PATH="$HOME/lib_hack:$LD_LIBRARY_PATH"
 
+# --- 2b. CPU Jupyter kernel for notebooks 00/01/02 -------------------------
+# A JupyterLab GUI kernel is launched by the notebook server and never sources
+# this script, so on its own it has NO Key4hep stack (uproot/awkward/numpy) on
+# PYTHONPATH. Register a kernel whose launcher *sources* Key4hep first — same
+# pattern as setup_gpu_kernel.sh's GPU kernel. Rewritten on every source so it
+# tracks the release pin above.
+_CPU_KDIR="$HOME/.local/share/jupyter/kernels/calomaps_cpu"
+_cpu_was_new=0; [ -f "$_CPU_KDIR/kernel.json" ] || _cpu_was_new=1
+mkdir -p "$_CPU_KDIR"
+cat > "$_CPU_KDIR/wrapper.sh" <<EOF
+#!/bin/bash
+# Source the Key4hep stack so uproot/awkward/numpy import in a GUI-launched kernel.
+source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$KEY4HEP_RELEASE" >/dev/null 2>&1
+exec python -m ipykernel_launcher "\$@"
+EOF
+chmod +x "$_CPU_KDIR/wrapper.sh"
+cat > "$_CPU_KDIR/kernel.json" <<EOF
+{
+ "argv": ["$_CPU_KDIR/wrapper.sh", "-f", "{connection_file}"],
+ "display_name": "Key4hep (CPU)",
+ "language": "python"
+}
+EOF
+[ "$_cpu_was_new" = 1 ] && echo "Registered Jupyter kernel 'Key4hep (CPU)' for nb00/01/02 (reload JupyterLab to see it)."
+
 # --- 3. Project root + executable sim scripts ------------------------------
 # First letter of $USER picks the /nashome/<X>/<username>/ bucket.
 USER_LETTER="${USER:0:1}"
