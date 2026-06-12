@@ -24,13 +24,15 @@ Everything runs in a browser JupyterLab session on EAF — no software is instal
 
 3. **Open a terminal.** File → New → Terminal.
 
-4. **Clone the repository** (into a folder named `CALOMAPS`, so the paths used throughout line up):
+4. **Clone the repository** (into a folder named `CALOMAPS`):
 
    ```bash
-   cd /nashome/${USER:0:1}/$USER/
+   cd ~
    git clone https://github.com/murtaza-safdari/CALOMAPS-students.git CALOMAPS
-   ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_calomaps.sh
+   ln -s ~/CALOMAPS/setup/setup_calomaps.sh ~/setup_calomaps.sh
    ```
+
+   Clone wherever you like — `$HOME` is simplest and always available. `setup_calomaps.sh` locates the repo from its own path, so nothing needs to match a fixed location.
 
 5. **Load the environment** (in every new terminal):
 
@@ -38,7 +40,9 @@ Everything runs in a browser JupyterLab session on EAF — no software is instal
    source ~/setup_calomaps.sh
    ```
 
-   `source` runs the script inside your current shell so the variables it sets persist. The script loads the Key4hep software stack (Geant4, ROOT, DD4hep, Python libraries) from CVMFS — a read-only network filesystem that streams pre-installed software on demand, so nothing lands in your home quota — and sets `$CALOMAPS_HOME` (the repo) and `$CALOMAPS_DATA_BASE` (where simulation output goes). It is safe to source repeatedly. Confirm the environment with the smoke test in [docs/handbook.md](docs/handbook.md) §8.
+   `source` runs the script inside your current shell so the variables it sets persist. The script loads the Key4hep software stack (Geant4, ROOT, DD4hep, Python libraries) from CVMFS — a read-only network filesystem that streams pre-installed software on demand, so nothing lands in your home quota — and sets `$CALOMAPS_HOME` (the repo, located automatically) and `$CALOMAPS_DATA_BASE` (where simulation output goes). It is safe to source repeatedly. Confirm the environment with the smoke test in [docs/handbook.md](docs/handbook.md) §8.
+
+   > **Disk note:** simulation data goes to `$CALOMAPS_DATA_BASE` (defaults to `~/CALOMAPS-data` on your `/home`, ~23 GB quota). That quota is all you have for now, so keep datasets modest and delete runs you no longer need.
 
 6. **Kernels.** Notebooks 00–02 use the **`Key4hep (CPU)`** kernel, which `setup_calomaps.sh` registered for you in step 5 (reload the JupyterLab browser tab if the picker doesn't list it yet). Don't pick the generic "Python 3 (ipykernel)" — that base Python has no `uproot`. Notebook 03 needs the **`Key4hep + GPU`** kernel: register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (~5 min; re-run if the server restarts). Details: handbook §6.4 and §11.2.
 

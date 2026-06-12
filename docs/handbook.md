@@ -376,16 +376,15 @@ Stages 1-2 happen in a JupyterLab terminal (or via `sim/generate_batched.sh`). S
 3. Wait ~30s. You land in JupyterLab.
 4. Open a terminal: **File → New → Terminal**.
 
-**Why this profile**: CALOMAPS needs `/nashome` (mounted) and a GPU. The CMS profile mounts `/uscms_data/` (not needed here) and uses a different image. The GPU itself is only used by notebook 03, but everything runs fine on this one profile.
+**Why this profile**: it provides CVMFS and a GPU on the right image (you don't need `/nashome` — clone into `$HOME`, §6.3). The CMS profile mounts `/uscms_data/` (not needed here) and uses a different image. The GPU itself is only used by notebook 03, but everything runs fine on this one profile.
 
 ### 6.3 Get the code
 
 ```bash
-# In a JupyterLab terminal:
-cd /nashome/${USER:0:1}/$USER/
-# Clone into a folder named CALOMAPS so the paths below (and setup_calomaps.sh) line up:
+# In a JupyterLab terminal -- clone into $HOME (always available; no /nashome needed):
+cd ~
 git clone https://github.com/murtaza-safdari/CALOMAPS-students.git CALOMAPS
-ln -s /nashome/${USER:0:1}/$USER/CALOMAPS/setup/setup_calomaps.sh ~/setup_calomaps.sh
+ln -s ~/CALOMAPS/setup/setup_calomaps.sh ~/setup_calomaps.sh
 ```
 
 The symlink lets you do `source ~/setup_calomaps.sh` from anywhere; the actual launcher lives in the repo. (You're already on the right branch — the student repo ships the materials as its `main`, so there's nothing to check out.)
@@ -420,8 +419,8 @@ What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 
 1. `source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01` — loads Key4hep (Geant4, ROOT, DD4hep, uproot, NumPy, PyTorch CPU). ~30 GB from CVMFS.
 2. Creates `~/lib_hack/libOpenGL.so.0` if missing, then prepends `~/lib_hack` to `LD_LIBRARY_PATH` — the OpenGL workaround for DD4hep (see above).
-3. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit, which a fresh `git clone` onto the `/nashome` mount drops.
-4. `export CALOMAPS_HOME=/nashome/<X>/<username>/CALOMAPS` — project root, derived from `$USER`.
+3. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit a fresh `git clone` can drop.
+4. Sets `CALOMAPS_HOME` to the repo root, located automatically from the script's own path (override by exporting it before sourcing).
 5. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` (and `mkdir -p` it) — where simulation data lives.
 6. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
 
@@ -451,7 +450,7 @@ Everything runs inside the EAF JupyterLab container:
 ┌────────────────────────────────────────────────┐
 │  EAF JupyterLab container                        │
 │                                                  │
-│  /nashome/<X>/<u>/CALOMAPS/      (~4 MB source)  │
+│  ~/CALOMAPS/  (your clone)       (~4 MB source)  │
 │  ├── geometry/   sim/   analysis/                │
 │  ├── notebooks/  docs/  setup/                   │
 │                                                  │
@@ -465,9 +464,9 @@ Everything runs inside the EAF JupyterLab container:
 └────────────────────────────────────────────────┘
 ```
 
-**Key principle**: the source tree on `/nashome` is small and shared (also reachable from a
-laptop mount — §16.1); the 21 GB of simulation data lives on `/home/<u>`, which is
-**container-local to EAF**. The two are connected by `$CALOMAPS_DATA_BASE`.
+**Key principle**: the source tree (wherever you cloned — usually `$HOME`) is small; it's also
+reachable from a laptop SSHFS mount if you have a `/nashome` home (§16.1); the 21 GB of simulation data lives on `/home/<u>`, which is
+**container-local to EAF**. The two are connected by `$CALOMAPS_DATA_BASE`; since `/home` is only ~23 GB, keep datasets modest and clean up old runs (see the README disk note).
 
 ---
 

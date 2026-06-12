@@ -87,7 +87,7 @@ import torch    # now resolves to your venv-installed cu121 build
 **Workaround.** The usual large-and-disposable culprits:
 - `~/.cache/pip` — pip's wheel cache. Routinely 2-3 GB. Safe to delete: `rm -rf ~/.cache/pip`.
 - `~/.conda/pkgs` — conda's package cache. Hundreds of MB. Safe to delete (`conda clean --packages` or `rm -rf ~/.conda/pkgs`).
-- Old project data — large `.root` / `.npz` files left behind by previous experiments. Move to `/exp/...` (huge persistent CephFS) or delete.
+- Old project data — large `.root` / `.npz` files left behind by previous runs. Delete them to free space — `/home` is your only quota for now.
 
 If you want a persistent-but-isolated install of something big (e.g., a CUDA torch venv) and `/home` is tight, install to `/tmp/<name>` instead — EAF's `/tmp` is an overlay filesystem with several TB free. The cost: `/tmp` is wiped on container restart.
 
@@ -206,7 +206,7 @@ recipe for the *notebook* path (the shim is still fine for headless scripts).
 4. Bounced to a **login** page → your SSO/CILogon session expired; re-authenticate.
 5. Even `/hub/home` won't load → facility outage or your network. Recall EAF is only reachable from the Fermilab network/VPN (see "Getting started on EAF" step 1); try another network, and check the EAF status / `#eaf-users` support channel.
 
-Nothing is lost across a restart: `/nashome` (your `$CALOMAPS_HOME`), `/exp`, and CVMFS all persist; only the per-pod `/home/<user>` PVC is container-local (and it survives a restart too). There is no way to "kick" a hung pod from your laptop — the Hub control panel is the only lever.
+Nothing is lost across a restart: your clone and `$CALOMAPS_DATA_BASE` live under `/home/<user>`, a per-pod PVC that persists across restarts, and CVMFS persists too. There is no way to "kick" a hung pod from your laptop — the Hub control panel is the only lever.
 
 ---
 
