@@ -27,7 +27,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from quantilenet import load_ensemble
 from dashboard import (
-    get_ensemble_metrics, get_interpolators, reco_metrics_over_grid,
+    get_interpolators, reco_metrics_over_grid,
     plot_dashboard,
 )
 
