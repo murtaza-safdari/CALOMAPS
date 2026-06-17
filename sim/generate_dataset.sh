@@ -10,10 +10,10 @@ EVENTS_PER_JOB="${CALOMAPS_NEVENTS:-100}"  # Events per job
 # --- PARTICLE / DATASET ---
 # Particle type is read from CALOMAPS_GUN_PARTICLE (default "gamma") and passed
 # through to run_sim.py. Defaults reproduce the original photon dataset exactly:
-#   gamma -> data_spectrum_100um_500GeV/sim_photons_part*.root
+#   gamma -> data_spectrum_100um_400GeV/sim_photons_part*.root
 # A non-photon run gets its own dataset dir + file prefix, e.g.:
 #   CALOMAPS_GUN_PARTICLE=pi+ bash generate_dataset.sh
-#     -> data_spectrum_100um_500GeV_piplus/sim_piplus_part*.root
+#     -> data_spectrum_100um_400GeV_piplus/sim_piplus_part*.root
 export CALOMAPS_GUN_PARTICLE="${CALOMAPS_GUN_PARTICLE:-gamma}"
 case "$CALOMAPS_GUN_PARTICLE" in
     gamma) TAG="photons" ;;
@@ -22,9 +22,9 @@ case "$CALOMAPS_GUN_PARTICLE" in
     *)     TAG="$(echo "$CALOMAPS_GUN_PARTICLE" | sed 's/+/plus/g; s/-/minus/g')" ;;
 esac
 if [ "$CALOMAPS_GUN_PARTICLE" = "gamma" ]; then
-    DATASET_NAME="${CALOMAPS_DATASET_NAME:-data_spectrum_100um_500GeV}"
+    DATASET_NAME="${CALOMAPS_DATASET_NAME:-data_spectrum_100um_400GeV}"
 else
-    DATASET_NAME="${CALOMAPS_DATASET_NAME:-data_spectrum_100um_500GeV_${TAG}}"
+    DATASET_NAME="${CALOMAPS_DATASET_NAME:-data_spectrum_100um_400GeV_${TAG}}"
 fi
 FILE_PREFIX="sim_${TAG}_part"
 OUT_DIR="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}/${DATASET_NAME}"

@@ -5,15 +5,15 @@ notebooks/03_ml_training_and_eval.ipynb — it imports `train_one_ensemble`
 from `quantilenet.py` and shows the training loop in the notebook UI.
 
 This script does:
-  reads $CALOMAPS_HOME/models/decal_extracted_data.npz
+  reads $CALOMAPS_HOME/models/decal_extracted_data_<particle>.npz
   trains 20 networks per readout (80 total)
-  saves to $CALOMAPS_HOME/models/saved_ensembles_gpu_v2/
+  saves to $CALOMAPS_HOME/models/saved_ensembles_gpu_<particle>/
 
 GPU prerequisite: see handbook.md §11.2 for the cu121 torch install.
 The sys.path shim below picks up /tmp/cu_torch_env when it exists (Path B).
 
 Usage from a terminal:
-    /tmp/cu_torch_env/bin/python $CALOMAPS_HOME/analysis/train_ensembles.py
+    python $CALOMAPS_HOME/analysis/train_ensembles.py --particle gamma
 """
 import sys, os
 
@@ -32,9 +32,16 @@ if HERE not in sys.path:
 from quantilenet import train_one_ensemble, save_ensemble
 
 
+import argparse
+_ap = argparse.ArgumentParser(description="Train 4 Deep Quantile Ensembles (headless).")
+_ap.add_argument("--particle", default=os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma"),
+                 help="gamma or pi+ (default: gamma, or $CALOMAPS_GUN_PARTICLE)")
+_args = _ap.parse_args()
+PART_TAG = "gamma" if _args.particle == "gamma" else _args.particle.replace("+", "plus").replace("-", "minus")
+
 CALOMAPS_HOME = os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS"))
-NPZ = os.path.join(CALOMAPS_HOME, "models", "decal_extracted_data.npz")
-OUT_DIR = os.path.join(CALOMAPS_HOME, "models", "saved_ensembles_gpu_v2")
+NPZ = os.path.join(CALOMAPS_HOME, "models", f"decal_extracted_data_{PART_TAG}.npz")
+OUT_DIR = os.path.join(CALOMAPS_HOME, "models", f"saved_ensembles_gpu_{PART_TAG}")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 

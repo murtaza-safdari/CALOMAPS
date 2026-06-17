@@ -1,14 +1,13 @@
 """Plotting + reconstruction utilities for the DECAL 3-panel physics dashboard.
 
 Given trained `QuantileNet` ensembles, this module:
-  1. evaluates the ensemble on a smooth energy grid to get the median surrogate
-     and quantile bands (`get_ensemble_metrics`),
-  2. builds SciPy interpolators on a fine grid for fast Brent-method inversion
-     (`get_interpolators`),
-  3. runs Neyman-construction reconstruction over a test energy set
+  1. builds SciPy interpolators of the ensemble-averaged quantile curves vs true
+     energy, with quantile monotonicity enforced (`get_interpolators`),
+  2. runs Neyman-construction reconstruction over a test energy set
      (`reco_metrics_over_grid`),
-  4. produces the 3-panel dashboard: reconstructed linearity, reconstructed
-     resolution vs E, stochastic resolution vs 1/sqrt(E) (`plot_dashboard`).
+  3. produces the 3-panel dashboard: a median self-inversion *self-consistency*
+     check, reconstructed resolution vs E, and the stochastic resolution vs
+     1/sqrt(E) with a fitted a/sqrt(E) (+) b (+) c/E term (`plot_dashboard`).
 
 Used by analysis/verify_ensembles.py and the 03_ml_training_and_eval notebook.
 """
@@ -16,41 +15,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from scipy.interpolate import interp1d
-from scipy.optimize import brentq
-
-
-# ---- ensemble evaluation -----------------------------------------------------
-
-def get_ensemble_metrics(ensemble, x_max: float, y_frac_max: float,
-                         e_grid: np.ndarray, device: torch.device,
-                         is_linear_analog: bool = False):
-    """Evaluate the ensemble on a smooth E grid; return (median, resolution).
-
-    `is_linear_analog=True` uses a fixed slope (estimated between 10 and 50 GeV)
-    instead of the local gradient — appropriate for the True Analog readout
-    where the response should be perfectly linear at low E.
-    """
-    x_tensor = torch.tensor(e_grid / x_max, dtype=torch.float32,
-                            device=device).unsqueeze(1)
-    preds = []
-    for m in ensemble:
-        m.eval()
-        with torch.no_grad():
-            preds.append(m(x_tensor).cpu().numpy())
-    avg = np.mean(preds, axis=0)
-    preds_abs = avg * y_frac_max * e_grid[:, None]
-    q_low, q_med, q_high = preds_abs[:, 0], preds_abs[:, 1], preds_abs[:, 2]
-    sigma_y = (q_high - q_low) / 2.0
-
-    if is_linear_analog:
-        idx10 = np.argmin(np.abs(e_grid - 10.0))
-        idx50 = np.argmin(np.abs(e_grid - 50.0))
-        slope = np.full_like(e_grid, (q_med[idx50] - q_med[idx10]) / 40.0)
-    else:
-        slope = np.maximum(np.gradient(q_med, e_grid), 1e-6)
-
-    resolution = sigma_y / slope / e_grid
-    return q_med, resolution
+from scipy.optimize import brentq, curve_fit
 
 
 # ---- Neyman-inversion reconstruction -----------------------------------------
@@ -60,6 +25,11 @@ def get_interpolators(ensemble, x_max: float, y_frac_max: float,
                       e_grid: np.ndarray = None):
     """Build (f_low, f_med, f_high) SciPy interpolators of the ensemble-averaged
     quantile curves vs true energy. Used as input to Brent inversion below.
+
+    The three quantile heads are trained independently, so in sparse/wide regions
+    they can CROSS (q_low > q_med, etc.). We sort the three curves at each energy
+    so the band edges are monotone by construction (q_low <= q_med <= q_high),
+    which keeps the inverted resolution well-defined (non-negative).
     """
     if e_grid is None:
         e_grid = np.linspace(1, 500, 1000)
@@ -72,34 +42,54 @@ def get_interpolators(ensemble, x_max: float, y_frac_max: float,
             preds.append(m(x_tensor).cpu().numpy())
     avg = np.mean(preds, axis=0)
     preds_abs = avg * y_frac_max * e_grid[:, None]
+    preds_abs = np.sort(preds_abs, axis=1)      # enforce quantile monotonicity (anti-crossing)
     f_low = interp1d(e_grid, preds_abs[:, 0], kind="linear", fill_value="extrapolate")
     f_med = interp1d(e_grid, preds_abs[:, 1], kind="linear", fill_value="extrapolate")
     f_high = interp1d(e_grid, preds_abs[:, 2], kind="linear", fill_value="extrapolate")
     return f_low, f_med, f_high
 
 
-def invert_brent(y_obs: float, f_curve, lo: float = 5.0, hi: float = 450.0) -> float:
-    """Find E such that f_curve(E) == y_obs, with graceful saturation handling.
+def invert_brent(y_obs: float, f_curve, lo: float = 5.0, hi: float = 450.0,
+                 hi_max: float = 5000.0) -> float:
+    """Find E such that f_curve(E) == y_obs.
 
-    Brent's method requires the objective to change sign between lo and hi.
-    When the surrogate saturates at high E, that may not be the case — we
-    fall back to clipping to lo or hi as appropriate.
+    Brent's method needs the objective to change sign between `lo` and `hi`. When
+    the (increasing) readout response saturates, the requested `y_obs` may sit
+    above f_curve(hi); we EXTEND the upper bracket geometrically up to `hi_max`
+    before giving up. If `y_obs` lies below f_curve(lo) we clip to `lo` (physical
+    floor). If no bracket exists even at `hi_max` -- genuine saturation, where the
+    readout can never reach `y_obs` -- we return NaN so the caller drops the point
+    rather than silently clipping to a fabricated value (which previously turned
+    the saturation regime into an artificial resolution down-turn).
     """
     def objective(e):
         return float(f_curve(e)) - y_obs
+    if objective(lo) > 0.0:            # y_obs below the curve at lo -> clip to floor
+        return lo
+    h = hi
+    while objective(h) < 0.0 and h < hi_max:
+        h *= 2.0
+    if objective(h) < 0.0:             # cannot bracket within hi_max -> unreliable
+        return float("nan")
     try:
-        return brentq(objective, lo, hi)
+        return brentq(objective, lo, h)
     except ValueError:
-        return hi if objective(hi) < 0 else lo
+        return float("nan")
 
 
 def reco_metrics_over_grid(f_low, f_med, f_high,
                            e_test: np.ndarray = None):
     """Run Neyman reconstruction over a grid of true energies.
 
-    Returns (e_test, response_ratio, resolution). Response is E_reco/E_true
-    (should be ~1 by construction). Resolution uses the Neyman crossover:
-    upper E bound from inverting the *lower* signal quantile, and vice versa.
+    Returns (e_test, response_ratio, resolution).
+
+    `response_ratio` = E_reco/E_true where E_reco inverts the MEDIAN surrogate
+    through ITSELF (y_obs = f_med(E_true)). This is identically 1 for any model,
+    so it is a *self-consistency check of the inversion*, NOT a closure test of
+    the surrogate -- treat it accordingly. `resolution` uses the Neyman crossover
+    (upper E bound from inverting the lower quantile, lower bound from the upper)
+    and is NaN wherever the band edge cannot be reliably inverted (saturation), so
+    the reported curve is automatically restricted to the trustworthy range.
     """
     if e_test is None:
         e_test = np.linspace(10, 400, 100)
@@ -114,6 +104,30 @@ def reco_metrics_over_grid(f_low, f_med, f_high,
     return e_test, np.array(response), np.array(resolution)
 
 
+# ---- stochastic-term fit -----------------------------------------------------
+
+def fit_stochastic(e_test, resolution):
+    """Least-squares fit sigma/E = sqrt((a/sqrt(E))^2 + b^2 + (c/E)^2).
+
+    `a` = stochastic term, `b` = constant term, `c` = noise term. Fits only the
+    finite, positive points (so the NaN-restricted saturation tail is excluded).
+    Returns dict(a, b, c) or None if too few usable points.
+    """
+    e = np.asarray(e_test, float)
+    r = np.asarray(resolution, float)
+    m = np.isfinite(e) & np.isfinite(r) & (e > 0) & (r > 0)
+    if m.sum() < 4:
+        return None
+    def model(E, a, b, c):
+        return np.sqrt((a / np.sqrt(E)) ** 2 + b ** 2 + (c / E) ** 2)
+    try:
+        p, _ = curve_fit(model, e[m], r[m], p0=[0.2, 0.05, 0.5],
+                         bounds=([0, 0, 0], [np.inf, np.inf, np.inf]), maxfev=20000)
+        return {"a": float(p[0]), "b": float(p[1]), "c": float(p[2])}
+    except Exception:
+        return None
+
+
 # ---- the 3-panel dashboard plot ----------------------------------------------
 
 READOUT_COLORS = {
@@ -121,21 +135,25 @@ READOUT_COLORS = {
     "MIP":     "forestgreen",
     "Hits":    "crimson",
     "Cluster": "darkorchid",
+    "Cluster (baseline)": "darkorchid",
+    "Cluster (improved)": "teal",
 }
 
 READOUT_LABELS = {
     "Analog":  "True Analog",
-    "MIP":     "MIP Proxy",
+    "MIP":     "MIP counting",
     "Hits":    "Raw Hits",
     "Cluster": "Naive 2D Clustering",
+    "Cluster (baseline)": "Cluster (baseline)",
+    "Cluster (improved)": "Cluster (improved)",
 }
 
 
 def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     """Produce the 3-panel reconstruction dashboard.
 
-    `reco_results` is a dict keyed by readout name (one of "Analog", "MIP",
-    "Hits", "Cluster") mapping to (e_test, response, resolution) tuples.
+    `reco_results` is a dict keyed by readout name mapping to
+    (e_test, response, resolution) tuples.
 
     If `out_path_prefix` is given, saves to {prefix}_linearity.png and
     {prefix}_resolution.png. If `show` is True, also calls plt.show().
@@ -146,17 +164,19 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
 
-    e_test = next(iter(reco_results.values()))[0]
-
-    # Panel 1: Reconstructed Linearity
+    # Panel 1: median self-inversion self-consistency check (NOT a closure test).
     fig, ax = plt.subplots(figsize=(6, 4.5))
     for key, (et, resp, _) in reco_results.items():
-        ax.plot(et, resp, color=READOUT_COLORS[key], lw=2, label=READOUT_LABELS[key])
+        ax.plot(et, resp, color=READOUT_COLORS.get(key, "gray"), lw=2,
+                label=READOUT_LABELS.get(key, key))
     ax.axhline(1.0, color="black", linestyle="--", alpha=0.5)
     ax.set_ylim(0.8, 1.2)
-    ax.set_title("Reconstructed Linearity ($E_{reco}/E_{true}$)", fontsize=13)
+    ax.set_title("Median Self-Inversion Check ($E_{reco}/E_{true}$)", fontsize=13)
     ax.set_xlabel("True Beam Energy ($E_{true}$) [GeV]")
     ax.set_ylabel("Response Ratio")
+    ax.text(0.5, 0.04, "self-consistency of the inversion ($\\equiv$1 by construction); "
+            "not a surrogate closure test", transform=ax.transAxes, ha="center",
+            va="bottom", fontsize=8, color="0.4")
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -167,11 +187,12 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     else:
         plt.close()
 
-    # Panels 2 + 3: Resolution + Stochastic
+    # Panels 2 + 3: Resolution + Stochastic (with fitted a/sqrt(E) (+) b (+) c/E)
     fig, axes = plt.subplots(1, 2, figsize=(16, 6.5))
 
     for key, (et, _, res) in reco_results.items():
-        axes[0].plot(et, res, color=READOUT_COLORS[key], lw=2, label=READOUT_LABELS[key])
+        axes[0].plot(et, res, color=READOUT_COLORS.get(key, "gray"), lw=2,
+                     label=READOUT_LABELS.get(key, key))
     axes[0].set_title("Reconstructed Resolution ($\\sigma_{reco}/E_{true}$)", fontsize=13)
     axes[0].set_xlabel("True Beam Energy ($E_{true}$) [GeV]")
     axes[0].set_ylabel("Energy Resolution")
@@ -179,9 +200,20 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
     axes[0].grid(True, alpha=0.3)
 
     for key, (et, _, res) in reco_results.items():
-        axes[1].plot(1.0 / np.sqrt(et), res, color=READOUT_COLORS[key], lw=2,
-                     label=READOUT_LABELS[key])
-    axes[1].set_title("Stochastic Resolution ($\\sigma/E$ vs $1/\\sqrt{E}$)",
+        col = READOUT_COLORS.get(key, "gray")
+        fit = fit_stochastic(et, res)
+        lbl = READOUT_LABELS.get(key, key)
+        if fit:
+            lbl += f"  (a={fit['a']:.2f}, b={fit['b']:.3f})"
+        axes[1].plot(1.0 / np.sqrt(et), res, color=col, lw=2, label=lbl)
+        if fit:
+            ef = np.asarray(et, float)
+            ef = ef[np.isfinite(ef) & (ef > 0)]
+            if ef.size:
+                eg = np.linspace(ef.min(), ef.max(), 200)
+                rg = np.sqrt((fit["a"] / np.sqrt(eg)) ** 2 + fit["b"] ** 2 + (fit["c"] / eg) ** 2)
+                axes[1].plot(1.0 / np.sqrt(eg), rg, color=col, lw=1, ls="--", alpha=0.6)
+    axes[1].set_title("Stochastic Resolution ($\\sigma/E$ vs $1/\\sqrt{E}$, fit overlaid)",
                       fontsize=13, pad=40)
     axes[1].set_xlabel("$1/\\sqrt{E_{true}}$ [GeV$^{-1/2}$]")
     axes[1].set_ylabel("Energy Resolution")

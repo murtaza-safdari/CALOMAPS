@@ -35,10 +35,11 @@ SIM.gun.position = (0, 0, 0)
 # Energy: a fixed energy if CALOMAPS_GUN_ENERGY_GEV is set, otherwise a uniform
 # momentum spectrum between PMIN and PMAX.
 if ENERGY:
-    # Mono-energetic beam: pin BOTH energy and a degenerate momentum window so the fixed
-    # energy is unambiguous regardless of ddsim's gun apply-order.
+    # Mono-energetic beam: pin only the MOMENTUM to a degenerate window (|p| = _e). The
+    # truth label downstream is E = sqrt(p^2 + m^2), so do NOT also set gun.energy: for a
+    # massive particle E and |p| cannot both equal _e, and setting both makes the realized
+    # beam depend on ddsim's gun apply-order. One convention (momentum) keeps it unambiguous.
     _e = float(ENERGY)
-    SIM.gun.energy = _e * GeV
     SIM.gun.momentumMin = _e * GeV
     SIM.gun.momentumMax = _e * GeV
 else:
