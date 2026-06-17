@@ -72,7 +72,7 @@ def pid_to_pixelav(pdg):
 
 
 # Rest masses (GeV) for the betagamma-matched pion momentum below.
-_MASS_GEV = {11: 0.000510999, 13: 0.105658, 211: 0.139570}
+_MASS_GEV = {11: 0.000510999, 13: 0.105658, 211: 0.139570, 321: 0.493677, 2212: 0.938272}  # e, mu, pi, K, p
 M_PION_GEV = 0.139570
 
 
@@ -97,7 +97,11 @@ def load_cascade(npz_path):
 
 def si_layer_centers():
     """Per-layer Si depths (mm): perpendicular (face-normal) distance from the barrel axis to
-    each sensor mid-plane (the apothem, built from ECAL_RMIN_MM); compared against the local depth w."""
+    each sensor mid-plane (the apothem, built from ECAL_RMIN_MM); compared against the local depth w.
+
+    NOTE: the slice thicknesses below MUST match geometry/my_custom_ecal.xml -- the single source of
+    truth that nb02's layer_radii() parses from the XML. They agree today; if you change the geometry
+    (pitch / thickness scans), update them here too (ideally refactor layer_radii() into a shared module)."""
     r, centers = ECAL_RMIN_MM, []
     for nrep, w in [(20, 2.5), (10, 5.0)]:
         pitch = w + 0.25 + 0.32 + 0.05 + 0.30 + 0.33   # W + air + Si + Cu + Kapton + air
