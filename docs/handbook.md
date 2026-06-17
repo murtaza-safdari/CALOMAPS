@@ -601,21 +601,23 @@ The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.back
 
 Use the trained ensemble as a surrogate. For a measured readout `y_obs`, find the `E_true` whose predicted readout matches.
 
-[`analysis/dashboard.py`](../analysis/dashboard.py) uses **Brent's method** with graceful clipping:
+[`analysis/dashboard.py`](../analysis/dashboard.py) uses **Brent's method**, extending the bracket (and returning `NaN` rather than clipping) when the surrogate saturates:
 
 ```python
-def invert_brent(y_obs, f_curve, lo=5.0, hi=450.0):
+def invert_brent(y_obs, f_curve, lo=5.0, hi=450.0, hi_max=5000.0):
     def objective(e):
         return float(f_curve(e)) - y_obs
-    try:
-        return brentq(objective, lo, hi)
-    except ValueError:
-        return hi if objective(hi) < 0 else lo
+    if objective(lo) > 0.0:          # y_obs below the curve at lo -> physical floor
+        return lo
+    h = hi
+    while objective(h) < 0.0 and h < hi_max:
+        h *= 2.0                     # extend the upper bracket through saturation
+    if objective(h) < 0.0:
+        return float("nan")          # genuinely cannot bracket -> drop the point
+    return brentq(objective, lo, h)
 ```
 
-Brent is O(log n) on a monotonic surrogate. When the digital surrogate saturates at high E, Brent can't bracket a root → we clip to the boundary instead of crashing.
-
-If you see weird kinks at the high-E end of the dashboard, switch back to pure grid search to confirm it's not an inversion artifact.
+Brent is O(log n) on a monotonic surrogate. An earlier version clipped to a fixed `hi=450` when it couldn't bracket — which made the resolution curve *turn over* at the top of the grid, an inversion artifact that mimicked a saturation knee. Extending the bracket / returning `NaN` fixes that: the reported curve covers only the energies where both band edges truly invert, and rises monotonically through the saturation regime.
 
 ### 12.1 The Neyman crossover
 
