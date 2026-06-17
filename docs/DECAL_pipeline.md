@@ -59,7 +59,7 @@ The most critical section in `my_decal_geom.xml` (or in this project, `my_custom
 
 ## Part 3: Executing the GEANT4 Simulation
 
-`ddsim` is the command-line tool that acts as the steering wheel for GEANT4. Bash loop to fire electrons across the energy spectrum (generates the dataset for the ML model):
+`ddsim` is the command-line tool that acts as the steering wheel for GEANT4. The snippet below is the original illustrative recipe (electrons at a fixed energy grid, 25 um pixels). **The implemented CALOMAPS pipeline differs:** it fires **photons** (`gamma`) over a **uniform 5-400 GeV momentum spectrum** at **100 um** pixels, driven by `sim/run_sim.py` + the `CALOMAPS_GUN_*` environment variables (see notebook 00 / handbook §9). Read the loop below as conceptual:
 
 ```bash
 for E in 5 10 20 50 100 200 300 400; do
