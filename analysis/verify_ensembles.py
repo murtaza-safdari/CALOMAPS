@@ -1,15 +1,15 @@
 """Load trained ensembles and produce the 3-panel reconstruction dashboard.
 
 Reads:
-    $CALOMAPS_HOME/models/decal_extracted_data.npz
+    $CALOMAPS_HOME/models/decal_extracted_data_<particle>.npz
     $CALOMAPS_HOME/models/<ensemble_dir>/ens_{analog,mip,hits,cluster}.pth
 
 Writes:
-    $CALOMAPS_HOME/docs/figures/dashboard_linearity.png
-    $CALOMAPS_HOME/docs/figures/dashboard_resolution.png
+    $CALOMAPS_HOME/models/figures/dashboard_linearity.png
+    $CALOMAPS_HOME/models/figures/dashboard_resolution.png
 
-`ensemble_dir` defaults to "saved_ensembles_gpu_v2" but can be overridden
-via the --ensemble-dir CLI arg.
+`--particle {gamma,pi+}` selects the per-particle npz and the default
+`saved_ensembles_gpu_<particle>` dir (override with --ensemble-dir).
 """
 import sys, os, argparse
 
@@ -27,23 +27,27 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from quantilenet import load_ensemble
 from dashboard import (
-    get_ensemble_metrics, get_interpolators, reco_metrics_over_grid,
+    get_interpolators, reco_metrics_over_grid,
     plot_dashboard,
 )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ensemble-dir", default="saved_ensembles_gpu_v2",
-                        help="Subdir under $CALOMAPS_HOME/models/ holding ens_*.pth files")
+    parser.add_argument("--particle", default=os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma"),
+                        help="gamma or pi+ (default: gamma, or $CALOMAPS_GUN_PARTICLE)")
+    parser.add_argument("--ensemble-dir", default=None,
+                        help="Subdir under $CALOMAPS_HOME/models/ holding ens_*.pth files "
+                             "(default: saved_ensembles_gpu_<particle>)")
     parser.add_argument("--show", action="store_true",
                         help="Also call plt.show() (useful when running inside a notebook).")
     args = parser.parse_args()
+    tag = "gamma" if args.particle == "gamma" else args.particle.replace("+", "plus").replace("-", "minus")
 
     calomaps_home = os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS"))
-    npz_path = os.path.join(calomaps_home, "models", "decal_extracted_data.npz")
-    ens_dir = os.path.join(calomaps_home, "models", args.ensemble_dir)
-    fig_dir = os.path.join(calomaps_home, "docs", "figures")
+    npz_path = os.path.join(calomaps_home, "models", f"decal_extracted_data_{tag}.npz")
+    ens_dir = os.path.join(calomaps_home, "models", args.ensemble_dir or f"saved_ensembles_gpu_{tag}")
+    fig_dir = os.path.join(calomaps_home, "models", "figures")
     os.makedirs(fig_dir, exist_ok=True)
 
     print(f"torch:  {torch.__file__}  v{torch.__version__}  cuda={torch.cuda.is_available()}")
