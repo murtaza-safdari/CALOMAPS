@@ -10,7 +10,7 @@ the epistemic uncertainty.
 Quantile choices match the symmetric 1-sigma percentiles of a Gaussian, but
 the training (Pinball loss) does not assume Gaussianity.
 
-Architecture (3000 parameters total):
+Architecture (~4355 parameters):
     Linear(1 -> 32) -> SiLU -> Linear(32 -> 64) -> SiLU
                     -> Linear(64 -> 32) -> SiLU -> Linear(32 -> 3)
 
