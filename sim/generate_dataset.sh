@@ -5,7 +5,7 @@
 # ==========================================
 NUM_JOBS=200           # Number of parallel jobs (CPU cores to use)
 EVENTS_PER_JOB=100    # Events per job
-DATASET_NAME="data_spectrum_100um_500GeV"
+DATASET_NAME="data_spectrum_100um_400GeV"
 OUT_DIR="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}/${DATASET_NAME}"
 
 TOTAL_EVENTS=$(($NUM_JOBS * $EVENTS_PER_JOB))
