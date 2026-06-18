@@ -28,7 +28,7 @@ if HERE not in sys.path:
 from quantilenet import load_ensemble
 from dashboard import (
     get_interpolators, reco_metrics_over_grid,
-    plot_dashboard,
+    plot_dashboard, reco_closure_events, plot_heldout_closure,
 )
 
 
@@ -94,6 +94,31 @@ def main():
     out_prefix = os.path.join(fig_dir, "dashboard")
     plot_dashboard(reco, out_path_prefix=out_prefix, show=args.show)
     print(f"saved {out_prefix}_linearity.png and {out_prefix}_resolution.png")
+
+    # ---- held-out event-based closure (the honest test: events no model trained on) ----
+    hp = os.path.join(ens_dir, "heldout_test.npz")
+    if os.path.exists(hp):
+        h = np.load(hp)
+        heldout = {
+            "Analog":  reco_closure_events(fma, h["all_visible"], h["all_truth"]),
+            "MIP":     reco_closure_events(fmm, h["all_mip"],     h["all_truth"]),
+            "Hits":    reco_closure_events(fmh, h["all_hits"],    h["all_truth"]),
+            "Cluster": reco_closure_events(fmc, h["all_cluster"], h["all_truth"]),
+        }
+        plot_heldout_closure(heldout, out_path_prefix=out_prefix, show=args.show)
+        print(f"saved {out_prefix}_heldout.png  ({len(h['all_truth'])} held-out events)")
+        print("\n=== held-out closure  (response E_reco/E_true | resolution std) ===")
+        for energy in (10, 100, 300):
+            row = f"  E={energy:>3d} GeV: "
+            for k in ("Analog", "MIP", "Hits", "Cluster"):
+                et, resp, res = heldout[k]
+                if len(et):
+                    i = int(np.argmin(np.abs(et - energy)))
+                    row += f" {k}={resp[i]:.3f}/{res[i]:.3f}"
+            print(row)
+    else:
+        print("(no heldout_test.npz in the ensemble dir -- retrain with the updated "
+              "train_ensembles.py to enable the held-out closure)")
 
     # ---- headline numbers ----------------------------------------------------
     print()
