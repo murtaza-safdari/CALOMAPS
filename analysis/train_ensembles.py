@@ -68,8 +68,18 @@ all_mip     = data["all_mip"]
 all_hits    = data["all_hits"]
 all_cluster = data["all_cluster"]
 valid = (all_hits > 0) & (all_truth > 0) & (all_visible > 0) & (all_mip > 0) & (all_cluster > 0)
-x_train = all_truth[valid]
-print(f"valid events: {valid.sum()} of {len(valid)}\n")
+# Hold out a fixed 20% TEST partition, shared across ALL ensemble members, so the dashboard
+# closure is measured on events no model trained on. Fixed seed -> reproducible split.
+_vidx = np.where(valid)[0]
+_perm = np.random.RandomState(12345).permutation(len(_vidx))
+_ntest = int(0.2 * len(_vidx))
+test_idx  = np.sort(_vidx[_perm[:_ntest]])
+train_idx = np.sort(_vidx[_perm[_ntest:]])
+np.savez(os.path.join(OUT_DIR, "heldout_test.npz"),
+         all_truth=all_truth[test_idx], all_visible=all_visible[test_idx], all_mip=all_mip[test_idx],
+         all_hits=all_hits[test_idx], all_cluster=all_cluster[test_idx])
+x_train = all_truth[train_idx]
+print(f"valid events: {valid.sum()} of {len(valid)}  ->  train {len(train_idx)} / held-out test {len(test_idx)}\n")
 
 
 # ---- train all 4 readouts ----------------------------------------------------
@@ -81,7 +91,7 @@ for label, y_arr, seed, fname in [
     ("Raw Hits",         all_hits,    3000, "ens_hits.pth"),
     ("Naive Clustering", all_cluster, 4000, "ens_cluster.pth"),
 ]:
-    ens, xm, ym = train_one_ensemble(x_train, y_arr[valid], device,
+    ens, xm, ym = train_one_ensemble(x_train, y_arr[train_idx], device,
                                      name=label, seed_base=seed)
     fp = os.path.join(OUT_DIR, fname)
     save_ensemble(ens, xm, ym, fp)
