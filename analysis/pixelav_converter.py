@@ -47,10 +47,8 @@ import os, sys, json
 import numpy as np
 
 ECAL_RMIN_MM = 1264.0
-ECAL_RMAX_MM = 1403.0
 N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
-SI_THICK_MM = 0.32
 
 # PIXELAV length unit relative to mm. PIXELAV works in MICRONS (firmly sourced from the source;
 # see docs/pixelav_reference.md), so mm -> um is x1000. Records are stored in mm; this factor is
