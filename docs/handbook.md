@@ -646,7 +646,7 @@ where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic 
 
 ### 13.1 Reading your dashboard
 
-**Reconstructed Linearity** (panel 1): all four readouts on `y = 1`. ⚠️ This is **misleading** — it's largely *by construction*. Neyman inversion uses the median surrogate for forward and inverse, so the median is trivially self-consistent. A meaningful linearity test would need (a) a held-out test set or (b) bootstrap-resampled real events.
+**Reconstructed Linearity** (panel 1): all four readouts on `y = 1`. This panel is a **self-consistency check**, true largely *by construction* -- Neyman inversion uses the median surrogate for both the forward map and its inverse, so the median is trivially self-consistent. The honest test is a **held-out closure** -- reconstructing events no ensemble member trained on; building one is the exercise in the section-11 cell of `03_ml_training_and_eval.ipynb`.
 
 **Reconstructed Resolution + Stochastic** (panels 2 + 3) — questions to ask of your dashboard:
 
