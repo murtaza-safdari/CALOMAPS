@@ -85,7 +85,7 @@ What it does, in order:
    the real momentum (one event; the shower is fully contained in the MCParticle tree).
 2. **extract** — `extract_trackermom.py` reads the ROOT into the `.npz` arrays.
 3. **convert** — `pixelav_converter.py` builds per-crossing records (variant C, the
-   tracker path) and writes the `badeaa3` deck + the `.json`/`.csv` records.
+   tracker path) and writes the 7-column deck + the `.json`/`.csv` records.
 
 The script prints the exact output paths at the end.
 
