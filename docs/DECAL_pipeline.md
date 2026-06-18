@@ -4,7 +4,7 @@
 
 *(Transcribed from the user's PDF "DECAL R&D: Complete Simulation to Reconstruction Pipeline (Expanded)" for in-project reference. The PDF is the source of truth if any conflict.)*
 
-Welcome to the Digital Calorimeter (DECAL) R&D framework. This document provides a foolproof, end-to-end guide. It covers everything from establishing your CVMFS environment and understanding the underlying C++ GEANT4 wrappers, to modifying the detector geometry, calibrating it using deep neural networks, and extracting fundamental physics properties.
+This document is an end-to-end guide to the Digital Calorimeter (DECAL) R&D framework. It covers everything from establishing your CVMFS environment and understanding the underlying C++ GEANT4 wrappers, to modifying the detector geometry, calibrating it using deep neural networks, and extracting fundamental physics properties.
 
 ## Part 0: The Physics (Why are we doing this?)
 
