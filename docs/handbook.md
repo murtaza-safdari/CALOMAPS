@@ -739,7 +739,7 @@ where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic 
 
 ### 13.1 What it actually looks like (current 100 µm config, ~17,780 events)
 
-**Reconstructed Linearity** (panel 1): all four readouts on `y = 1`. ⚠️ This is **misleading** — it's largely *by construction*. Neyman inversion uses the median surrogate for forward and inverse, so the median is trivially self-consistent. A meaningful linearity test would need (a) a held-out test set or (b) bootstrap-resampled real events.
+**Reconstructed Linearity** (panel 1): all four readouts on `y = 1`. This panel is a **self-consistency check**, true largely *by construction* -- Neyman inversion uses the median surrogate for both the forward map and its inverse, so the median is trivially self-consistent. The honest test is the **held-out closure** (`figures/dashboard_heldout.png`, and the section-11 cell of `03_ml_training_and_eval.ipynb`): reconstruct events no ensemble member trained on. On 3,556 held-out gamma events the response is flat to ~1% at 10 GeV and droops to about 0.97-0.99 at 100-300 GeV (a small saturation bias the self-inversion cannot reveal), while the held-out sigma/E (about 0.075 at 10 GeV, rising to about 0.09 for Analog/MIP and about 0.10-0.12 for Hits/Cluster) tracks the Neyman-band resolution -- confirming the bands are roughly calibrated rather than badly overfit.
 
 **Reconstructed Resolution + Stochastic** (panels 2 + 3):
 
