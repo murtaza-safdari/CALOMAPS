@@ -237,3 +237,59 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
         plt.show()
     else:
         plt.close()
+
+
+# ---- held-out event-based closure (the honest test) --------------------------
+
+def reco_closure_events(f_med, y_obs, e_true, e_bins=None):
+    """Honest closure on a HELD-OUT set: invert each event's OBSERVED readout through the
+    median surrogate to recover E_reco, then bin by E_true. Returns (centers, response,
+    resolution) with response = mean(E_reco/E_true) and resolution = std(E_reco/E_true) per
+    bin -- a real test on events no ensemble member trained on, unlike the median self-inversion
+    (which is 1 by construction). Uses the same invert_brent as the dashboard."""
+    y_obs = np.asarray(y_obs, dtype=float); e_true = np.asarray(e_true, dtype=float)
+    if e_bins is None:
+        e_bins = np.linspace(float(np.nanmin(e_true)), float(np.nanmax(e_true)), 16)
+    e_reco = np.array([invert_brent(float(y), f_med) for y in y_obs])
+    ratio = e_reco / e_true
+    centers, resp, res = [], [], []
+    for lo, hi in zip(e_bins[:-1], e_bins[1:]):
+        m = (e_true >= lo) & (e_true < hi) & np.isfinite(ratio)
+        if int(m.sum()) >= 5:
+            centers.append(0.5 * (lo + hi))
+            resp.append(float(np.mean(ratio[m])))
+            res.append(float(np.std(ratio[m])))
+    return np.array(centers), np.array(resp), np.array(res)
+
+
+def plot_heldout_closure(heldout_results, out_path_prefix=None, show=False):
+    """Two-panel honest closure from held-out events: linearity <E_reco/E_true> (left) and
+    resolution std(E_reco/E_true) (right), per readout."""
+    import matplotlib
+    if out_path_prefix is not None and not show:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    for key, (et, resp, _res) in heldout_results.items():
+        if len(et):
+            axes[0].plot(et, resp, "o-", color=READOUT_COLORS.get(key, "gray"), lw=2,
+                         label=READOUT_LABELS.get(key, key))
+    axes[0].axhline(1.0, color="black", linestyle="--", alpha=0.5)
+    axes[0].set_ylim(0.8, 1.2)
+    axes[0].set_title("Held-out linearity  $\\langle E_{reco}/E_{true}\\rangle$", fontsize=13)
+    axes[0].set_xlabel("True Beam Energy [GeV]"); axes[0].set_ylabel("Response Ratio")
+    axes[0].legend(); axes[0].grid(True, alpha=0.3)
+    for key, (et, _resp, res) in heldout_results.items():
+        if len(et):
+            axes[1].plot(et, res, "o-", color=READOUT_COLORS.get(key, "gray"), lw=2,
+                         label=READOUT_LABELS.get(key, key))
+    axes[1].set_title("Held-out resolution  $\\mathrm{std}(E_{reco}/E_{true})$", fontsize=13)
+    axes[1].set_xlabel("True Beam Energy [GeV]"); axes[1].set_ylabel("Energy Resolution")
+    axes[1].legend(); axes[1].grid(True, alpha=0.3)
+    plt.tight_layout()
+    if out_path_prefix:
+        plt.savefig(f"{out_path_prefix}_heldout.png", dpi=110)
+    if show:
+        plt.show()
+    else:
+        plt.close()
