@@ -210,6 +210,24 @@ Nothing is lost across a restart: your clone and `$CALOMAPS_DATA_BASE` live unde
 
 ---
 
+## Training the ensembles on a CPU-only EAF session thrashes across all cores
+
+Training the quantile ensembles without a GPU (a CPU-only EAF session, or `cuda=False`
+because CVMFS ships CPU-only torch) can stall: PyTorch parallelizes each tiny full-batch
+step across every core, and for a model this small (~4,400 parameters, full-batch) the
+threading overhead dominates. You will see ~2000% CPU with *no* per-model progress for
+many minutes. Pin it to a single thread and it runs far faster (~15-30 s per model,
+~30 min for all four ensembles on CPU):
+
+```bash
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+python analysis/train_ensembles.py --particle gamma
+```
+
+A GPU session is still faster end-to-end; this is the fallback when none is available.
+
+---
+
 ## Where else to check
 
 - **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, scripts that wipe data dirs, etc.)
