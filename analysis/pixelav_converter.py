@@ -50,6 +50,7 @@ ECAL_RMIN_MM = 1264.0
 # Outer apothem = inner apothem + total radial stack depth (20 x 3.75 mm + 10 x 6.25 mm layers;
 # the pitches match si_layer_centers() below / geometry/my_custom_ecal.xml). Used by the nb05b schematic.
 ECAL_RMAX_MM = ECAL_RMIN_MM + 20 * 3.75 + 10 * 6.25   # = 1401.5 mm
+SI_THICK_MM = 0.32   # silicon sensor thickness (320 um); matches geometry/my_custom_ecal.xml
 N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
 
