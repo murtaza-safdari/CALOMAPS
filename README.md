@@ -167,7 +167,7 @@ Simulation ROOT files live **outside the repo** at `$CALOMAPS_DATA_BASE` (defaul
 
 The detector geometry is built on top of the [SiD detector concept](https://confluence.slac.stanford.edu/display/ilc/sidloi) (Silicon Detector — Letter of Intent), specifically the `o2_v03` compact released October 2017 by Norman Graf, Jeremy McCormick, and Dan Protopopescu. CALOMAPS retains the SiD coordinate system, dimensions, and material definitions, but disables every subdetector except the ECal barrel (which is replaced by the custom DECAL definition in `geometry/my_custom_ecal.xml`). See [geometry/baseline_sid_o2_v03/PROVENANCE.md](geometry/baseline_sid_o2_v03/PROVENANCE.md) for the full inheritance documentation.
 
-The deep quantile ensemble approach follows the standard pinball-loss regression pattern; the Neyman-construction inversion is implemented with `scipy.optimize.brentq` plus graceful clipping for the saturation regime.
+The deep quantile ensemble approach follows the standard pinball-loss regression pattern; the Neyman-construction inversion is implemented with `scipy.optimize.brentq`, extending the search bracket into the saturation regime and reporting points the readout can never reach as NaN (dropped) rather than clipping them to a fabricated value.
 
 ---
 

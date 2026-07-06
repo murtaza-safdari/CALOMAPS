@@ -40,6 +40,8 @@ If you open standard calorimeter geometries, you will find coarse analog pads (e
 - **Material:** Active sensor material changed to ultra-thin Silicon to mimic Monolithic Active Pixel Sensors (MAPS).
 - **Segmentation:** `grid_size` shrunk from millimeters down to **25 µm × 25 µm**. This extreme granularity is what allows individual particle tracks to be counted rather than measuring bulk energy.
 
+*(Note: the 25 µm here — and in the snippet below — is the PDF's illustrative value. This repository's implemented pitch is **100 µm**, set by `ECal_cell_size` in `geometry/SiD_TestBeam.xml`; see notebook 00 for how to change it.)*
+
 ### 2.2 Anatomy of the Readout Block
 
 The most critical section in `my_decal_geom.xml` (or in this project, `my_custom_ecal.xml`) is the `<readout>` block:
@@ -55,7 +57,7 @@ The most critical section in `my_decal_geom.xml` (or in this project, `my_custom
 ```
 
 - **Segmentation:** Physically divides the silicon plane. *Experiment here!* Change `25*um` to `50*um` or `10*um` to see how pixel size drives the high-energy saturation catastrophe.
-- **The ID String (Bitfield Encoding):** Detector saves a 3D coordinate by packing it into a single 64-bit integer. `system:8` = 8 bits for system ID; `layer:6` = 6 bits for layer; `x:32:-16` = 32 bits for X pixel index, offset by -16 bits. You generally **do not** need to edit this string — but this is why EDM4hep ROOT files output weirdly nested branch names.
+- **The ID String (Bitfield Encoding):** Detector saves a 3D coordinate by packing it into a single 64-bit integer. Each entry is `name:width` or `name:start:width`: `system:8` = 8 bits for system ID; `layer:6` = 6 bits for layer; `x:32:-16` = the X field *starts at bit 32* with a *signed 16-bit width* (a negative width means signed, so pixel indices can go negative either side of the module centre). You generally **do not** need to edit this string — but this is why EDM4hep ROOT files output weirdly nested branch names.
 
 ## Part 3: Executing the GEANT4 Simulation
 
@@ -166,4 +168,4 @@ The pipeline outputs a 3-Panel Physics Dashboard. This is how you verify if XML 
 |---|---|---|
 | **Panel 1: Reconstructed Linearity** | E_reco / E_true | Should be perfectly flat at 1.0. If it deviates: inversion algorithm failed, or detector has zero predictive power remaining. |
 | **Panel 2: Reconstructed Resolution** | σ_reco / E_true | Watch the 400 GeV mark. If Hits or Clusters curves shoot violently upward: pixel size too large, catastrophic saturation. |
-| **Panel 3: Stochastic Term** | σ/E vs 1/√E | At low energies (right side), data should form a straight line through origin. Slope = hardware's stochastic capability *a*. Left-side deviations highlight non-linear constant terms *c* caused by leakage and saturation. |
+| **Panel 3: Stochastic Term** | σ/E vs 1/√E | In the stochastic regime the data form a straight line through the origin; slope = hardware's stochastic capability *a*. Left-side (high-energy) deviations highlight the **constant term *b*** from leakage and saturation; the noise term *c* enters as c/E and matters at the low-energy (right) side. |
