@@ -94,6 +94,8 @@ Success = a lower σ/E curve (or better linearity) than the baseline, shown on t
 - Lead with the arc above; make the photon/pion comparison explicit (put the photon and pion
   plots side by side at the end of each notebook).
 - Every scaffold cell states the **task**, a **hint**, and the **expected result** (shape of
-  the plot / ballpark number), and links the canonical solution on `main`.
+  the plot / ballpark number). Solutions are **not** distributed with the student branch —
+  the cells say so and students ask the instructor (the worked notebooks live on `main` and
+  its `-b` pion variants).
 - Keep the from-scratch EAF setup identical to the collaborator path (handbook §6) — students
   are collaborators too. No "this is just a student exercise" tone; this is real R&D.

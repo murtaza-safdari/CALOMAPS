@@ -87,7 +87,7 @@ import time
 t_grand = time.time()
 for label, y_arr, seed, fname in [
     ("True Analog",      all_visible, 1000, "ens_analog.pth"),
-    ("MIP Proxy",        all_mip,     2000, "ens_mip.pth"),
+    ("MIP counting",     all_mip,     2000, "ens_mip.pth"),
     ("Raw Hits",         all_hits,    3000, "ens_hits.pth"),
     ("Naive Clustering", all_cluster, 4000, "ens_cluster.pth"),
 ]:

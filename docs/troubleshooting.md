@@ -177,8 +177,9 @@ env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir torch \
 # wrapper.sh:   unset PYTHONPATH PYTHONHOME; exec "$VENV/bin/python" -m ipykernel_launcher "$@"
 ```
 
-`setup/setup_gpu_kernel.sh` does exactly this. Notebook 03 needs only
-torch/numpy/scipy/matplotlib (no ROOT/uproot), so a self-contained venv covers it
+`setup/setup_gpu_kernel.sh` does this, and additionally installs `uproot`/`awkward`
+(the nb03 §10.2 capstone re-reads the raw `.root` files). The core training path
+needs only torch/numpy/scipy/matplotlib, so a self-contained venv covers everything
 without CVMFS at all. This supersedes the older `~/my_gpu_env` + `sys.path`-shim
 recipe for the *notebook* path (the shim is still fine for headless scripts).
 

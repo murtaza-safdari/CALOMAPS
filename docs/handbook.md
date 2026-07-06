@@ -359,7 +359,7 @@ flowchart TD
     style J fill:#bfb,stroke:#070
 ```
 
-Stages 1-2 happen in a JupyterLab terminal (or via `sim/generate_batched.sh`). Stages 3-5 happen in JupyterLab notebooks (stages 3-4 use the `Key4hep + GPU` kernel).
+Stage 1 (simulation) happens in a JupyterLab terminal (via `sim/generate_batched.sh`). Stages 2-5 happen in JupyterLab notebooks: stage 2 (extraction, notebook 02) on the `Key4hep (CPU)` kernel, stages 3-5 (training / inversion / dashboard, notebook 03) on the `Key4hep + GPU` kernel.
 
 ---
 
@@ -565,7 +565,7 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
    - `cluster count` — number of 8-connected pixel clusters, summed over layers
 3. Save into `models/decal_extracted_data_<particle>.npz` (per-particle: `_gamma` or `_piplus`).
 
-The notebook parallelizes with `ProcessPoolExecutor(max_workers=16)`. Drop to 8 if memory-pressed; bump to 64 if impatient and core-rich.
+The notebook parallelizes with `ProcessPoolExecutor(max_workers=min(32, os.cpu_count() or 8))`. Lower the cap if memory-pressed.
 
 ---
 
@@ -576,7 +576,7 @@ The model in [`analysis/quantilenet.py`](../analysis/quantilenet.py):
 - **Architecture**: `Linear(1→32) → SiLU → Linear(32→64) → SiLU → Linear(64→32) → SiLU → Linear(32→3)`. 4,355 parameters.
 - **Targets**: predict **fractional response** `E_signal / E_true` normalized by its max — works for any signal unit.
 - **Loss**: Pinball at the 15.87 / 50 / 84.13 percentiles (symmetric 1-σ Gaussian percentiles, but no Gaussianity assumed).
-- **Ensemble**: 20 networks per readout, each with its own 80/20 train/val split (bootstrap-style).
+- **Ensemble**: 20 networks per readout, each with its own 80/20 train/val split (drawn without replacement).
 
 **Total work**: 4 readouts × 20 models × up to 5000 epochs. On an A100 MIG slice: ~10 minutes. On CPU: 30–60 minutes.
 
@@ -636,8 +636,8 @@ If your detector might be undermeasuring the signal, the same observation could 
 | Panel | Plot | What you want to see |
 |---|---|---|
 | **1. Linearity** | E_reco / E_true vs E_true | A flat line at y = 1 |
-| **2. Resolution** | σ_reco / E_true vs E_true | Decrease at low E, flattening, then upward kink at high E if pixels saturate — *the* DECAL physics result |
-| **3. Stochastic** | σ_reco / E_true vs 1/√E_true | Straight line through origin in the stochastic regime; high-E uptick = saturation/leakage constant-term contributions |
+| **2. Resolution** | σ_reco / E_true vs E_true | Rising with E for the digital readouts, with a sharp upward turn where pixels saturate — *the* DECAL physics result |
+| **3. Stochastic** | σ_reco / E_true vs 1/√E_true | Straight line through origin in the stochastic regime; left-side (high-E) uptick = saturation/leakage constant-term contributions |
 
 Standard parameterization:
 
@@ -735,9 +735,11 @@ mkdir -p ~/nashome
 sshfs <username>@cmslpc-el9.fnal.gov:/nashome ~/nashome -o reconnect,defer_permissions
 ```
 
-The mount exposes only the ~4 MB source tree (`/nashome/<X>/<u>/CALOMAPS/`, same files as on
-EAF). The 21 GB simulation data is **not** visible through it — that lives on
-`/home/<username>/` inside the EAF container (see the §7 storage map).
+The mount exposes `/nashome` — useful if you keep a source clone at
+`/nashome/<X>/<u>/CALOMAPS/`. Note that the quickstart in §6.3 clones into `$HOME`
+*inside the EAF container*, which is **not** on `/nashome` and so is not visible
+through this mount; neither is the 21 GB simulation data on `/home/<username>/`
+(see the §7 storage map).
 
 ### 16.2 Manual GPU-kernel setup (what `setup_gpu_kernel.sh` automates)
 

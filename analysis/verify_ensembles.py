@@ -117,14 +117,15 @@ def main():
         }
         plot_heldout_closure(heldout, out_path_prefix=out_prefix, show=args.show)
         print(f"saved {out_prefix}_heldout.png  ({len(h['all_truth'])} held-out events)")
-        print("\n=== held-out closure  (response E_reco/E_true | resolution std) ===")
+        print("\n=== held-out closure  (response E_reco/E_true | resolution std, "
+              "@ actual bin centre) ===")
         for energy in (10, 100, 300):
-            row = f"  E={energy:>3d} GeV: "
+            row = f"  E~{energy:>3d} GeV: "
             for k in ("Analog", "MIP", "Hits", "Cluster"):
                 et, resp, res = heldout[k]
                 if len(et):
                     i = int(np.argmin(np.abs(et - energy)))
-                    row += f" {k}={resp[i]:.3f}/{res[i]:.3f}"
+                    row += f" {k}={resp[i]:.3f}/{res[i]:.3f}@{et[i]:.0f}"
             print(row)
     else:
         print("(no heldout_test.npz in the ensemble dir -- retrain with the updated "
