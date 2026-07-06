@@ -563,6 +563,100 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 
 The notebook parallelizes with `ProcessPoolExecutor(max_workers=min(32, os.cpu_count() or 8))`. Lower the cap if memory-pressed.
 
+### 10.1 Cascade + per-crossing-momentum extraction (experiments "A" + "B": full-cascade 4-vectors + PIXELAV inputs)
+
+Preparing inputs for a per-pixel device simulation (PIXELAV) needs the full shower cascade and, per
+charged-track sensor crossing, the entry point, direction and **momentum**. Two single-event `ddsim`
+runs of the same 50 GeV photon (both pin seed 424242 → identical shower), steered from `sim/`, produce it:
+
+| Run | Steering | Si readout | Gives |
+|-----|----------|-----------|-------|
+| Calorimeter cascade | `run_sim_fullcascade.py` | calorimeter (detailed mode) | MCParticle cascade + per-step `CaloHitContribution` (position, PDG, time) |
+| Tracker momentum | `run_sim_trackermom.py` | **tracker** (`Geant4TrackerWeightedAction`) | one `SimTrackerHit` per crossing **with momentum** |
+
+EDM4hep's `CaloHitContribution` carries no momentum, so `run_sim_trackermom.py` reads the ECal Si
+out as a Geant4 tracker via one line — `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'`
+— and the resulting `SimTrackerHit`s carry the true Geant4 momentum at each crossing.
+
+Run both (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
+
+```bash
+source ~/setup_calomaps.sh                       # Key4hep + lib_hack + CALOMAPS_* env
+export CALOMAPS_DATA_BASE=/tmp/calomaps-data     # off-quota; /home has a 23 GB per-user cap
+cd $CALOMAPS_HOME/geometry
+ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_fullcascade.py --numberOfEvents 1
+ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py  --numberOfEvents 1
+python ../analysis/extract_cascade.py            # -> models/fullcascade_*.npz  (cascade + step truth)
+python ../analysis/extract_trackermom.py         # -> models/trackermom_*.npz   (per-crossing momentum)
+python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* (auto-picks Variant C)
+```
+
+⚠️ **Key4hep release**: both runs keep the full ~75k-particle cascade, and the pinned `2026-02-01`
+release crashes (`free(): invalid pointer`) while *finalizing* such a large EDM4hep file. Source the
+`2026-04-08` release before running these two steering files — see `troubleshooting.md`, "EDM4hep
+podio writer crashes on very large events".
+
+`pixelav_converter.py` auto-selects **Variant C** (tracker hits → real per-crossing `|p|`, direction
+and entry) when the trackermom `.npz` is present, else falls back to Variant A (calo step truth,
+production momentum). Notebooks [`04_shower_4vectors`](../notebooks/04_shower_4vectors.ipynb),
+[`05a_pixelav_inputs_tracker`](../notebooks/05a_pixelav_inputs_tracker.ipynb) (§5 validates the
+per-crossing momentum) and [`05b_pixelav_inputs_calo`](../notebooks/05b_pixelav_inputs_calo.ipynb)
+inspect these outputs. Building and running PIXELAV itself on these inputs is a separate, deferred
+step maintained on the `pixelav-integration` branch; this section covers only preparing its inputs.
+
+### 10.2 Controlling which secondaries are produced and saved
+
+Both SD steering files keep the **entire** Geant4 cascade by default (every track written as an
+MCParticle). Two independent knobs change that, and they act at **different stages** — conflating
+them is a classic source of confusion, so they are kept separate here. Both are exposed as
+environment variables on `run_sim_fullcascade.py` and `run_sim_trackermom.py`; the defaults
+reproduce the canonical run, so existing outputs are unchanged.
+
+| Knob | Env var | DDSim attribute | Default | Acts at | Changes physics? |
+|------|---------|-----------------|---------|---------|------------------|
+| Production range cut | `CALOMAPS_RANGECUT_MM` | `SIM.physics.rangecut` | 0.7 mm | secondary **production** | **Yes** |
+| Persistency floor | `CALOMAPS_MIN_KE_MEV` (+ `CALOMAPS_KEEP_ALL=0`) | `SIM.part.minimalKineticEnergy` / `keepAllParticles` | 1 MeV / keep-all | output **writing** | No |
+
+**Production range cut (physics).** `SIM.physics.rangecut` is the Geant4 secondary-production
+threshold, given as a range (converted per material to an energy). Below it, soft delta-rays and
+low-energy photons are **not created as separate tracks** — their energy is deposited continuously
+along the parent's step. It is a genuine physics/CPU knob: lowering it produces more soft
+secondaries (→ more charged-track sensor crossings for PIXELAV) at higher CPU cost; raising it
+coarsens the shower and the deposited-energy pattern. DDSim's default is 0.7 mm.
+
+```bash
+# finer delta-ray production (more, softer sensor crossings), same output format:
+CALOMAPS_RANGECUT_MM=0.05 ddsim --compactFile SiD_TestBeam.xml \
+    --steeringFile ../sim/run_sim_trackermom.py --numberOfEvents 1
+```
+
+**Persistency floor (output only).** `SIM.part.minimalKineticEnergy` decides which
+**already-simulated** particles get written to the MCParticle truth collection — it does **not**
+change the physics or the energy deposited, only the size/content of the truth output. The catch:
+this floor is **ignored while `keepAllParticles` is `True`** (the default), so raising
+`CALOMAPS_MIN_KE_MEV` alone does nothing. You must also set `CALOMAPS_KEEP_ALL=0`:
+
+```bash
+# prune most sub-10-MeV truth particles (physics unchanged, smaller truth collection):
+CALOMAPS_KEEP_ALL=0 CALOMAPS_MIN_KE_MEV=10 ddsim --compactFile SiD_TestBeam.xml \
+    --steeringFile ../sim/run_sim_fullcascade.py --numberOfEvents 1
+```
+
+Even then the floor is **not a pure kinematic cut**: DD4hep keeps any particle that left a detector
+hit (and all primaries/parents), combining only the sub-threshold, hit-less tracks into their
+parents. So on the tracker-readout `run_sim_trackermom.py` run — where *every* Si crossing makes a
+`SimTrackerHit` — the sub-10-MeV crossing tracks **survive** the floor; to thin soft sensor
+crossings there, use the range cut, not the persistency floor.
+
+**Which one do you want?** For **PIXELAV per-crossing inputs**, the physically meaningful knob is
+almost always the **production cut** — it controls how many soft charged tracks actually exist to
+cross a sensor. The persistency floor only prunes the *saved* truth; and for ECal secondaries its
+upstream semantics are entangled with `userParticleHandler`, which both SD files clear to `""` so
+that out-of-tracking-region ECal secondaries (born at r > 1267 mm) persist at all. Use the
+persistency floor when you want a smaller truth file without touching the physics; use the range
+cut when you want to change what the shower actually produces. To change the **gun energy**, set
+`CALOMAPS_GUN_ENERGY_GEV` (the same variable name the baseline `run_sim.py` uses).
+
 ---
 
 ## 11. Training the deep-ensemble surrogate
