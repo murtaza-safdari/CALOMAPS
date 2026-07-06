@@ -98,6 +98,16 @@ def main():
     # ---- held-out event-based closure (the honest test: events no model trained on) ----
     hp = os.path.join(ens_dir, "heldout_test.npz")
     if os.path.exists(hp):
+        # The split is only honest if these ensembles were trained together with it.
+        # Ensembles retrained afterwards into this dir (e.g. interactively via nb03,
+        # which trains on ALL valid events) may have trained on these very events.
+        newest_ens = max(os.path.getmtime(os.path.join(ens_dir, f"ens_{k}.pth"))
+                         for k in ("analog", "mip", "hits", "cluster"))
+        if newest_ens > os.path.getmtime(hp) + 1.0:
+            print("WARNING: the ens_*.pth files are newer than heldout_test.npz -- the "
+                  "ensembles were retrained after this split was saved and may have "
+                  "trained on these events, so the closure below is NOT guaranteed "
+                  "honest. Rerun train_ensembles.py to refresh both together.")
         h = np.load(hp)
         heldout = {
             "Analog":  reco_closure_events(fma, h["all_visible"], h["all_truth"]),
@@ -107,14 +117,15 @@ def main():
         }
         plot_heldout_closure(heldout, out_path_prefix=out_prefix, show=args.show)
         print(f"saved {out_prefix}_heldout.png  ({len(h['all_truth'])} held-out events)")
-        print("\n=== held-out closure  (response E_reco/E_true | resolution std) ===")
+        print("\n=== held-out closure  (response E_reco/E_true | resolution std, "
+              "@ actual bin centre) ===")
         for energy in (10, 100, 300):
-            row = f"  E={energy:>3d} GeV: "
+            row = f"  E~{energy:>3d} GeV: "
             for k in ("Analog", "MIP", "Hits", "Cluster"):
                 et, resp, res = heldout[k]
                 if len(et):
                     i = int(np.argmin(np.abs(et - energy)))
-                    row += f" {k}={resp[i]:.3f}/{res[i]:.3f}"
+                    row += f" {k}={resp[i]:.3f}/{res[i]:.3f}@{et[i]:.0f}"
             print(row)
     else:
         print("(no heldout_test.npz in the ensemble dir -- retrain with the updated "

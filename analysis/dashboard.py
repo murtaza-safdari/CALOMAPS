@@ -241,16 +241,28 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
 
 # ---- held-out event-based closure (the honest test) --------------------------
 
-def reco_closure_events(f_med, y_obs, e_true, e_bins=None):
+def reco_closure_events(f_med, y_obs, e_true, e_bins=None, verbose=True):
     """Honest closure on a HELD-OUT set: invert each event's OBSERVED readout through the
     median surrogate to recover E_reco, then bin by E_true. Returns (centers, response,
     resolution) with response = mean(E_reco/E_true) and resolution = std(E_reco/E_true) per
     bin -- a real test on events no ensemble member trained on, unlike the median self-inversion
-    (which is 1 by construction). Uses the same invert_brent as the dashboard."""
+    (which is 1 by construction). Uses the same invert_brent as the dashboard.
+
+    Treat the EDGE bins with care: at the top, events whose readout fluctuated above the
+    saturated curve invert to NaN and are dropped (informative censoring -- the surviving
+    events understate the spread there); at the bottom, events whose readout falls below
+    the curve's value at the 5 GeV bracket floor are clipped to E_reco = 5 GeV, pulling
+    that bin's ratio toward 5/E_true. verbose=True prints the censored/clipped counts."""
     y_obs = np.asarray(y_obs, dtype=float); e_true = np.asarray(e_true, dtype=float)
     if e_bins is None:
         e_bins = np.linspace(float(np.nanmin(e_true)), float(np.nanmax(e_true)), 16)
     e_reco = np.array([invert_brent(float(y), f_med) for y in y_obs])
+    n_nan = int(np.sum(~np.isfinite(e_reco)))
+    n_floor = int(np.sum(e_reco == 5.0))       # == invert_brent's `lo` bracket floor
+    if verbose and (n_nan or n_floor):
+        print(f"  reco_closure_events: of {len(e_reco)} events, {n_nan} not invertible "
+              f"(saturation -> dropped) and {n_floor} clipped at the 5 GeV floor -- "
+              f"edge bins are biased accordingly")
     ratio = e_reco / e_true
     centers, resp, res = [], [], []
     for lo, hi in zip(e_bins[:-1], e_bins[1:]):
