@@ -591,7 +591,7 @@ python ../analysis/extract_trackermom.py         # -> models/trackermom_*.npz   
 python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* (auto-picks Variant C)
 ```
 
-⚠️ **Key4hep release**: both runs keep the full ~75k-particle cascade, and the pinned `2026-02-01`
+⚠️ **Key4hep release**: both runs keep the full ~78k-particle cascade, and the pinned `2026-02-01`
 release crashes (`free(): invalid pointer`) while *finalizing* such a large EDM4hep file. Source the
 `2026-04-08` release before running these two steering files — see `troubleshooting.md`, "EDM4hep
 podio writer crashes on very large events".

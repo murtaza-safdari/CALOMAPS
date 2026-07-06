@@ -22,7 +22,7 @@ The one non-obvious setting is `part.userParticleHandler = ""`:
 DDSim's default Geant4TCUserParticleHandler restricts MC-truth to the inner *tracking*
 region, so ECal shower secondaries (born at r>1267mm) get merged into the primary and
 never stored -- even with keepAllParticles=True. Disabling the user handler removes that
-region cut, so the full cascade is retained (~75k particles for a single 50 GeV photon).
+region cut, so the full cascade is retained (~78k particles for a single 50 GeV photon).
 
 NOTE: keep this file pure ASCII. A non-ASCII character (em-dash, "smart quote") in a
 steering file gets copied into the run metadata and breaks the EDM4hep RunHeader

@@ -229,13 +229,13 @@ SIM.part.userParticleHandler = ""
 SIM.part.keepAllParticles    = True
 ```
 
-With both, the complete cascade is retained (~75k particles for a single 50 GeV photon). See
+With both, the complete cascade is retained (~78k particles for a single 50 GeV photon). See
 `sim/run_sim_fullcascade.py`.
 
 ## EDM4hep podio writer crashes (free(): invalid pointer) on very large events
 
 On Key4hep 2026-02-01, writing a *high-multiplicity* EDM4hep event -- e.g. a full shower
-cascade with `keepAllParticles=True` + `userParticleHandler=""` (~75k MCParticles) -- crashes
+cascade with `keepAllParticles=True` + `userParticleHandler=""` (~78k MCParticles) -- crashes
 at the END of the run with `free(): invalid pointer` inside `podio::ROOTWriter::finish()` ->
 `TFile::Close`. The event data is written first ("Saving EDM4hep event 0"); the abort happens
 during file *finalization*. Standard 1-particle samples are unaffected.
