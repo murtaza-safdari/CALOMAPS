@@ -578,6 +578,21 @@ EDM4hep's `CaloHitContribution` carries no momentum, so `run_sim_trackermom.py` 
 out as a Geant4 tracker via one line — `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'`
 — and the resulting `SimTrackerHit`s carry the true Geant4 momentum at each crossing.
 
+**Minimal diff vs the baseline `run_sim.py`.** The raw file diff is ~100 lines, but only these
+five lines are load-bearing (the rest just reproduces the canonical gun or is optional env/output):
+
+| Line | Run | What it does |
+|------|-----|--------------|
+| `SIM.random.seed = 424242` | both | pins the shower, so the calo and tracker runs read out the *same* event |
+| `SIM.part.userParticleHandler = ""` | both | removes the tracking-region cut so ECal secondaries (born r > 1267 mm) persist |
+| `SIM.part.keepAllParticles = True` | both | writes every Geant4 track as an `MCParticle` (no KE pruning) |
+| `SIM.enableDetailedShowerMode = True` | calo | fills each `CaloHitContribution` with per-step `stepPosition`/`PDG` (zero in SIMPLE mode) |
+| `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'` | tracker | reads the ECal Si as a tracker → one `SimTrackerHit` per crossing **with momentum** |
+
+The first three are truth-persistency — they change *which* truth is written, not the physics
+(nb04 §2 shows the deposit distribution is unchanged); the last two switch on the per-crossing
+readout PIXELAV needs.
+
 Run both (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
 
 ```bash
@@ -603,6 +618,12 @@ production momentum). Notebooks [`04_shower_4vectors`](../notebooks/04_shower_4v
 per-crossing momentum) and [`05b_pixelav_inputs_calo`](../notebooks/05b_pixelav_inputs_calo.ipynb)
 inspect these outputs. Building and running PIXELAV itself on these inputs is a separate, deferred
 step maintained on the `pixelav-integration` branch; this section covers only preparing its inputs.
+
+Notebook 04 §2 also contrasts the stock vs full-cascade config over 20 events each to show the
+persistency settings don't change the physics; it reads `models/config_ab_gamma50.npz`, which
+[`analysis/make_config_ab.py`](../analysis/make_config_ab.py) regenerates (the panel is skipped
+gracefully if the file is absent). The cross-readout consistency checks (byte-identical cascade,
+crossings-per-layer agreement, the silicon-MIP dE/dx) are in notebook 05a §8.
 
 ### 10.2 Controlling which secondaries are produced and saved
 
