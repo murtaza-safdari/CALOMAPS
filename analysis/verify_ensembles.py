@@ -98,6 +98,16 @@ def main():
     # ---- held-out event-based closure (the honest test: events no model trained on) ----
     hp = os.path.join(ens_dir, "heldout_test.npz")
     if os.path.exists(hp):
+        # The split is only honest if these ensembles were trained together with it.
+        # Ensembles retrained afterwards into this dir (e.g. interactively via nb03,
+        # which trains on ALL valid events) may have trained on these very events.
+        newest_ens = max(os.path.getmtime(os.path.join(ens_dir, f"ens_{k}.pth"))
+                         for k in ("analog", "mip", "hits", "cluster"))
+        if newest_ens > os.path.getmtime(hp) + 1.0:
+            print("WARNING: the ens_*.pth files are newer than heldout_test.npz -- the "
+                  "ensembles were retrained after this split was saved and may have "
+                  "trained on these events, so the closure below is NOT guaranteed "
+                  "honest. Rerun train_ensembles.py to refresh both together.")
         h = np.load(hp)
         heldout = {
             "Analog":  reco_closure_events(fma, h["all_visible"], h["all_truth"]),
