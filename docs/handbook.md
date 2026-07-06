@@ -537,7 +537,7 @@ The bare `generate_batched.sh` defaults to 1000 jobs × 20 events = **20,000 eve
 
 **Rough timing**: ~30 minutes to 2 hours wall time depending on EAF load.
 
-⚠️ **Before running**: the script's first step is `rm -f $OUT_DIR/sim_<particle>_part*.root` (e.g. `sim_photons_part*` for gamma) — so re-running **replaces** that particle's dataset rather than adding to it. To keep an existing run, set a different `CALOMAPS_DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run, and check for the `$OUT_DIR/SIM_COMPLETE.txt` marker to confirm it finished.
+⚠️ **Before running**: before generating anything, the script deletes the previous run's files (`rm -f $OUT_DIR/sim_<particle>_part*.root`, e.g. `sim_photons_part*` for gamma) — so re-running **replaces** that particle's dataset rather than adding to it. To keep an existing run, set a different `CALOMAPS_DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run, and check for the `$OUT_DIR/SIM_COMPLETE.txt` marker to confirm it finished (it is only written when every job produced its output file).
 
 For energy-range studies, [`sim/generate_dataset.sh`](../sim/generate_dataset.sh) is a simpler 200×100 variant.
 
@@ -700,7 +700,7 @@ EAF `/tmp/` is overlay container storage, wiped on container restart. For long-l
 Sourcing `setup_calomaps.sh` in a shell that already loaded Key4hep produces this warning. Harmless; env vars stay valid.
 
 ### Pre-existing generate scripts wipe the data dir
-Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` start with `rm -f $OUT_DIR/sim_<particle>_part*.root` (gamma → `sim_photons_part*`). To preserve an existing dataset, change `DATASET_NAME` (or `CALOMAPS_DATASET_NAME`) or comment out the rm.
+Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` delete the previous run's files (`rm -f $OUT_DIR/sim_<particle>_part*.root`, gamma → `sim_photons_part*`) before generating. To preserve an existing dataset, change `DATASET_NAME` (or `CALOMAPS_DATASET_NAME`) or comment out the rm.
 
 ### CMS image vs GPU image
 The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS uses) doesn't — `/uscms_data/` is invisible. CALOMAPS doesn't need it. Make sure you spawn the GPU profile.

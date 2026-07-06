@@ -241,7 +241,7 @@ def plot_dashboard(reco_results, out_path_prefix=None, show=False):
 
 # ---- held-out event-based closure (the honest test) --------------------------
 
-def reco_closure_events(f_med, y_obs, e_true, e_bins=None, verbose=True):
+def reco_closure_events(f_med, y_obs, e_true, e_bins=None, verbose=True, label=""):
     """Honest closure on a HELD-OUT set: invert each event's OBSERVED readout through the
     median surrogate to recover E_reco, then bin by E_true. Returns (centers, response,
     resolution) with response = mean(E_reco/E_true) and resolution = std(E_reco/E_true) per
@@ -260,7 +260,8 @@ def reco_closure_events(f_med, y_obs, e_true, e_bins=None, verbose=True):
     n_nan = int(np.sum(~np.isfinite(e_reco)))
     n_floor = int(np.sum(e_reco == 5.0))       # == invert_brent's `lo` bracket floor
     if verbose and (n_nan or n_floor):
-        print(f"  reco_closure_events: of {len(e_reco)} events, {n_nan} not invertible "
+        tag = f" [{label}]" if label else ""
+        print(f"  reco_closure_events{tag}: of {len(e_reco)} events, {n_nan} not invertible "
               f"(saturation -> dropped) and {n_floor} clipped at the 5 GeV floor -- "
               f"edge bins are biased accordingly")
     ratio = e_reco / e_true

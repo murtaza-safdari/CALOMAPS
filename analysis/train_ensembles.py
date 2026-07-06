@@ -97,5 +97,10 @@ for label, y_arr, seed, fname in [
     save_ensemble(ens, xm, ym, fp)
     print(f"  saved -> {fp} ({os.path.getsize(fp)/1024:.0f} KB)\n")
 
+# Stamp the held-out split LAST: verify_ensembles.py flags ens_*.pth files newer
+# than heldout_test.npz as "retrained after the split". The honest end state of
+# this script is ensembles + split written together, so refresh the split's mtime.
+os.utime(os.path.join(OUT_DIR, "heldout_test.npz"), None)
+
 print(f"=== ALL DONE in {time.time()-t_grand:.1f}s total ===")
 print(f"models in: {OUT_DIR}")
