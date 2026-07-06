@@ -7,8 +7,8 @@ TOTAL_JOBS="${CALOMAPS_NJOBS:-1000}"            # Total number of root files you
 EVENTS_PER_JOB="${CALOMAPS_NEVENTS:-20}"        # Keeps memory footprint low per file
 CONCURRENT_JOBS="${CALOMAPS_NCONCURRENT:-20}"   # How many jobs to run simultaneously
 # Job i is seeded SEED_BASE+i: every job unique, and the whole dataset reproducible.
-# (bash $RANDOM is only 15-bit, so ~1000 draws collide and silently duplicate whole
-# files.) Set CALOMAPS_SEED_BASE to generate a statistically independent dataset.
+# (bash $RANDOM is only 15-bit, so at ~1000 draws some collide and silently duplicate
+# whole files.) Set CALOMAPS_SEED_BASE to generate a statistically independent dataset.
 SEED_BASE="${CALOMAPS_SEED_BASE:-0}"
 
 # --- PARTICLE / DATASET ---

@@ -358,7 +358,7 @@ flowchart TD
     style J fill:#bfb,stroke:#070
 ```
 
-Stage 1 (simulation) happens in a JupyterLab terminal (via `sim/generate_batched.sh`). Stages 2-5 happen in JupyterLab notebooks: stage 2 (extraction, notebook 02) on the `Key4hep (CPU)` kernel, stages 3-5 (training / inversion / dashboard, notebook 03) on the `Key4hep + GPU` kernel.
+Stage 1 (simulation) happens in a JupyterLab terminal (via `sim/generate_batched.sh`). Stages 2-5 happen in JupyterLab notebooks: stage 2 (extraction) in notebook 02, stages 3-5 (training / inversion / dashboard) in notebook 03 on the `Key4hep + GPU` kernel.
 
 ---
 
@@ -533,7 +533,7 @@ Defaults: 1000 jobs × 20 events each = **20,000 events**, uniform momentum 5–
 
 **Rough timing**: ~30 minutes to 2 hours wall time depending on EAF load.
 
-⚠️ **Before running**: the script's first step is `rm -f $OUT_DIR/sim_<particle>_part*.root` (e.g. `sim_photons_part*` for gamma) — it nukes the existing dataset for that particle. If you want to keep the current 21 GB, change `DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run.
+⚠️ **Before running**: before generating anything, the script deletes the previous run's files (`rm -f $OUT_DIR/sim_<particle>_part*.root`, e.g. `sim_photons_part*` for gamma) — it replaces the existing dataset for that particle. If you want to keep the current 21 GB, change `DATASET_NAME` or comment out the rm. Use `nohup ... &` or `tmux` so a flaky browser doesn't kill the run.
 
 For energy-range studies, [`sim/generate_dataset.sh`](../sim/generate_dataset.sh) is a simpler 200×100 variant.
 
@@ -737,7 +737,7 @@ where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic 
 
 **Reconstructed Resolution + Stochastic** (panels 2 + 3):
 
-- **True Analog** and **MIP Proxy** overlap; rise from σ/E ≈ 0.07 at 10 GeV to ≈ 0.095 at 400 GeV. Best readouts at all energies. MIP tracks analog tightly because at 100 µm pitch each MIP-crossing reliably triggers one hit.
+- **True Analog** and **MIP counting** overlap; rise from σ/E ≈ 0.07 at 10 GeV to ≈ 0.095 at 400 GeV. Best readouts at all energies. MIP tracks analog tightly because at 100 µm pitch each MIP-crossing reliably triggers one hit.
 - **Raw Hits** tracks analog at low E, **diverges upward from ~100 GeV**, rising monotonically to σ/E ≈ 0.113 at 400 GeV. **Pixel saturation** — exactly the DECAL physics.
 - **Naive 2D Clustering** is the worst, rising to σ/E ≈ 0.14 at 400 GeV. The cluster *count* saturates as the dense core merges adjacent pixels into a few big blobs, so it doesn't recover the lost multiplicity.
 
@@ -790,7 +790,7 @@ EAF `/tmp/` is overlay container storage, wiped on container restart. For long-l
 Sourcing `setup_calomaps.sh` in a shell that already loaded Key4hep produces this warning. Harmless; env vars stay valid.
 
 ### Pre-existing generate scripts wipe the data dir
-Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` start with `rm -f $OUT_DIR/sim_<particle>_part*.root` (gamma → `sim_photons_part*`). To preserve an existing dataset, change `DATASET_NAME` (or `CALOMAPS_DATASET_NAME`) or comment out the rm.
+Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` delete the previous run's files (`rm -f $OUT_DIR/sim_<particle>_part*.root`, gamma → `sim_photons_part*`) before generating. To preserve an existing dataset, change `DATASET_NAME` (or `CALOMAPS_DATASET_NAME`) or comment out the rm.
 
 ### CMS image vs GPU image
 The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS uses) doesn't — `/uscms_data/` is invisible. CALOMAPS doesn't need it. Make sure you spawn the GPU profile.

@@ -110,10 +110,10 @@ def main():
                   "honest. Rerun train_ensembles.py to refresh both together.")
         h = np.load(hp)
         heldout = {
-            "Analog":  reco_closure_events(fma, h["all_visible"], h["all_truth"]),
-            "MIP":     reco_closure_events(fmm, h["all_mip"],     h["all_truth"]),
-            "Hits":    reco_closure_events(fmh, h["all_hits"],    h["all_truth"]),
-            "Cluster": reco_closure_events(fmc, h["all_cluster"], h["all_truth"]),
+            "Analog":  reco_closure_events(fma, h["all_visible"], h["all_truth"], label="Analog"),
+            "MIP":     reco_closure_events(fmm, h["all_mip"],     h["all_truth"], label="MIP"),
+            "Hits":    reco_closure_events(fmh, h["all_hits"],    h["all_truth"], label="Hits"),
+            "Cluster": reco_closure_events(fmc, h["all_cluster"], h["all_truth"], label="Cluster"),
         }
         plot_heldout_closure(heldout, out_path_prefix=out_prefix, show=args.show)
         print(f"saved {out_prefix}_heldout.png  ({len(h['all_truth'])} held-out events)")
