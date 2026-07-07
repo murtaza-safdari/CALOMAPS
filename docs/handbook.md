@@ -667,6 +667,57 @@ where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic 
 
 ---
 
+### 13.3 Conventional cross-check: fixed-energy Crystal-Ball fits (`03c_conventional_resolution.ipynb`)
+
+Notebook 03c measures the same energy resolution as nb03, but the **conventional
+test-beam way** — a transparent, ground-truth cross-check of the ML surrogate:
+
+- **Fixed-energy beams, not a spectrum.** Simulate photons at a handful of fixed
+  energies (a mono-energetic gun: set `CALOMAPS_GUN_ENERGY_GEV` in `sim/run_sim.py`,
+  one dataset per energy). At a fixed energy the response spread is *purely* the
+  detector, so the resolution is read off directly — no model is needed to disentangle
+  it from a spread of input energies.
+- **A Crystal-Ball fit per point.** At fixed energy the response is a Gaussian core with
+  a low-side leakage tail; fit a Crystal Ball and quote the **core σ** (the tail is real
+  physics, but it is not what "resolution" means).
+- **Invert the calibration.** The fitted peaks μ(E) form the response/calibration curve.
+  To turn a readout width into an *energy* resolution you invert it,
+  `E_reco = μ⁻¹(readout)` — exactly as nb03 inverts its learned median curve, only here
+  the forward model is a curve through fixed-energy points instead of a neural net. Where
+  the calibration flattens (digital saturation) a small readout band maps to a wide
+  energy band and the resolution blows up; this is why quoting σ/μ of the raw counts
+  would *hide* the saturation.
+- **σ_E/E vs 1/√E.** Fit `a/√E ⊕ b ⊕ c/E`. Analog tracks a near-straight line
+  (stochastic-dominated); the digital readouts peel upward at high energy (saturation),
+  the naive clustering earliest.
+
+**When to use which.** nb03 (ML) trains once on a spectrum and covers the whole continuum;
+03c needs dedicated fixed-energy runs but every step is auditable and is the ground truth.
+Run both and overlay — agreement validates both methods; divergence (at very low energy, or
+deep in saturation where the calibration is nearly flat) is physics, not error.
+
+#### Generating the fixed-energy datasets
+
+You need one dataset **per energy**, each with a **distinct `CALOMAPS_DATASET_NAME`** —
+the generate scripts wipe their output dir on start (see §14 "Pre-existing generate scripts
+wipe the data dir"), so two fixed-energy runs into the same dir would clobber each other.
+The raw ROOT is large, so keep it on a roomy scratch area and extract to the small
+per-energy `.npz`, deleting the ROOT as you go (EAF `/home` is a tight ~23 GB):
+
+```bash
+for E in 1 2 5 10 20 50 100 200 400; do
+  CALOMAPS_GUN_PARTICLE=gamma CALOMAPS_GUN_ENERGY_GEV=$E \
+  CALOMAPS_DATASET_NAME=mono_gamma_${E}GeV \
+  CALOMAPS_DATA_BASE=/scratch/$USER/CALOMAPS-mono \
+  bash sim/generate_dataset.sh
+  # >>> extract the four readouts into one .npz per energy <<<
+  #   main:   python analysis/extract_readouts.py --datadir .../mono_gamma_${E}GeV \
+  #             --energy $E --out $CALOMAPS_HOME/models/mono_gamma/decal_mono_gamma_E$(printf '%04d' $E)GeV.npz
+  #   (or reuse your notebook-02 readout code on each dataset)
+  rm -rf /scratch/$USER/CALOMAPS-mono/mono_gamma_${E}GeV   # free scratch as you go
+done
+```
+
 ## 14. Common gotchas (code-level)
 
 This section covers **code-level errors**. For **infrastructure-level quirks** (SSHFS, JupyterHub flakes, CVMFS surprises, disk quotas), see [troubleshooting.md](troubleshooting.md).
