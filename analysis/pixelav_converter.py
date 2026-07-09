@@ -20,7 +20,8 @@ PIXELAV is effectively TWO stages:
       mid-crossing position (~sensor mid-plane), NOT the entry face. NOTE: stock PIXELAV
       randomizes the impact over the central 3x3 pixels internally, so the impact is carried
       only as a LABEL (for matching) unless the PIXELAV wrapper is patched to read it (ours
-      is: analysis/pixelav/ppixelav2_list_trkpy_real_entry.c). See docs/pixelav_reference.md.
+      is: analysis/pixelav/ppixelav2_list_trkpy_real_entry.c on the pixelav-integration
+      branch). See docs/pixelav_reference.md.
 
 EXPERIMENT "B": one record per charged-track sensor crossing. PRIMARY = Variant C (auto-selected):
 run_sim_trackermom.py reads the Si out as a Geant4 tracker, so each SimTrackerHit is one crossing
@@ -38,7 +39,8 @@ direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-
 per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
 
 DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'badeaa3' = the 7-column
-ppixelav2_list_trkpy_n_2f.c format (our driver lineage; see analysis/pixelav/ + setup/setup_pixelav.sh); 'smartpix' = the 9-column ppixelav2_custom.c
+ppixelav2_list_trkpy_n_2f.c format (our driver lineage; the driver itself lives on the
+pixelav-integration branch: analysis/pixelav/ + setup/setup_pixelav.sh); 'smartpix' = the 9-column ppixelav2_custom.c
 format. ppion is the betagamma-matched pion momentum p*(m_pi/m_particle) so PIXELAV's pion dE/dx
 reproduces the real particle's ionisation. Lengths in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
 
@@ -160,7 +162,8 @@ def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, var
                                                               # (~mid-plane), NOT the entry face)
         "cot_alpha": cot_a, "cot_beta": cot_b,
         "flipped": int(dw >= 0),       # 1 = outward-going (dw>=0). VERIFIED vs the patched driver
-                                       # (analysis/pixelav/ppixelav2_list_trkpy_real_entry.c):
+                                       # (pixelav-integration branch,
+                                       # analysis/pixelav/ppixelav2_list_trkpy_real_entry.c):
                                        # flipped=1 -> locdir_z>0, entry face z=0; flipped=0 -> z=thick.
         "sensor_normal_phi": float(phi_n), "depth_w_mm": float(ew),
         "energy_dep_GeV": float(edep), "n_steps": int(nstep), "time_ns": float(time_ns),
@@ -310,7 +313,8 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
     layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (read by our patched
-        real-entry driver, analysis/pixelav/ppixelav2_list_trkpy_real_entry.c)
+        real-entry driver, analysis/pixelav/ppixelav2_list_trkpy_real_entry.c on the
+        pixelav-integration branch)
         cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
     layout='smartpix': the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
         cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
@@ -338,7 +342,8 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
                           pid_to_pixelav(s["pdg"])))
         elif layout == "badeaa3":
             # 7-col format read by ppixelav2_list_trkpy_n_2f.c / our patched real-entry driver
-            # (analysis/pixelav/, built by setup/setup_pixelav.sh). Axis map VERIFIED against the
+            # (pixelav-integration branch: analysis/pixelav/, built by setup/setup_pixelav.sh).
+            # Axis map VERIFIED against the
             # driver source: col1 cot_alpha pairs with y(13-px, Lorentz) = our u and col6 mody;
             # col2 cot_beta pairs with x(21-px) = our v and col5 modx. Impact is written
             # full-truth in um; the patched driver reduces it mod-pitch to the sub-pixel impact.

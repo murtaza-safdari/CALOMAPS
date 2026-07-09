@@ -51,7 +51,7 @@ sim/make_pixelav_inputs.sh  (one command: sim → extract → deck)
     ├── analysis/extract_trackermom.py   ──>  models/trackermom_<tag><E>_1evt.npz
     └── analysis/pixelav_converter.py    ──>  models/pixelav_segments_*.pixelav.txt  (the PIXELAV deck)
                                               + .json/.csv per-crossing records (16 fields each)
-notebooks 04 / 05a / 05b / 05c inspect it;  setup/setup_pixelav.sh + notebook 06 build & run PIXELAV on it
+notebooks 04 / 05a / 05b / 05c inspect it;  the pixelav-integration branch builds & runs PIXELAV on it
 ```
 
 ---
@@ -67,12 +67,10 @@ CALOMAPS/
 │   ├── DECAL_pipeline.md              ← PHYSICS writeup (advisor's PDF transcribed)
 │   ├── pixelav_reference.md           ← PIXELAV itself: what it is, input formats, conventions
 │   ├── pixelav_handoff.md             ← end-to-end recipe: produce + hand off the PIXELAV deck
-│   ├── pixelav_journey_log.md         ← build/run log of PIXELAV on our decks (with validation)
 │   └── figures/                       ← rendered dashboards + figures
 ├── setup/
 │   ├── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env
-│   ├── setup_gpu_kernel.sh            ← one-shot: register the GPU kernel for notebooks 03/03b/03d
-│   └── setup_pixelav.sh               ← build PIXELAV + the DECAL sensor model (for notebook 06)
+│   └── setup_gpu_kernel.sh            ← one-shot: register the GPU kernel for notebooks 03/03b/03d
 ├── geometry/                          ← DD4hep XML detector descriptions
 │   ├── SiD_TestBeam.xml               ← top-level compact passed to ddsim
 │   ├── my_custom_ecal.xml             ← our DECAL barrel definition (only modified file)
@@ -94,8 +92,7 @@ CALOMAPS/
 │   ├── extract_cascade.py             ← full-cascade ROOT → npz (MCParticles + step truth)
 │   ├── extract_trackermom.py          ← tracker-readout ROOT → npz (per-crossing momentum)
 │   ├── pixelav_converter.py           ← crossings → 7-column PIXELAV deck (+ json/csv records)
-│   ├── decal_cbfit.py / cbnet.py      ← Crystal-Ball fits / CB-density net (03c/03d)
-│   └── pixelav/                       ← patched real-entry PIXELAV driver + Stage-A generator + parser
+│   └── decal_cbfit.py / cbnet.py      ← Crystal-Ball fits / CB-density net (03c/03d)
 ├── notebooks/                         ← interactive workflow notebooks
 │   ├── 00_simulate_your_samples.ipynb ← primer: generate your own samples (any particle via env vars)
 │   ├── 01_detector_and_data.ipynb     ← the detector + its data (01b: pion variant)
@@ -103,8 +100,7 @@ CALOMAPS/
 │   ├── 03_ml_training_and_eval.ipynb  ← train ensembles + dashboard (03b: pions)
 │   ├── 03c / 03d                      ← Crystal-Ball resolution studies (conventional / ML)
 │   ├── 04_shower_4vectors.ipynb       ← full-cascade MCParticle 4-vectors
-│   ├── 05a / 05b / 05c                ← PIXELAV inputs: tracker route, calo route, inspection
-│   └── 06_pixelav_clusters.ipynb      ← run PIXELAV on the deck + validate output clusters
+│   └── 05a / 05b / 05c                ← PIXELAV inputs: tracker route, calo route, inspection
 └── models/                            ← (gitignored) extracted data + trained checkpoints
     ├── decal_extracted_data*.npz
     ├── saved_ensembles_gpu_v2/        ← photon ensembles (trained on the A100 MIG slice)
@@ -127,7 +123,7 @@ source ~/setup_calomaps.sh
 
 `setup_calomaps.sh` is safe to source repeatedly; it creates the `~/lib_hack` OpenGL shim and the data directory for you. Confirm your environment with the smoke test in `docs/handbook.md` §8.
 
-New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`), then `01 → 02 → 03` study the reconstruction. For the PIXELAV product line, `04 → 05a/05b → 05c → 06` go from the shower cascade to validated pixel clusters ([docs/pixelav_handoff.md](docs/pixelav_handoff.md) is the recipe).
+New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`), then `01 → 02 → 03` study the reconstruction. For the PIXELAV product line, `04 → 05a/05b → 05c` go from the shower cascade to a validated input deck ([docs/pixelav_handoff.md](docs/pixelav_handoff.md) is the recipe; PIXELAV itself is built and run on the `pixelav-integration` branch).
 
 The ML notebook (`03_ml_training_and_eval.ipynb`) needs a GPU kernel — register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
 

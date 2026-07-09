@@ -120,7 +120,8 @@ What each driving field means:
   other way around: `locdir[0] = cot_beta·locdir[2]`, `locdir[1] = cot_alpha·locdir[2]` — i.e.
   the **first** deck column steers the **y** (13-pixel, Lorentz) axis and the **second** steers
   **x** (21-pixel). ✅ **VERIFIED for our chain (2026-07-09)** by direct source read of
-  `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c` plus a byte-identical full-chain
+  `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c` (on the `pixelav-integration`
+  branch) plus a byte-identical full-chain
   reproduction: our deck writes `cot_alpha = p_u/p_w` (col 1) + `mody = u` (col 6) onto PIXELAV's
   y axis, and `cot_beta = p_v/p_w` (col 2) + `modx = v` (col 5) onto PIXELAV's x axis — angles and
   impact labels land on the same axes, self-consistently. The stock snippet quoted below (from
@@ -230,7 +231,8 @@ writing and counted in the converter's summary line.
 1. **Which fork/column layout** is canonical for our Smart Pixels target (we assume the 9-col
    `ppixelav2_custom.c`); confirm there isn't a newer internal version.
 2. **Entry point:** standard randomisation vs truth injection. Our patched driver
-   (`analysis/pixelav/ppixelav2_list_trkpy_real_entry.c`, built by `setup/setup_pixelav.sh`)
+   (on the `pixelav-integration` branch: `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c`,
+   built by `setup/setup_pixelav.sh`)
    already injects the deck's truth impact (reduced mod-pitch); the collaboration still has to
    choose which mode their production runs use. Note the "entry" we carry is the
    energy-weighted **mid-crossing** position from `Geant4TrackerWeightedAction` (~sensor

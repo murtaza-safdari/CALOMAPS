@@ -374,7 +374,8 @@ A second product line — **per-sensor track crossings for PIXELAV** — branche
 | `04_shower_4vectors` | full-cascade MCParticle 4-vectors (experiment A) |
 | `05a`/`05b_pixelav_inputs` | per-sensor track crossings for PIXELAV — tracker / calo routes (§10.1) |
 | `05c_pixelav_input_inspection` | deck/npz sanity + physics inspection before hand-off |
-| `06_pixelav_clusters` | run PIXELAV on the deck; parse + validate the output clusters |
+
+(Building and *running* PIXELAV on the deck lives on the `pixelav-integration` branch — see §10.1.)
 
 ---
 
@@ -641,10 +642,10 @@ and entry) when the trackermom `.npz` is present, else falls back to Variant A (
 production momentum). Notebooks [`04_shower_4vectors`](../notebooks/04_shower_4vectors.ipynb),
 [`05a_pixelav_inputs_tracker`](../notebooks/05a_pixelav_inputs_tracker.ipynb) (§5 validates the
 per-crossing momentum) and [`05b_pixelav_inputs_calo`](../notebooks/05b_pixelav_inputs_calo.ipynb)
-inspect these outputs. Building and running PIXELAV itself on these inputs is in-repo too:
-[`setup/setup_pixelav.sh`](../setup/setup_pixelav.sh) builds the reference PIXELAV plus our patched
-real-entry driver ([`analysis/pixelav/`](../analysis/pixelav/)), notebook
-[`06_pixelav_clusters`](../notebooks/06_pixelav_clusters.ipynb) runs and parses it, and
+inspect these outputs. Main deliberately stops at the validated input package: building and
+running PIXELAV itself lives on the `pixelav-integration` branch (`setup/setup_pixelav.sh`
+builds the reference PIXELAV plus our patched real-entry driver in `analysis/pixelav/`;
+notebook `06_pixelav_clusters` runs and parses it there).
 [`docs/pixelav_handoff.md`](pixelav_handoff.md) is the end-to-end hand-off recipe (deck format,
 Stage-A sensor model, open decisions for the collaboration).
 

@@ -34,8 +34,8 @@ travel with it so the recipient can trace any line back to its MCParticle.
 > Summing PIXELAV's per-crossing charge over a whole shower over-counts the deposited
 > charge (PIXELAV regenerates delta rays that Geant4 already produced as separate
 > crossings) — the per-crossing physics is correct; it is the *shower sum* that needs a
-> filter. The double-counting and the proposed filter are documented in notebook 06; the
-> filter is **not** applied here.
+> filter. The double-counting and the proposed filter are documented in notebook 06 on the
+> `pixelav-integration` branch; the filter is **not** applied here.
 
 ---
 
@@ -110,7 +110,8 @@ cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
 - `pT` — the real momentum magnitude (GeV), carried as a label.
 
 Stock PIXELAV randomizes the sub-pixel impact; `modx`/`mody` are the real impact for the
-patched `ppixelav2_list_trkpy_real_entry` driver (see [`pixelav_journey_log.md`](pixelav_journey_log.md)).
+patched `ppixelav2_list_trkpy_real_entry` driver (on the `pixelav-integration` branch; see
+`docs/pixelav_journey_log.md` there).
 
 ---
 
@@ -125,10 +126,12 @@ pixelav_segments_<tag><E>_1evt.json / .csv           <- per-crossing provenance
 trackermom_<tag><E>_1evt.npz                         <- full MCParticle + tracker arrays
 ```
 
-They run it through their PIXELAV with the DECAL sensor model (320 µm Si, 100 µm pitch;
+They run it through their PIXELAV with the DECAL sensor model (320 µm Si, 100 µm pitch).
+For a local cross-check, the `pixelav-integration` branch carries the PIXELAV-side tooling:
 `analysis/pixelav/make_decal_stagea.py` generates the Stage-A field + weighting-potential
-files, and `setup/setup_pixelav.sh` builds a reference PIXELAV + the patched driver if they
-want a local cross-check). Each deck line yields one simulated cluster.
+files, and `setup/setup_pixelav.sh` builds a reference PIXELAV + the patched real-entry
+driver; its notebook `06_pixelav_clusters` runs and parses a full deck. Each deck line
+yields one simulated cluster.
 
 To validate a deck before sending it, open the **PIXELAV-input inspection notebook**
 ([`05c_pixelav_input_inspection.ipynb`](../notebooks/05c_pixelav_input_inspection.ipynb)) — it
