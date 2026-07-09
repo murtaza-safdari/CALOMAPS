@@ -113,7 +113,7 @@ chmod +x wrapper.sh
 
 Open `kernel.json` in that folder and replace the path to the python binary with the path to your new `wrapper.sh` script.
 
-> **⚠ Drift note (2026-05-26):** In the current project's actual install, the CUDA torch install was either never done or didn't persist (`torch.cuda.is_available()` returns False), and the wrapper.sh was never created. The kernel calls `/home/murtazas/my_gpu_env/bin/python` directly. If GPU training matters, re-run the pip install above.
+> **⚠ Drift note (updated 2026-07-09):** the manual recipe above is historical. The current, supported path is `bash setup/setup_gpu_kernel.sh`, which creates the venv, installs CUDA torch, and registers the `Key4hep + GPU` (`calomaps_gpu`) wrapper kernel in one step — see handbook.md §11.2. The ensembles shipped with the project were (re)trained on the A100 through that kernel.
 
 ## Part 5: Software Reconstruction (Jupyter Pipeline)
 

@@ -5,7 +5,9 @@ charge deposition and transport in a silicon pixel sensor. It is the simulation 
 the CMS `SiPixelTemplate` / generic-error pixel templates and the calibration engine for the
 CMS Phase-2 Inner Tracker. CALOMAPS produces **PIXELAV Stage-B track-crossing inputs** from the
 Geant4 shower (see [`analysis/pixelav_converter.py`](../analysis/pixelav_converter.py) and
-notebook [`05_pixelav_inputs.ipynb`](../notebooks/05_pixelav_inputs.ipynb)); this file is the
+notebooks [`05a_pixelav_inputs_tracker.ipynb`](../notebooks/05a_pixelav_inputs_tracker.ipynb),
+[`05b_pixelav_inputs_calo.ipynb`](../notebooks/05b_pixelav_inputs_calo.ipynb) and
+[`05c_pixelav_input_inspection.ipynb`](../notebooks/05c_pixelav_input_inspection.ipynb)); this file is the
 collected reference on PIXELAV itself — what it is, how to get it, and the exact input format —
 so the converter and the deck writer can be finished against a concrete spec.
 
@@ -113,8 +115,17 @@ What each driving field means:
   x and y the in-plane pixel axes). This matches the CMS convention `cot(alpha) = cosx/cosz`,
   `cot(beta) = cosy/cosz` (CMS NOTE 2002/027; CMS IN 2004/014; CMSSW `SiPixelTemplate.h`), where
   α is the incidence angle in the x–z plane and β in the y–z (magnetic-bending) plane.
-  **Caveat:** the *badeaa3* driver source literally swaps these (`cot_alpha = p_y/p_z`), so the
-  x↔y axis labelling and signs should be verified against the exact binary you run.
+  **Caveat — the two lineages differ, so verify against the driver you run.** The *badeaa3* list
+  drivers (and our patched real-entry driver, which inherits from them) apply the columns the
+  other way around: `locdir[0] = cot_beta·locdir[2]`, `locdir[1] = cot_alpha·locdir[2]` — i.e.
+  the **first** deck column steers the **y** (13-pixel, Lorentz) axis and the **second** steers
+  **x** (21-pixel). ✅ **VERIFIED for our chain (2026-07-09)** by direct source read of
+  `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c` plus a byte-identical full-chain
+  reproduction: our deck writes `cot_alpha = p_u/p_w` (col 1) + `mody = u` (col 6) onto PIXELAV's
+  y axis, and `cot_beta = p_v/p_w` (col 2) + `modx = v` (col 5) onto PIXELAV's x axis — angles and
+  impact labels land on the same axes, self-consistently. The stock snippet quoted below (from
+  `ppixelav2.c`'s randomizing wrapper) names the variables the Smart-Pixels way; only the
+  fscanf-to-axis pairing of the list drivers is swapped.
 - **`ppion`** — momentum magnitude in **GeV/c**.
 - **`flipped`** (int 0/1) — selects the entry face and the sign of the depth direction: `flipped`
   picks z-entry = 0 with n_z > 0, or z-entry = thickness with n_z < 0.
@@ -184,13 +195,51 @@ path if CALOMAPS ever wants CMS-style templates.
 - For our **custom DECAL geometry**, the Stage-A field map comes from our TCAD via
   `CodexForster/TCADtoPixelAV` — that, plus the per-track deck, is the full PIXELAV input.
 
+### The CALOMAPS per-crossing record — authoritative schema
+
+`pixelav_converter.py` writes, next to the deck, a `.json`/`.csv` with one 16-field record per
+crossing (the provenance behind every deck line). Coordinates: **u** = across-pitch (tangential),
+**v** = cylinder-z, **w** = sensor depth (outward face normal); all lengths in **mm** here (the
+deck's length labels are in µm).
+
+| Field | Unit | Meaning |
+|---|---|---|
+| `track_id` | – | index into the event's `MCParticles` (trace any line back to its particle) |
+| `layer_id` | – | Si layer 0–29 (0 = innermost); assignment verified against the readout `cellID` |
+| `pdg` | – | PDG code of the crossing particle |
+| `p_GeV` | GeV | \|p\| — variant **C**: true Geant4 momentum *at the crossing*; **A**/**B**: momentum at production |
+| `entry_u`, `entry_v` | mm | sensor-local impact point. Variant **C**: `Geant4TrackerWeightedAction`'s energy-weighted mid-crossing position (~mid-plane), **not** the entry face; **A**: earliest-in-time step position |
+| `cot_alpha` | – | `p_u / p_w` (drives PIXELAV's 13-px/Lorentz **y** axis in our driver) |
+| `cot_beta` | – | `p_v / p_w` (drives PIXELAV's 21-px **x** axis) |
+| `flipped` | 0/1 | 1 = outward-going (`p_w ≥ 0`) → driver entry face `z = 0`; 0 → `z = thick` |
+| `sensor_normal_phi` | rad | outward-normal azimuth of the dodecagon face the crossing is on |
+| `depth_w_mm` | mm | radial depth (apothem) of the impact point |
+| `energy_dep_GeV` | GeV | Geant4 energy deposited in the crossing — bookkeeping only; PIXELAV regenerates its own ionization |
+| `n_steps` | – | Geant4 steps merged into this record (variant C: 1 combined hit) |
+| `time_ns` | ns | crossing time (deck's `hittime` label is this ×1000, in ps, smartpix layout only) |
+| `variant` | – | `C` (tracker truth), `A` (calo step truth), `B` (pixel centroid fallback) |
+| `flags` | – | provenance markers: `tracker_hit`, `dir_from_momentum`, `pixel_centroid`, `grazing` |
+
+Deck-column ↔ record mapping (badeaa3 7-col): `cot_alpha cot_beta ppion flipped modx mody pT` =
+`cot_alpha`, `cot_beta`, `p·(m_π/m_particle)` (βγ-matched), `flipped`, `entry_v·1000` (µm),
+`entry_u·1000` (µm), `p_GeV`. Grazing records (|cot| > 10 or non-finite) are skipped at deck
+writing and counted in the converter's summary line.
+
 ### Open decisions (need the collaboration / Swartz)
 
 1. **Which fork/column layout** is canonical for our Smart Pixels target (we assume the 9-col
    `ppixelav2_custom.c`); confirm there isn't a newer internal version.
-2. **Entry point:** standard randomisation vs patch the wrapper to inject our truth entry.
-3. **cot axis/sign** for our sensor orientation (the public copies disagree on x↔y) — verify with
-   a one-track round-trip against the actual binary.
+2. **Entry point:** standard randomisation vs truth injection. Our patched driver
+   (`analysis/pixelav/ppixelav2_list_trkpy_real_entry.c`, built by `setup/setup_pixelav.sh`)
+   already injects the deck's truth impact (reduced mod-pitch); the collaboration still has to
+   choose which mode their production runs use. Note the "entry" we carry is the
+   energy-weighted **mid-crossing** position from `Geant4TrackerWeightedAction` (~sensor
+   mid-plane), not the entry-face point — the driver back-projects it to the entry face using
+   the track angles, exactly as stock PIXELAV does with its randomized mid-plane impact.
+3. ~~**cot axis/sign** for our sensor orientation (the public copies disagree on x↔y)~~ —
+   **RESOLVED 2026-07-09**: verified against our patched driver's source and a byte-identical
+   full-chain rerun (see §3b caveat above). Re-verify only if you switch to a different
+   driver/lineage (e.g. the 9-column Smart Pixels wrapper).
 4. **Non-pion dE/dx:** is the momentum-rescaling approximation acceptable for the e±-dominated
    shower, or does Swartz have a proper electron treatment?
 5. The Stage-A field map for the 100 µm-pitch DECAL Si (TCAD → `TCADtoPixelAV`).

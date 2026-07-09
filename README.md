@@ -2,6 +2,8 @@
 
 A research framework for digital electromagnetic calorimeter (DECAL) studies using simulated Monolithic Active Pixel Sensor (MAPS) silicon layers. CALOMAPS pairs a DD4hep / Geant4 simulation of a custom 100 µm-pitch silicon-tungsten ECal barrel with a PyTorch Deep Quantile Ensemble surrogate model and a Neyman-construction energy reconstruction, producing the standard 3-panel calorimeter performance dashboard (linearity, resolution, stochastic term).
 
+Beyond the reconstruction dashboard, CALOMAPS produces a second data product for sensor-level collaborators: **per-sensor charged-track crossings** of every silicon layer in the shower — impact point, direction, and true per-crossing momentum — exported as ready-to-run input decks for [PIXELAV](docs/pixelav_reference.md) (M. Swartz's detailed silicon-pixel charge-transport simulation). See [docs/pixelav_handoff.md](docs/pixelav_handoff.md) for the end-to-end hand-off recipe.
+
 The pipeline runs end-to-end on the [Fermilab Elastic Analysis Facility (EAF)](https://eaf.fnal.gov). Everything from environment setup through the final physics plot is documented in [docs/handbook.md](docs/handbook.md).
 
 ---
@@ -41,6 +43,17 @@ sim/run_sim.py  ──>  ddsim  ──>  ROOT files (1000 × 20 events)
                        3-panel physics dashboard PNG
 ```
 
+A second product line branches off after simulation — per-sensor track crossings for PIXELAV:
+
+```
+sim/make_pixelav_inputs.sh  (one command: sim → extract → deck)
+    ├── sim/run_sim_trackermom.py   ──>  ddsim  ──>  SimTrackerHits with true per-crossing momentum
+    ├── analysis/extract_trackermom.py   ──>  models/trackermom_<tag><E>_1evt.npz
+    └── analysis/pixelav_converter.py    ──>  models/pixelav_segments_*.pixelav.txt  (the PIXELAV deck)
+                                              + .json/.csv per-crossing records (16 fields each)
+notebooks 04 / 05a / 05b / 05c inspect it;  setup/setup_pixelav.sh + notebook 06 build & run PIXELAV on it
+```
+
 ---
 
 ## Repository layout
@@ -52,10 +65,14 @@ CALOMAPS/
 │   ├── handbook.md                    ← OPERATIONAL guide; read this first
 │   ├── troubleshooting.md             ← infrastructure quirks (SSHFS, JupyterHub, CVMFS, quotas)
 │   ├── DECAL_pipeline.md              ← PHYSICS writeup (advisor's PDF transcribed)
+│   ├── pixelav_reference.md           ← PIXELAV itself: what it is, input formats, conventions
+│   ├── pixelav_handoff.md             ← end-to-end recipe: produce + hand off the PIXELAV deck
+│   ├── pixelav_journey_log.md         ← build/run log of PIXELAV on our decks (with validation)
 │   └── figures/                       ← rendered dashboards + figures
 ├── setup/
 │   ├── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env
-│   └── setup_gpu_kernel.sh            ← one-shot: register the GPU kernel for notebook 03
+│   ├── setup_gpu_kernel.sh            ← one-shot: register the GPU kernel for notebooks 03/03b/03d
+│   └── setup_pixelav.sh               ← build PIXELAV + the DECAL sensor model (for notebook 06)
 ├── geometry/                          ← DD4hep XML detector descriptions
 │   ├── SiD_TestBeam.xml               ← top-level compact passed to ddsim
 │   ├── my_custom_ecal.xml             ← our DECAL barrel definition (only modified file)
@@ -63,22 +80,35 @@ CALOMAPS/
 │       └── PROVENANCE.md
 ├── sim/                               ← Geant4 / DD4hep driver scripts
 │   ├── run_sim.py                     ← ddsim steering file (particle gun + physics list)
+│   ├── run_sim_fullcascade.py         ← + full-cascade truth (detailed calo mode; experiment A)
+│   ├── run_sim_trackermom.py          ← + per-crossing momentum (ECal Si as tracker; PIXELAV source)
+│   ├── make_pixelav_inputs.sh         ← one command: sim → extract → PIXELAV deck
 │   ├── generate_dataset.sh
 │   └── generate_batched.sh
 ├── analysis/                          ← Python ML / reconstruction utilities
 │   ├── quantilenet.py                 ← QuantileNet model + training + load/save
 │   ├── dashboard.py                   ← Neyman inversion + 3-panel dashboard plotting
 │   ├── train_ensembles.py             ← CLI entry point (headless training)
-│   └── verify_ensembles.py            ← CLI entry point (regenerate dashboard)
+│   ├── verify_ensembles.py            ← CLI entry point (regenerate dashboard)
+│   ├── extract_readouts.py            ← headless nb02-equivalent extraction (per-energy datasets)
+│   ├── extract_cascade.py             ← full-cascade ROOT → npz (MCParticles + step truth)
+│   ├── extract_trackermom.py          ← tracker-readout ROOT → npz (per-crossing momentum)
+│   ├── pixelav_converter.py           ← crossings → 7-column PIXELAV deck (+ json/csv records)
+│   ├── decal_cbfit.py / cbnet.py      ← Crystal-Ball fits / CB-density net (03c/03d)
+│   └── pixelav/                       ← patched real-entry PIXELAV driver + Stage-A generator + parser
 ├── notebooks/                         ← interactive workflow notebooks
 │   ├── 00_simulate_your_samples.ipynb ← primer: generate your own samples (any particle via env vars)
-│   ├── 01_detector_and_data.ipynb     ← the detector + its data: geometry, one shower, first-look plots
-│   ├── 02_data_extraction.ipynb       ← parallel uproot extraction → .npz
-│   └── 03_ml_training_and_eval.ipynb  ← train ensembles + dashboard
+│   ├── 01_detector_and_data.ipynb     ← the detector + its data (01b: pion variant)
+│   ├── 02_data_extraction.ipynb       ← parallel uproot extraction → .npz (02b: pions)
+│   ├── 03_ml_training_and_eval.ipynb  ← train ensembles + dashboard (03b: pions)
+│   ├── 03c / 03d                      ← Crystal-Ball resolution studies (conventional / ML)
+│   ├── 04_shower_4vectors.ipynb       ← full-cascade MCParticle 4-vectors
+│   ├── 05a / 05b / 05c                ← PIXELAV inputs: tracker route, calo route, inspection
+│   └── 06_pixelav_clusters.ipynb      ← run PIXELAV on the deck + validate output clusters
 └── models/                            ← (gitignored) extracted data + trained checkpoints
-    ├── decal_extracted_data.npz
-    ├── saved_ensembles/               ← original ensembles
-    └── saved_ensembles_gpu_v2/        ← retrained on the A100 MIG slice
+    ├── decal_extracted_data*.npz
+    ├── saved_ensembles_gpu_v2/        ← photon ensembles (trained on the A100 MIG slice)
+    └── pixelav_segments_*             ← per-crossing records + PIXELAV decks
 ```
 
 The 21 GB of raw simulation ROOT files live **outside the repo**, at `$CALOMAPS_DATA_BASE` (defaults to `~/CALOMAPS-data/`). They're regenerated by `sim/generate_batched.sh` and consumed by `notebooks/02_data_extraction.ipynb`.
@@ -97,7 +127,7 @@ source ~/setup_calomaps.sh
 
 `setup_calomaps.sh` is safe to source repeatedly; it creates the `~/lib_hack` OpenGL shim and the data directory for you. Confirm your environment with the smoke test in `docs/handbook.md` §8.
 
-New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`), then `01 → 02 → 03` study the reconstruction.
+New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`), then `01 → 02 → 03` study the reconstruction. For the PIXELAV product line, `04 → 05a/05b → 05c → 06` go from the shower cascade to validated pixel clusters ([docs/pixelav_handoff.md](docs/pixelav_handoff.md) is the recipe).
 
 The ML notebook (`03_ml_training_and_eval.ipynb`) needs a GPU kernel — register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
 

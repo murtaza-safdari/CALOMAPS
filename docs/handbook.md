@@ -236,7 +236,7 @@ r=1403 mm
 
 **Why 320 µm silicon?** Standard MAPS thickness. Thin enough for well-defined Landau-distributed energy deposits per MIP-crossing; thick enough for reliable detection.
 
-**Total radiation lengths:** 20 × 2.5 mm + 10 × 5.0 mm = 100 mm of tungsten; W X₀ ≈ 3.5 mm → **~28 X₀**, plenty for EM containment.
+**Total radiation lengths:** 20 × 2.5 mm + 10 × 5.0 mm = 100 mm of absorber. The absorber is not pure tungsten but the SiD heavy alloy `TungstenDens24` (93% W / 6.1% Ni / 0.9% Fe by mass, ρ = 17.8 g/cm³ — see `geometry/baseline_sid_o2_v03/materials.xml`), whose X₀ ≈ 6.99 g/cm² ÷ 17.8 g/cm³ ≈ 3.93 mm → **~25 X₀**, plenty for EM containment.
 
 ### 3.5 Pixel segmentation
 
@@ -274,7 +274,7 @@ Empirically (from a 10-event smoke run at fixed 50 GeV):
 | Energy per hit | 3 neV — 5 MeV | Landau-shaped — most hits are MIP-like |
 | Hit y-range | **[−1316, +1401] mm** | Spans both the +Y entry face *and* the −Y exit face |
 
-**Why hits on the opposite face?** A 50 GeV EM shower is roughly 95% contained in 28 X₀. The remaining ~5% (and many soft secondaries) escape *into* the air cavity inside the dodecagon, fly across, and strike the **opposite face**. So a single shower deposits hits on both the entry face and (less so) the exit face.
+**Why hits on the opposite face?** A 50 GeV EM shower is roughly 95% contained in the stack's ~25 X₀. The remaining ~5% (and many soft secondaries) escape *into* the air cavity inside the dodecagon, fly across, and strike the **opposite face**. So a single shower deposits hits on both the entry face and (less so) the exit face.
 
 The extraction in `notebooks/02_data_extraction.ipynb` isolates the **entry segment** — the one dodecagon face the beam enters — keeping only hits in a ±15° wedge around +y within the silicon depth range:
 ```python
@@ -295,7 +295,7 @@ This is deliberate: a real measurement reads out the module the beam enters, and
 | Thin layers | 20 × (2.5 mm W + 320 µm Si + readout) | `my_custom_ecal.xml` |
 | Thick layers | 10 × (5.0 mm W + 320 µm Si + readout) | `my_custom_ecal.xml` |
 | Total Si layers | **30** | |
-| Total W absorber | 100 mm ≈ 28 X₀ | |
+| Total W-alloy absorber | 100 mm ≈ 25 X₀ (TungstenDens24, X₀ ≈ 3.93 mm) | |
 | Pixel pitch | **100 µm × 100 µm** | `ECal_cell_size` |
 | Magnetic field | **0 T** | `<fields>` in `SiD_TestBeam.xml` |
 
@@ -360,6 +360,22 @@ flowchart TD
 
 Stage 1 (simulation) happens in a JupyterLab terminal (via `sim/generate_batched.sh`). Stages 2-5 happen in JupyterLab notebooks: stage 2 (extraction) in notebook 02, stages 3-5 (training / inversion / dashboard) in notebook 03 on the `Key4hep + GPU` kernel.
 
+A second product line — **per-sensor track crossings for PIXELAV** — branches off after simulation
+(§10.1 and [`docs/pixelav_handoff.md`](pixelav_handoff.md)). The full notebook set, in pipeline order:
+
+| Notebook | What it does |
+|---|---|
+| `00_simulate_your_samples` | generate your own datasets (terminal recipes) |
+| `01_detector_and_data` (+ `01b` pions) | geometry, pixel quantization, one event, first look |
+| `02_data_extraction` (+ `02b` pions) | canonical extraction → `decal_extracted_data*.npz` |
+| `03_ml_training_and_eval` (+ `03b` pions) | quantile ensembles + Neyman dashboard |
+| `03c_conventional_resolution` | Crystal-Ball fixed-energy resolution cross-check (§13.3) |
+| `03d_ml_crystalball_density` | ML CB-density-net resolution study |
+| `04_shower_4vectors` | full-cascade MCParticle 4-vectors (experiment A) |
+| `05a`/`05b_pixelav_inputs` | per-sensor track crossings for PIXELAV — tracker / calo routes (§10.1) |
+| `05c_pixelav_input_inspection` | deck/npz sanity + physics inspection before hand-off |
+| `06_pixelav_clusters` | run PIXELAV on the deck; parse + validate the output clusters |
+
 ---
 
 ## 6. Setting up your environment
@@ -413,18 +429,18 @@ What this does (see [`setup/setup_calomaps.sh`](../setup/setup_calomaps.sh)):
 
 1. `source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01` — loads Key4hep (Geant4, ROOT, DD4hep, uproot, NumPy, PyTorch CPU). ~30 GB from CVMFS.
 2. Creates `~/lib_hack/libOpenGL.so.0` if missing, then prepends `~/lib_hack` to `LD_LIBRARY_PATH` — the OpenGL workaround for DD4hep (see above).
-3. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit, which a fresh `git clone` onto the SSHFS mount drops.
-4. `export CALOMAPS_HOME=/nashome/<X>/<username>/CALOMAPS` — project root, derived from `$USER`.
-5. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` (and `mkdir -p` it) — where simulation data lives.
-6. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
+3. Registers the **Key4hep (CPU)** Jupyter kernel (`calomaps_cpu`) — a wrapper kernel whose launcher sources Key4hep before starting, so GUI-launched notebooks see `uproot`/`numpy`/`awkward`. This is the kernel the CPU notebooks are saved with.
+4. `chmod +x $CALOMAPS_HOME/sim/*.sh` — restores the executable bit, which a fresh `git clone` onto the SSHFS mount drops.
+5. `export CALOMAPS_HOME=<repo root>` — self-located from the script's own path (through the `~/setup_calomaps.sh` symlink), so it works wherever you cloned. Override by exporting `CALOMAPS_HOME` before sourcing.
+6. `export CALOMAPS_DATA_BASE=$HOME/CALOMAPS-data` (and `mkdir -p` it) — where simulation data lives.
+7. `cd $CALOMAPS_HOME/sim` — drops you in the work dir.
 
 The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't kill your shell. Source once per terminal. Notebooks don't need it — the JupyterLab kernel inherits CVMFS at spawn.
 
 #### Notebook kernels
 
-- **Notebooks 00, 01, 02** (CPU) run on the Key4hep stack. In the JupyterLab kernel selector pick **`python3`** — on the EAF image this is the CVMFS Key4hep build (it ships `uproot`, `numpy`, `awkward`) — or **`Python (Key4hep)`** if that entry is present (a hand-registered alias for the same stack). Either works.
-- **Notebook 03** (GPU training) needs the **`Key4hep + GPU`** kernel from `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2).
-- If neither CPU entry has `uproot`, register one yourself after sourcing the env: `python -m ipykernel install --user --name key4hep --display-name "Python (Key4hep)"`.
+- **CPU notebooks** (00, 01/01b, 02/02b, 03c, 04, 05a/05b/05c, 06) are saved against the **`Key4hep (CPU)`** kernel (`calomaps_cpu`), which `source ~/setup_calomaps.sh` registers automatically (step 3 above). A GUI-launched kernel never inherits a terminal's environment, so this wrapper kernel — whose launcher sources Key4hep itself — is what makes the notebooks work for a fresh clone. Reload JupyterLab after first sourcing to see it.
+- **GPU notebooks** (03/03b/03d) need the **`Key4hep + GPU`** kernel (`calomaps_gpu`) from `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2).
 
 ### 6.5 Editing files
 
@@ -566,7 +582,7 @@ The notebook parallelizes with `ProcessPoolExecutor(max_workers=min(32, os.cpu_c
 ### 10.1 Cascade + per-crossing-momentum extraction (experiments "A" + "B": full-cascade 4-vectors + PIXELAV inputs)
 
 Preparing inputs for a per-pixel device simulation (PIXELAV) needs the full shower cascade and, per
-charged-track sensor crossing, the entry point, direction and **momentum**. Two single-event `ddsim`
+charged-track sensor crossing, the impact point, direction and **momentum**. Two single-event `ddsim`
 runs of the same 50 GeV photon (both pin seed 424242 → identical shower), steered from `sim/`, produce it:
 
 | Run | Steering | Si readout | Gives |
@@ -593,7 +609,15 @@ The first three are truth-persistency — they change *which* truth is written, 
 (nb04 §2 shows the deposit distribution is unchanged); the last two switch on the per-crossing
 readout PIXELAV needs.
 
-Run both (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
+**One command runs the whole chain** — both sims, both extractors, and the converter
+([`sim/make_pixelav_inputs.sh`](../sim/make_pixelav_inputs.sh); particle/energy via the usual env vars):
+
+```bash
+bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh --fullcascade            # gamma 50 GeV
+CALOMAPS_GUN_PARTICLE=pi+ CALOMAPS_GUN_ENERGY_GEV=80 bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh
+```
+
+Or run the steps manually (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
 
 ```bash
 source ~/setup_calomaps.sh                       # Key4hep + lib_hack + CALOMAPS_* env
@@ -606,18 +630,23 @@ python ../analysis/extract_trackermom.py         # -> models/trackermom_*.npz   
 python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* (auto-picks Variant C)
 ```
 
-⚠️ **Key4hep release**: both runs keep the full ~78k-particle cascade, and the pinned `2026-02-01`
-release crashes (`free(): invalid pointer`) while *finalizing* such a large EDM4hep file. Source the
-`2026-04-08` release before running these two steering files — see `troubleshooting.md`, "EDM4hep
-podio writer crashes on very large events".
+⚠️ **Key4hep release**: both runs keep the full ~78k-particle cascade. On the older EAF image the
+pinned `2026-02-01` release crashed (`free(): invalid pointer`) while *finalizing* such a large
+EDM4hep file; on the current AlmaLinux 9 image this no longer reproduces (verified 2026-07-09,
+50 GeV photon, both steering files). If you do hit it, source the `2026-04-08` release for these
+two runs — see `troubleshooting.md`, "EDM4hep podio writer crashes on very large events".
 
 `pixelav_converter.py` auto-selects **Variant C** (tracker hits → real per-crossing `|p|`, direction
 and entry) when the trackermom `.npz` is present, else falls back to Variant A (calo step truth,
 production momentum). Notebooks [`04_shower_4vectors`](../notebooks/04_shower_4vectors.ipynb),
 [`05a_pixelav_inputs_tracker`](../notebooks/05a_pixelav_inputs_tracker.ipynb) (§5 validates the
 per-crossing momentum) and [`05b_pixelav_inputs_calo`](../notebooks/05b_pixelav_inputs_calo.ipynb)
-inspect these outputs. Building and running PIXELAV itself on these inputs is a separate, deferred
-step maintained on the `pixelav-integration` branch; this section covers only preparing its inputs.
+inspect these outputs. Building and running PIXELAV itself on these inputs is in-repo too:
+[`setup/setup_pixelav.sh`](../setup/setup_pixelav.sh) builds the reference PIXELAV plus our patched
+real-entry driver ([`analysis/pixelav/`](../analysis/pixelav/)), notebook
+[`06_pixelav_clusters`](../notebooks/06_pixelav_clusters.ipynb) runs and parses it, and
+[`docs/pixelav_handoff.md`](pixelav_handoff.md) is the end-to-end hand-off recipe (deck format,
+Stage-A sensor model, open decisions for the collaboration).
 
 Notebook 04 §2 also contrasts the stock vs full-cascade config over 20 events each to show the
 persistency settings don't change the physics; it reads `models/config_ab_gamma50.npz`, which
@@ -693,7 +722,7 @@ The model in [`analysis/quantilenet.py`](../analysis/quantilenet.py):
 
 ### 11.1 Reusing pre-trained models
 
-The repo expects pre-trained ensembles at `models/saved_ensembles_gpu_v2/` (4 files, ~400 KB each). These are **not committed to git** (`.gitignore` excludes `models/`). They're produced by the training step below, or distributed separately.
+The repo expects pre-trained ensembles at `models/saved_ensembles_gpu_v2/` (4 files, ~400 KB each — the dir notebook 03 writes; the headless `analysis/train_ensembles.py` writes `saved_ensembles_gpu_gamma/` instead, and `verify_ensembles.py` accepts either). These are **not committed to git** (`.gitignore` excludes `models/`). They're produced by the training step below, or distributed separately.
 
 If you have the `.npz` but no saved ensembles, train once (next subsection).
 
@@ -965,8 +994,7 @@ The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS us
 
 ## 15. Where to ask for help
 
-- **Project advisor**: (fill in with name + email/Slack handle)
-- **Slack channel**: (fill in)
+- **Project questions / bug reports**: open an issue on the [GitHub repository](https://github.com/murtaza-safdari/CALOMAPS/issues)
 - **EAF general help**: `eaf-support@fnal.gov`
 - **Key4hep docs**: <https://key4hep.github.io/>
 - **DD4hep manual**: <https://dd4hep.web.cern.ch/dd4hep/usermanuals/DD4hepManual/DD4hepManual.pdf>
