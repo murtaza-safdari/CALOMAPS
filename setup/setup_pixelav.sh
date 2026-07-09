@@ -49,7 +49,9 @@ cp weighting_BPix_50x13x100.init wgt_pot.init
 # 4) Generate the DECAL Stage-A sensor model (320 um, 100 um pitch, simple uniform E-field,
 #    B=0, FFT Ramo weighting potential).
 echo "[setup] generating DECAL Stage-A (ppixel2.decal.init + wgt_pot.decal.init) ..."
-"$PY" "$PXDIR/make_decal_stagea.py" .
+# PYTHONPATH is cleared: a Key4hep-sourced shell exports a python-3.13 PYTHONPATH that breaks
+# the /opt/conda interpreter (numpy "source directory" ImportError).
+env PYTHONPATH= "$PY" "$PXDIR/make_decal_stagea.py" .
 
 # 5) Assemble a ready-to-run DECAL run directory.
 RUN="$SRC/decal_run"; mkdir -p "$RUN"

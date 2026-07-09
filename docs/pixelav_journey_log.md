@@ -138,12 +138,12 @@ back-projection from midplane to the entry face intact.
 ## 8. Status & next steps
 
 - [x] Source obtained, driver built, baseline run verified on EAF.
-- [ ] DECAL Stage-A config (`ppixel2.init` + weighting potential) for our pitch/thickness with
-      a simple analytic E-field.
-- [ ] Patched driver consuming real `modx/mody`.
-- [ ] `write_pixelav_deck()` finished (7-col, µm, axis map above) and a deck generated from the
-      2,535 crossings.
-- [ ] One-track round-trip to confirm the cot/axis/flip convention; then a full run + plots.
+- [x] DECAL Stage-A config (`ppixel2.init` + weighting potential) for our pitch/thickness with
+      a simple analytic E-field. (§9)
+- [x] Patched driver consuming real `modx/mody`. (§9)
+- [x] `write_pixelav_deck()` finished (7-col, µm, axis map above) and a deck generated. (§9)
+- [x] Round-trip to confirm the cot/axis/flip convention; full run + plots. (§9, and re-verified
+      end-to-end 2026-07-09 — see §10.)
 
 ---
 
@@ -277,3 +277,37 @@ over-counts.
 3. Split notebook 05 into two co-equal methods: `05a_pixelav_inputs_tracker.ipynb` (tracker SD,
    momentum) and `05b_pixelav_inputs_calo.ipynb` (calo SD, step-energy truth, entry-face). The
    readout complementarity is documented in 05a §2b and the 05b intro.
+
+---
+
+## 10. Full-chain re-verification + port to `main` (2026-07-09)
+
+Everything in this log was re-exercised from scratch on the **updated EAF image** (AlmaLinux 9.7,
+Key4hep pinned `2026-02-01`), starting from a fresh `git clone` of `main`:
+
+1. `ddsim` (both steering files, seed 424242) → `extract_trackermom.py` → `pixelav_converter.py`
+   reproduced the committed per-crossing CSV **byte-for-byte** (3217 crossings / 3241 tracker hits /
+   24 neutral-skipped; deck: 3109 lines, 108 grazing skipped). The `free(): invalid pointer`
+   finalization crash (§ earlier) did **not** reproduce on the new image under the pinned release.
+2. `setup_pixelav.sh` rebuilt PIXELAV + the DECAL Stage-A model from scratch (one fix: the Stage-A
+   generator must run with a clean `PYTHONPATH` from a Key4hep-sourced shell — now in the script);
+   the patched driver on the fresh deck reproduced the committed `pixelav_clusters_full.out`
+   **byte-identically** over the compared prefix.
+3. The cot/axis/flip convention was verified a second, independent way: by direct read of the
+   driver source. `locdir[0] = cot_beta·locdir[2]`, `locdir[1] = cot_alpha·locdir[2]`, so deck
+   col 1 (`cot_alpha = p_u/p_w`) steers PIXELAV **y** (13 px, Lorentz) — the same axis as col 6
+   (`mody = u`) — and col 2 (`cot_beta = p_v/p_w`) steers PIXELAV **x** (21 px), same axis as
+   col 5 (`modx = v`). `flipped = 1` (outward, `p_w ≥ 0`) → `locdir[2] > 0` → entry face `z = 0`.
+   Angles and impact labels are pairwise consistent; the convention is closed.
+4. One geometry subtlety was root-caused while validating: the `ECalBarrel_o2_v03` driver starts
+   the layer stack at `rmin + ecal_barrel_tolerance` (= `env_safety` = 0.1 mm), so the naive
+   rmin-based Si mid-planes used by `si_layer_centers()` were 0.1 mm shallow. Layer *assignment*
+   was never affected (verified against the readout `cellID` for every hit); the constant is now
+   applied explicitly (`ECAL_STACK_OFFSET_MM`).
+
+Scope split (settled 2026-07-10): `main` carries the input-preparation side only —
+`sim/make_pixelav_inputs.sh`, the deck converter, notebook 05c (input inspection) and
+`docs/pixelav_handoff.md`. The PIXELAV build/run tooling in this log (`analysis/pixelav/`,
+`setup/setup_pixelav.sh`, notebook 06, this log itself) stays on this branch by design; the
+2026-07-09 fixes (clean-PYTHONPATH Stage-A invocation, the verification results above) are
+committed here.
