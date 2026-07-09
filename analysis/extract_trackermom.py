@@ -23,6 +23,14 @@ IN  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_data_base, "trackermom
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_home, "models", "trackermom_gamma50_1evt.npz")
 EV  = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 
+
+# Stamp provenance honestly: parse particle/energy from the input filename written by the
+# steering files (<prefix>_<tag><E>_1evt.root); fall back to 'unknown' rather than guessing.
+import re as _re
+_m = _re.search(r"(?:trackermom|fullcascade)_([a-z]+?)([0-9.]+)_", os.path.basename(IN))
+_meta_particle = _m.group(1) if _m else "unknown"
+_meta_energy = (_m.group(2) + " GeV") if _m else "unknown"
+
 t = uproot.open(IN)["events"]
 br = ["MCParticles.PDG", "MCParticles.mass",
       "MCParticles.momentum.x", "MCParticles.momentum.y", "MCParticles.momentum.z",
@@ -72,7 +80,7 @@ np.savez_compressed(
     pid=pid, status=status, gstat=gstat, dbeg=dbeg, dend=dend, dau=dau,
     thx=thx, thy=thy, thz=thz, tpx=tpx, tpy=tpy, tpz=tpz,
     tpath=tpath, ttime=ttime, tedep=tedep, tcellID=tcellID, tmc=tmc,
-    meta=np.array(["gamma", "50.0 GeV", "+y pencil beam", "seed=424242",
+    meta=np.array([_meta_particle, _meta_energy, "+y pencil beam", "seed=424242",
                    "ECalBarrel as Geant4TrackerWeightedAction", "SimTrackerHit w/ momentum", "EDM4hep"]),
 )
 tp = np.sqrt(tpx**2 + tpy**2 + tpz**2)

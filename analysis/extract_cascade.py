@@ -24,6 +24,14 @@ IN  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_data_base, "fullcascad
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_home, "models", "fullcascade_gamma50_1evt.npz")
 EV  = int(sys.argv[3]) if len(sys.argv) > 3 else 0   # cascade files are single-event
 
+
+# Stamp provenance honestly: parse particle/energy from the input filename written by the
+# steering files (<prefix>_<tag><E>_1evt.root); fall back to 'unknown' rather than guessing.
+import re as _re
+_m = _re.search(r"(?:trackermom|fullcascade)_([a-z]+?)([0-9.]+)_", os.path.basename(IN))
+_meta_particle = _m.group(1) if _m else "unknown"
+_meta_energy = (_m.group(2) + " GeV") if _m else "unknown"
+
 t = uproot.open(IN)["events"]
 br = ["MCParticles.PDG", "MCParticles.mass",
       "MCParticles.momentum.x", "MCParticles.momentum.y", "MCParticles.momentum.z",
@@ -84,7 +92,7 @@ np.savez_compressed(
     dbeg=dbeg, dend=dend, dau=dau,
     hx=hx, hy=hy, hz=hz, he=he, cellID=cellID,
     cbeg=cbeg, cend=cend, cpdg=cpdg, cE=cE, cslen=cslen, ctime=ctime, csx=csx, csy=csy, csz=csz, cmc=cmc,
-    meta=np.array(["gamma", "50.0 GeV", "+y pencil beam", "keepAllParticles",
+    meta=np.array([_meta_particle, _meta_energy, "+y pencil beam", "keepAllParticles",
                    "userParticleHandler=off", "enableDetailedShowerMode", "EDM4hep"]),
 )
 _detailed = bool(np.any((csx != 0) | (csy != 0) | (csz != 0)))

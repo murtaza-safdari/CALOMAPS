@@ -9,7 +9,9 @@ Geant4's TRACKER sensitive action instead of the calorimeter action:
 
 A tracker SD produces SimTrackerHits, which DO carry momentum[3], position[3], pathLength, EDep,
 time and a link to the producing MCParticle -- i.e. one record per charged-track crossing of a Si
-sensor, with the true Geant4 momentum at that crossing. Same gun, physics and seed (424242) as
+sensor, with the true Geant4 momentum at that crossing. (The hit position is the action's
+energy-weighted COMBINED position over the crossing, ~the sensor mid-plane -- not the
+entry-face point; see docs/pixelav_reference.md.) Same gun, physics and seed (424242) as
 run_sim_fullcascade.py, so the shower is identical; only the Si readout differs.
 
 This is a SEPARATE run from the calorimeter one: nb04 (shower display) and nb05's calo view still
@@ -20,6 +22,7 @@ Run (from geometry/, on EAF, Key4hep + lib_hack on LD_LIBRARY_PATH):
     ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py --numberOfEvents 1
 
 Environment knobs (all optional; the defaults reproduce the canonical 50 GeV photon run):
+    CALOMAPS_GUN_PARTICLE    gun particle (gamma, pi+, pi-, ...)      (default gamma)
     CALOMAPS_GUN_ENERGY_GEV  gun energy in GeV                        (default 50)
     CALOMAPS_RANGECUT_MM     Geant4 production range cut in mm        (default: DDSim's 0.7)
     CALOMAPS_KEEP_ALL        1 keeps every track; 0 prunes by min-KE  (default 1)
@@ -39,10 +42,13 @@ SIM = DD4hepSimulation()
 # Reproducibility: same seed as the calorimeter cascade so the shower is identical.
 SIM.random.seed = 424242
 
-# ---- particle gun: single fixed-energy photon, +y pencil beam (energy overridable) ----
+# ---- particle gun: single fixed-energy particle, +y pencil beam (both overridable) ----
+_particle = os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma")
 _energy_gev = float(os.environ.get("CALOMAPS_GUN_ENERGY_GEV", "50.0"))
+_tag = {"gamma": "gamma", "pi+": "piplus", "pi-": "piminus"}.get(
+    _particle, _particle.replace("+", "plus").replace("-", "minus"))
 SIM.enableGun = True
-SIM.gun.particle = "gamma"
+SIM.gun.particle = _particle
 SIM.gun.energy = _energy_gev * GeV
 SIM.gun.position = (0, 0, 0)
 SIM.gun.distribution = "uniform"
@@ -74,11 +80,12 @@ SIM.part.printStartTracking = False
 
 # ---- THE KEY LINE: read the ECal Si out as a TRACKER -> SimTrackerHits with momentum ----
 # Geant4TrackerWeightedAction combines the steps of one sensor crossing into a single hit with an
-# energy-weighted position and the track momentum; that is exactly one PIXELAV crossing record.
+# energy-weighted position (~mid-crossing, not the entry face) and the track momentum; one hit
+# per crossing = one PIXELAV deck line.
 SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
 
 # ---- output ----
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "trackermom")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "trackermom_gamma%g_1evt.root" % _energy_gev)
+SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g_1evt.root" % (_tag, _energy_gev))

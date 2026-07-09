@@ -10,6 +10,7 @@ Run (from geometry/, on EAF, Key4hep sourced):
           --numberOfEvents 1
 
 Environment knobs (all optional; the defaults reproduce the canonical 50 GeV photon run):
+    CALOMAPS_GUN_PARTICLE    gun particle (gamma, pi+, pi-, ...)      (default gamma)
     CALOMAPS_GUN_ENERGY_GEV  gun energy in GeV                        (default 50)
     CALOMAPS_RANGECUT_MM     Geant4 production range cut in mm        (default: DDSim's 0.7)
     CALOMAPS_KEEP_ALL        1 keeps every track; 0 prunes by min-KE  (default 1)
@@ -46,11 +47,14 @@ SIM = DD4hepSimulation()
 SIM.random.seed = 424242
 
 # ==========================================
-# PARTICLE GUN -- single fixed-energy photon, +y pencil beam
+# PARTICLE GUN -- single fixed-energy particle, +y pencil beam
 # ==========================================
+_particle = os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma")
 _energy_gev = float(os.environ.get("CALOMAPS_GUN_ENERGY_GEV", "50.0"))
+_tag = {"gamma": "gamma", "pi+": "piplus", "pi-": "piminus"}.get(
+    _particle, _particle.replace("+", "plus").replace("-", "minus"))
 SIM.enableGun = True
-SIM.gun.particle = "gamma"
+SIM.gun.particle = _particle
 SIM.gun.energy = _energy_gev * GeV
 SIM.gun.position = (0, 0, 0)
 SIM.gun.distribution = "uniform"
@@ -109,4 +113,4 @@ SIM.enableDetailedShowerMode = True
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "fullcascade")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "fullcascade_gamma%g_1evt.root" % _energy_gev)
+SIM.outputFile = os.path.join(_out_dir, "fullcascade_%s%g_1evt.root" % (_tag, _energy_gev))

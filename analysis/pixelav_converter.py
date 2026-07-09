@@ -16,9 +16,11 @@ PIXELAV is effectively TWO stages:
     - cot(alpha)=p_u/p_w, cot(beta)=p_v/p_w   (w = sensor radial normal / depth axis)
     - momentum magnitude |p|           (sets betagamma / dE/dx regime: MIP vs soft e-)
     - particle type
-    - local entry point (u, v)  -- NOTE: stock PIXELAV randomizes the impact over the central
-      3x3 pixels internally, so the entry point is carried only as a LABEL (for matching) unless
-      the PIXELAV wrapper is patched to read it. See docs/pixelav_reference.md.
+    - local impact point (u, v) -- for the tracker path this is the energy-weighted
+      mid-crossing position (~sensor mid-plane), NOT the entry face. NOTE: stock PIXELAV
+      randomizes the impact over the central 3x3 pixels internally, so the impact is carried
+      only as a LABEL (for matching) unless the PIXELAV wrapper is patched to read it (ours
+      is: analysis/pixelav/ppixelav2_list_trkpy_real_entry.c). See docs/pixelav_reference.md.
 
 EXPERIMENT "B": one record per charged-track sensor crossing. PRIMARY = Variant C (auto-selected):
 run_sim_trackermom.py reads the Si out as a Geant4 tracker, so each SimTrackerHit is one crossing
@@ -36,20 +38,28 @@ direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-
 per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
 
 DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'badeaa3' = the 7-column
-ppixelav2_list_trkpy_n_2f.c format (the PIXELAV driver, built on the pixelav-integration branch); 'smartpix' = the 9-column ppixelav2_custom.c
+ppixelav2_list_trkpy_n_2f.c format (our driver lineage; see analysis/pixelav/ + setup/setup_pixelav.sh); 'smartpix' = the 9-column ppixelav2_custom.c
 format. ppion is the betagamma-matched pion momentum p*(m_pi/m_particle) so PIXELAV's pion dE/dx
 reproduces the real particle's ionisation. Lengths in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
 
 Usage:
-    python pixelav_converter.py [cascade.npz] [out_prefix] [--variant A|B|auto] [--layout smartpix|badeaa3]
+    python pixelav_converter.py [cascade.npz] [out_prefix] [--variant C|A|B|auto] [--layout smartpix|badeaa3]
 """
 import os, sys, json
 import numpy as np
 
 ECAL_RMIN_MM = 1264.0
-# Outer apothem = inner apothem + total radial stack depth (20 x 3.75 mm + 10 x 6.25 mm layers;
-# the pitches match si_layer_centers() below / geometry/my_custom_ecal.xml). Used by the nb05b schematic.
-ECAL_RMAX_MM = ECAL_RMIN_MM + 20 * 3.75 + 10 * 6.25   # = 1401.5 mm
+# The ECalBarrel_o2_v03 driver does NOT start the layer stack at rmin: it places the stave at
+# mod_y_off = inner_r + ry + trd_z + tolerance (k4geo ECalBarrel_o2_v03_geo.cpp), where
+# tolerance = ecal_barrel_tolerance = env_safety = 0.1 mm (SiD_TestBeam.xml) and ry = 0 (no
+# support rails). So every layer sits 0.1 mm beyond the naive rmin-based depth. Verified
+# empirically: tracker-hit depths cluster at +0.100 mm from the naive mid-planes and span
+# exactly +/-0.16 mm (the Si half-thickness) around the corrected ones.
+ECAL_STACK_OFFSET_MM = 0.1
+# Outer apothem = inner apothem + stack offset + total radial stack depth (20 x 3.75 mm +
+# 10 x 6.25 mm layers; pitches match si_layer_centers() / geometry/my_custom_ecal.xml).
+# Used by the nb05b schematic.
+ECAL_RMAX_MM = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM + 20 * 3.75 + 10 * 6.25   # = 1401.6 mm
 SI_THICK_MM = 0.32   # silicon sensor thickness (320 um); matches geometry/my_custom_ecal.xml
 N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
@@ -62,7 +72,9 @@ LENGTH_UNIT_MM = 1000.0
 # Species PIXELAV should NOT process: neutrals (no primary ionization) and nuclei (slow recoils,
 # not minimum-ionizing tracks). Nuclei use PDG |code| > 1e9, which is why they are excluded here
 # even though they are formally charged -- intentional for a pixel MIP simulation.
-_NEUTRAL_PDGS = {22, 2112, -2112, 130, 310, 311, -311, 12, -12, 14, -14, 16, -16}
+_NEUTRAL_PDGS = {22, 2112, -2112, 130, 310, 311, -311, 12, -12, 14, -14, 16, -16,
+                 111, 221,                      # pi0/eta (decay instantly; belt-and-braces)
+                 3122, -3122, 3212, -3212, 3322, -3322}  # neutral hyperons (Lambda, Sigma0, Xi0)
 
 # Map our PDG codes to the PIXELAV PID column (the ppixelav2_custom.c wrapper handles 211/13/11;
 # for non-pions it only rescales momentum by the mass ratio -- the dE/dx model stays pion-like).
@@ -103,8 +115,10 @@ def si_layer_centers():
 
     NOTE: the slice thicknesses below MUST match geometry/my_custom_ecal.xml -- the single source of
     truth that nb02's layer_radii() parses from the XML. They agree today; if you change the geometry
-    (pitch / thickness scans), update them here too (ideally refactor layer_radii() into a shared module)."""
-    r, centers = ECAL_RMIN_MM, []
+    (pitch / thickness scans), update them here too (ideally refactor layer_radii() into a shared module).
+    The stack starts at rmin + ECAL_STACK_OFFSET_MM (driver placement tolerance, see above); the
+    offset is uniform so it does not affect nearest-centre layer ASSIGNMENT, only absolute depths."""
+    r, centers = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM, []
     for nrep, w in [(20, 2.5), (10, 5.0)]:
         pitch = w + 0.25 + 0.32 + 0.05 + 0.30 + 0.33   # W + air + Si + Cu + Kapton + air
         for _ in range(nrep):
@@ -140,9 +154,14 @@ def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, var
         flags = (flags + "|grazing").strip("|")
     return {
         "track_id": int(mc), "layer_id": int(lay), "pdg": int(pdg), "p_GeV": float(p_mag),
-        "entry_u": float(eu), "entry_v": float(ev),           # mm (sensor-local)
+        "entry_u": float(eu), "entry_v": float(ev),           # mm (sensor-local IMPACT point; for
+                                                              # variant C this is the tracker hit's
+                                                              # energy-weighted mid-crossing position
+                                                              # (~mid-plane), NOT the entry face)
         "cot_alpha": cot_a, "cot_beta": cot_b,
-        "flipped": int(dw >= 0),       # entry-face / depth-sign flag (1=outward; verify vs the binary)
+        "flipped": int(dw >= 0),       # 1 = outward-going (dw>=0). VERIFIED vs the patched driver
+                                       # (analysis/pixelav/ppixelav2_list_trkpy_real_entry.c):
+                                       # flipped=1 -> locdir_z>0, entry face z=0; flipped=0 -> z=thick.
         "sensor_normal_phi": float(phi_n), "depth_w_mm": float(ew),
         "energy_dep_GeV": float(edep), "n_steps": int(nstep), "time_ns": float(time_ns),
         "variant": variant, "flags": flags,
@@ -245,8 +264,11 @@ def build_segments_C(d):
     """One record per Si crossing from the tracker-readout sim (sim/run_sim_trackermom.py): the
     ECal Si is read out as a Geant4 tracker, so each SimTrackerHit is one combined sensor crossing
     carrying the TRUE Geant4 momentum at that crossing. So |p|, the direction (cot a/b) and the
-    entry point are all real per-crossing truth -- no production-momentum fallback, no step
-    time-ordering needed (Geant4TrackerWeightedAction already combines the crossing's steps)."""
+    impact point are all real per-crossing truth -- no production-momentum fallback, no step
+    time-ordering needed (Geant4TrackerWeightedAction already combines the crossing's steps).
+    NOTE: the hit position is the action's energy-weighted COMBINED position (~sensor mid-plane
+    for a through-going track), not the entry-face point; the record keeps the historical
+    entry_u/entry_v field names, but treat them as the mid-crossing impact."""
     thx, thy, thz = np.asarray(d["thx"]), np.asarray(d["thy"]), np.asarray(d["thz"])
     tpx, tpy, tpz = np.asarray(d["tpx"]), np.asarray(d["tpy"]), np.asarray(d["tpz"])
     tedep, ttime, tmc = np.asarray(d["tedep"]), np.asarray(d["ttime"]), np.asarray(d["tmc"]).astype(int)
@@ -263,7 +285,7 @@ def build_segments_C(d):
             n_neutral += 1
             continue
         phi_n = float(phin[j])
-        eu, ev, ew = to_local(float(thx[j]), float(thy[j]), float(thz[j]), phi_n)   # entry point (local)
+        eu, ev, ew = to_local(float(thx[j]), float(thy[j]), float(thz[j]), phi_n)   # weighted mid-crossing impact (local)
         du, dv, dw = to_local(float(tpx[j]), float(tpy[j]), float(tpz[j]), phi_n)    # momentum -> local frame
         p_mag = float(np.sqrt(tpx[j]**2 + tpy[j]**2 + tpz[j]**2))                     # REAL |p| at the crossing
         segs.append(_record(mc, int(layer[j]), pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
@@ -287,7 +309,8 @@ def write_intermediate(segs, out_prefix):
 def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
-    layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (the PIXELAV driver, built on the pixelav-integration branch)
+    layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (read by our patched
+        real-entry driver, analysis/pixelav/ppixelav2_list_trkpy_real_entry.c)
         cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
     layout='smartpix': the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
         cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
@@ -314,10 +337,11 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
                          (ca, cb, ppion, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
                           pid_to_pixelav(s["pdg"])))
         elif layout == "badeaa3":
-            # 7-col format read by ppixelav2_list_trkpy_n_2f.c (the PIXELAV driver, built on the pixelav-integration branch).
-            # Axis map: modx -> vect[0] = PIXELAV x(21-px) = our v; mody -> vect[1] =
-            # PIXELAV y(13-px, Lorentz) = our u. Entry is written full-truth in um; the
-            # patched driver (on the pixelav-integration branch) reduces it mod-pitch to the sub-pixel impact.
+            # 7-col format read by ppixelav2_list_trkpy_n_2f.c / our patched real-entry driver
+            # (analysis/pixelav/, built by setup/setup_pixelav.sh). Axis map VERIFIED against the
+            # driver source: col1 cot_alpha pairs with y(13-px, Lorentz) = our u and col6 mody;
+            # col2 cot_beta pairs with x(21-px) = our v and col5 modx. Impact is written
+            # full-truth in um; the patched driver reduces it mod-pitch to the sub-pixel impact.
             # ppion is the betagamma-matched pion momentum (dE/dx); the pT column keeps the real |p|.
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f" %
                          (ca, cb, ppion, s["flipped"], ev_um, eu_um, p))
@@ -328,8 +352,9 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     legend = {"smartpix": "cot_alpha cot_beta ppion flipped ylocal[um] zglobal[um] pT hittime[ps] PID",
               "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um]=v_entry mody[um]=u_entry pT"}[layout]
     with open(out_path + ".columns.txt", "w") as f:
-        f.write(f"# PIXELAV track-list ({layout}); lengths in microns; entry point is a LABEL "
-                f"(stock PIXELAV randomizes impact -- see docs/pixelav_reference.md)\n{legend}\n")
+        f.write(f"# PIXELAV track-list ({layout}); lengths in microns; modx/mody carry the truth "
+                f"mid-plane impact as a LABEL (stock PIXELAV randomizes the impact; our patched "
+                f"real-entry driver consumes it -- see docs/pixelav_reference.md)\n{legend}\n")
     return out_path, len(lines), n_skip
 
 
@@ -357,7 +382,8 @@ def main():
     d = load_cascade(npz)
 
     has_tracker = ("thx" in d) and len(np.atleast_1d(d["thx"])) > 0
-    has_steps = ("csx" in d) and bool(np.any((d["csx"] != 0) | (d["csy"] != 0) | (d["csz"] != 0)))
+    has_calo = ("cmc" in d) and ("cbeg" in d)   # calo-contribution arrays (extract_cascade.py)
+    has_steps = has_calo and ("csx" in d) and bool(np.any((d["csx"] != 0) | (d["csy"] != 0) | (d["csz"] != 0)))
     if variant == "auto":
         variant = "C" if has_tracker else ("A" if has_steps else "B")   # C = real per-crossing momentum
     if variant == "C" and not has_tracker:
@@ -366,6 +392,11 @@ def main():
     if variant == "A" and not has_steps:
         print("WARNING: Variant A requested but stepPosition is zero/absent -> falling back to B.")
         variant = "B"
+    if variant in ("A", "B") and not has_calo:
+        sys.exit(f"ERROR: variant {variant} needs the calorimeter-contribution arrays "
+                 "(cmc/cbeg/cend/cE/hx...) which this npz does not have -- it looks like a "
+                 "tracker-readout extraction (extract_trackermom.py). Use --variant C (or auto), "
+                 "or point at a fullcascade npz from extract_cascade.py.")
 
     builder = {"A": build_segments_A, "B": build_segments_B, "C": build_segments_C}[variant]
     segs, stats = builder(d)
