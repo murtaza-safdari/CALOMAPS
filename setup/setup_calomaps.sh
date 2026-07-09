@@ -61,6 +61,9 @@ mkdir -p "$_CPU_KDIR"
 cat > "$_CPU_KDIR/wrapper.sh" <<EOF
 #!/bin/bash
 # Source the Key4hep stack so uproot/awkward/numpy import in a GUI-launched kernel.
+# unset the guard first: if this kernel is spawned FROM an already-sourced terminal
+# (e.g. nbconvert), setup.sh would otherwise short-circuit and set no paths.
+unset KEY4HEP_STACK
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$KEY4HEP_RELEASE" >/dev/null 2>&1
 exec python -m ipykernel_launcher "\$@"
 EOF

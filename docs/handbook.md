@@ -237,7 +237,7 @@ r=1403 mm
 
 **Why 320 µm silicon?** Standard MAPS thickness. Thin enough for well-defined Landau-distributed energy deposits per MIP-crossing; thick enough for reliable detection.
 
-**Total radiation lengths:** 20 × 2.5 mm + 10 × 5.0 mm = 100 mm of tungsten; W X₀ ≈ 3.5 mm → **~28 X₀**, plenty for EM containment.
+**Total radiation lengths:** 20 × 2.5 mm + 10 × 5.0 mm = 100 mm of absorber. The absorber is not pure tungsten but the SiD heavy alloy `TungstenDens24` (93% W / 6.1% Ni / 0.9% Fe by mass, ρ = 17.8 g/cm³ — see `geometry/baseline_sid_o2_v03/materials.xml`), whose X₀ ≈ 6.99 g/cm² ÷ 17.8 g/cm³ ≈ 3.93 mm → **~25 X₀**, plenty for EM containment.
 
 ### 3.5 Pixel segmentation
 
@@ -275,7 +275,7 @@ Empirically (from a 10-event smoke run at fixed 50 GeV):
 | Energy per hit | 3 neV — 5 MeV | Landau-shaped — most hits are MIP-like |
 | Hit y-range | **[−1316, +1401] mm** | Spans both the +Y entry face *and* the −Y exit face |
 
-**Why hits on the opposite face?** A 50 GeV EM shower is roughly 95% contained in 28 X₀. The remaining ~5% (and many soft secondaries) escape *into* the air cavity inside the dodecagon, fly across, and strike the **opposite face**. So a single shower deposits hits on both the entry face and (less so) the exit face.
+**Why hits on the opposite face?** A 50 GeV EM shower is roughly 95% contained in the stack's ~25 X₀. The remaining ~5% (and many soft secondaries) escape *into* the air cavity inside the dodecagon, fly across, and strike the **opposite face**. So a single shower deposits hits on both the entry face and (less so) the exit face.
 
 The extraction in `notebooks/02_data_extraction.ipynb` isolates the **entry segment** — the one dodecagon face the beam enters — keeping only hits in a ±15° wedge around +y within the silicon depth range:
 ```python
@@ -296,7 +296,7 @@ This is deliberate: a real measurement reads out the module the beam enters, and
 | Thin layers | 20 × (2.5 mm W + 320 µm Si + readout) | `my_custom_ecal.xml` |
 | Thick layers | 10 × (5.0 mm W + 320 µm Si + readout) | `my_custom_ecal.xml` |
 | Total Si layers | **30** | |
-| Total W absorber | 100 mm ≈ 28 X₀ | |
+| Total W-alloy absorber | 100 mm ≈ 25 X₀ (TungstenDens24, X₀ ≈ 3.93 mm) | |
 | Pixel pitch | **100 µm × 100 µm** | `ECal_cell_size` |
 | Magnetic field | **0 T** | `<fields>` in `SiD_TestBeam.xml` |
 

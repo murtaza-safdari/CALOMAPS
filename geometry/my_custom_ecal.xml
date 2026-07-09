@@ -63,7 +63,9 @@
       <argument value="radius=ECalBarrel_rmin" />
       <argument value="phi0=0" />
       <argument value="symmetry=ECalBarrel_symmetry" />
-      <argument value="systemID=20" />
+      <!-- must match this detector's system id (DetID_ECal_Barrel = 5 in SiD_TestBeam.xml);
+           was 20, which attached the calo-face surfaces to a nonexistent system -->
+      <argument value="systemID=5" />
     </plugin>
   </plugins>
 

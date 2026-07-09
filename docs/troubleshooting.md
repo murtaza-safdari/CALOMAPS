@@ -2,7 +2,7 @@
 
 Infrastructure-level quirks that bite when running CALOMAPS on the Fermilab Elastic Analysis Facility (EAF). Each entry is a known pattern with a workaround.
 
-For **project-level errors** (your `ddsim` exited non-zero, a notebook cell threw a NameError, etc.), see [handbook.md §14](handbook.md#14-common-gotchas) instead.
+For **project-level errors** (your `ddsim` exited non-zero, a notebook cell threw a NameError, etc.), see [handbook.md §14](handbook.md#14-common-gotchas-code-level) instead.
 
 ---
 

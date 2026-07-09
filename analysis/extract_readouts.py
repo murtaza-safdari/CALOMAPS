@@ -46,7 +46,10 @@ def layer_radii(calomaps_home):
     consts = {x.get("name"): x.get("value")
               for x in ET.parse(os.path.join(g, "SiD_TestBeam.xml")).getroot().findall(".//constant")}
     det = ET.parse(os.path.join(g, "my_custom_ecal.xml")).getroot().find(".//detector[@name='ECalBarrel']")
-    cur, planes = _pv(det.find("dimensions").get("rmin"), consts), []
+    # The ECalBarrel_o2_v03 driver starts the stack at rmin + ecal_barrel_tolerance (=env_safety,
+    # 0.1 mm), not at rmin. The offset is uniform, so nearest-centre layer BINNING below is
+    # unaffected; we add it so absolute depths are correct.
+    cur, planes = _pv(det.find("dimensions").get("rmin"), consts) + 0.1, []
     for layer in det.findall("layer"):
         rep = int(layer.get("repeat", 1)); sl = layer.findall("slice")
         thick = sum(_pv(s.get("thickness"), consts) for s in sl)

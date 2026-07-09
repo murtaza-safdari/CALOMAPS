@@ -45,8 +45,26 @@ def main():
     tag = "gamma" if args.particle == "gamma" else args.particle.replace("+", "plus").replace("-", "minus")
 
     calomaps_home = os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS"))
-    npz_path = os.path.join(calomaps_home, "models", f"decal_extracted_data_{tag}.npz")
-    ens_dir = os.path.join(calomaps_home, "models", args.ensemble_dir or f"saved_ensembles_gpu_{tag}")
+    # Accept the canonical per-particle names first (what notebooks 02/03 write here), then
+    # legacy / alternate names so instructor-provided artifacts also load (unsuffixed photon
+    # npz; saved_ensembles_gpu_v2/ and saved_ensembles_piplus/ ensemble dirs).
+    npz_cands = [os.path.join(calomaps_home, "models", f"decal_extracted_data_{tag}.npz")]
+    if tag == "gamma":
+        npz_cands.append(os.path.join(calomaps_home, "models", "decal_extracted_data.npz"))
+    npz_path = next((p for p in npz_cands if os.path.exists(p)), None)
+    if npz_path is None:
+        sys.exit("ERROR: no extracted-data npz found. Tried:\n  " + "\n  ".join(npz_cands)
+                 + "\nRun notebooks/02_data_extraction.ipynb first (set the particle env vars for pions).")
+    if args.ensemble_dir:
+        dir_cands = [os.path.join(calomaps_home, "models", args.ensemble_dir)]
+    else:
+        dir_cands = [os.path.join(calomaps_home, "models", f"saved_ensembles_gpu_{tag}"),
+                     os.path.join(calomaps_home, "models",
+                                  "saved_ensembles_gpu_v2" if tag == "gamma" else f"saved_ensembles_{tag}")]
+    ens_dir = next((d for d in dir_cands if os.path.isdir(d)), None)
+    if ens_dir is None:
+        sys.exit("ERROR: no ensemble dir found. Tried:\n  " + "\n  ".join(dir_cands)
+                 + "\nTrain first (notebook 03 or analysis/train_ensembles.py), or pass --ensemble-dir.")
     fig_dir = os.path.join(calomaps_home, "models", "figures")
     os.makedirs(fig_dir, exist_ok=True)
 

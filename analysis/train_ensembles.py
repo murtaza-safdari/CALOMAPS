@@ -40,7 +40,15 @@ _args = _ap.parse_args()
 PART_TAG = "gamma" if _args.particle == "gamma" else _args.particle.replace("+", "plus").replace("-", "minus")
 
 CALOMAPS_HOME = os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS"))
-NPZ = os.path.join(CALOMAPS_HOME, "models", f"decal_extracted_data_{PART_TAG}.npz")
+# Accept the canonical per-particle npz first (what notebook 02 writes here), then legacy /
+# alternate names so instructor-provided artifacts also load (an unsuffixed photon npz).
+_NPZ_CANDIDATES = [os.path.join(CALOMAPS_HOME, "models", f"decal_extracted_data_{PART_TAG}.npz")]
+if PART_TAG == "gamma":
+    _NPZ_CANDIDATES.append(os.path.join(CALOMAPS_HOME, "models", "decal_extracted_data.npz"))
+NPZ = next((p for p in _NPZ_CANDIDATES if os.path.exists(p)), None)
+if NPZ is None:
+    sys.exit("ERROR: no extracted-data npz found. Tried:\n  " + "\n  ".join(_NPZ_CANDIDATES)
+             + "\nRun notebooks/02_data_extraction.ipynb first (set the particle env vars for pions).")
 OUT_DIR = os.path.join(CALOMAPS_HOME, "models", f"saved_ensembles_gpu_{PART_TAG}")
 os.makedirs(OUT_DIR, exist_ok=True)
 
