@@ -40,7 +40,16 @@ _args = _ap.parse_args()
 PART_TAG = "gamma" if _args.particle == "gamma" else _args.particle.replace("+", "plus").replace("-", "minus")
 
 CALOMAPS_HOME = os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS"))
-NPZ = os.path.join(CALOMAPS_HOME, "models", f"decal_extracted_data_{PART_TAG}.npz")
+# The notebooks and this CLI historically used different artifact names: nb02 writes the
+# photon npz UNsuffixed (decal_extracted_data.npz), nb02b writes decal_extracted_data_piplus.npz.
+# Accept the canonical per-particle name first, then the notebook-produced name.
+_NPZ_CANDIDATES = [os.path.join(CALOMAPS_HOME, "models", f"decal_extracted_data_{PART_TAG}.npz")]
+if PART_TAG == "gamma":
+    _NPZ_CANDIDATES.append(os.path.join(CALOMAPS_HOME, "models", "decal_extracted_data.npz"))
+NPZ = next((p for p in _NPZ_CANDIDATES if os.path.exists(p)), None)
+if NPZ is None:
+    sys.exit("ERROR: no extracted-data npz found. Tried:\n  " + "\n  ".join(_NPZ_CANDIDATES)
+             + "\nRun notebooks/02_data_extraction.ipynb (photons) or 02b (pions) first.")
 OUT_DIR = os.path.join(CALOMAPS_HOME, "models", f"saved_ensembles_gpu_{PART_TAG}")
 os.makedirs(OUT_DIR, exist_ok=True)
 
