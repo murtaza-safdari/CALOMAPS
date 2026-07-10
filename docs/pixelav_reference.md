@@ -119,10 +119,9 @@ What each driving field means:
   drivers (and our patched real-entry driver, which inherits from them) apply the columns the
   other way around: `locdir[0] = cot_beta·locdir[2]`, `locdir[1] = cot_alpha·locdir[2]` — i.e.
   the **first** deck column steers the **y** (13-pixel, Lorentz) axis and the **second** steers
-  **x** (21-pixel). ✅ **VERIFIED for our chain (2026-07-09)** by direct source read of
-  `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c` (on the `pixelav-integration`
-  branch) plus a byte-identical full-chain
-  reproduction: our deck writes `cot_alpha = p_u/p_w` (col 1) + `mody = u` (col 6) onto PIXELAV's
+  **x** (21-pixel). **Verified against the driver source** (`ppixelav2_list_trkpy_real_entry.c`
+  in `analysis/pixelav/` on the `pixelav-integration` branch) and confirmed with an
+  end-to-end run: our deck writes `cot_alpha = p_u/p_w` (col 1) + `mody = u` (col 6) onto PIXELAV's
   y axis, and `cot_beta = p_v/p_w` (col 2) + `modx = v` (col 5) onto PIXELAV's x axis — angles and
   impact labels land on the same axes, self-consistently. The stock snippet quoted below (from
   `ppixelav2.c`'s randomizing wrapper) names the variables the Smart-Pixels way; only the
@@ -239,8 +238,8 @@ writing and counted in the converter's summary line.
    mid-plane), not the entry-face point — the driver back-projects it to the entry face using
    the track angles, exactly as stock PIXELAV does with its randomized mid-plane impact.
 3. ~~**cot axis/sign** for our sensor orientation (the public copies disagree on x↔y)~~ —
-   **RESOLVED 2026-07-09**: verified against our patched driver's source and a byte-identical
-   full-chain rerun (see §3b caveat above). Re-verify only if you switch to a different
+   **resolved** for the patched driver this project targets — the pairing is verified against
+   the driver source (see the §3b caveat above). Re-verify if you switch to a different
    driver/lineage (e.g. the 9-column Smart Pixels wrapper).
 4. **Non-pion dE/dx:** is the momentum-rescaling approximation acceptable for the e±-dominated
    shower, or does Swartz have a proper electron treatment?

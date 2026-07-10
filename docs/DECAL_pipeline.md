@@ -2,7 +2,7 @@
 
 *Expanded Edition: From Environment Setup to Physics Reconstruction*
 
-*(Transcribed from the user's PDF "DECAL R&D: Complete Simulation to Reconstruction Pipeline (Expanded)" for in-project reference. The PDF is the source of truth if any conflict.)*
+*(Transcribed from the project's founding design document, "DECAL R&D: Complete Simulation to Reconstruction Pipeline (Expanded)". That document is the source of truth if anything here conflicts with it.)*
 
 This document is an end-to-end guide to the Digital Calorimeter (DECAL) R&D framework. It covers everything from establishing your CVMFS environment and understanding the underlying C++ GEANT4 wrappers, to modifying the detector geometry, calibrating it using deep neural networks, and extracting fundamental physics properties.
 
@@ -113,7 +113,7 @@ chmod +x wrapper.sh
 
 Open `kernel.json` in that folder and replace the path to the python binary with the path to your new `wrapper.sh` script.
 
-> **⚠ Drift note (updated 2026-07-09):** the manual recipe above is historical. The current, supported path is `bash setup/setup_gpu_kernel.sh`, which creates the venv, installs CUDA torch, and registers the `Key4hep + GPU` (`calomaps_gpu`) wrapper kernel in one step — see handbook.md §11.2. The ensembles shipped with the project were (re)trained on the A100 through that kernel.
+> **⚠ Note:** the manual recipe above is kept for reference only. The supported path is `bash setup/setup_gpu_kernel.sh`, which creates the venv, installs CUDA torch, and registers the `Key4hep + GPU` (`calomaps_gpu`) wrapper kernel in one step — see handbook.md §11.2.
 
 ## Part 5: Software Reconstruction (Jupyter Pipeline)
 

@@ -10,7 +10,7 @@ For **project-level errors** (your `ddsim` exited non-zero, a notebook cell thre
 
 **Symptom.** A `cp` (or git internal write, or `python -m venv`, or any small-file write) onto the `/nashome`-via-SSHFS mount succeeds, but the resulting file is **zero bytes** even though `ls` shows the correct size. Reading the file later reveals it's all NULs.
 
-Hit during this session on: `elements.xml` (33 KB → 33 KB of NULs after `cp`), `analysis/dashboard.py` (Write tool wrote 0 bytes), `.git/objects/<hash>` (git's internal store, hit twice during `git commit`).
+Observed on: `elements.xml` (33 KB → 33 KB of NULs after `cp`), `analysis/dashboard.py` (a whole-file editor save produced 0 bytes), `.git/objects/<hash>` (git's internal store, during `git commit`).
 
 **Workaround.**
 
@@ -277,5 +277,4 @@ A GPU session is still faster end-to-end; this is the fallback when none is avai
 ## Where else to check
 
 - **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, cell-19/26 bugs, scripts that wipe data dirs, etc.)
-- **`~/lpc-tools/lpc-setup.html`** — the user's personal LPC/EAF onboarding handbook on their laptop, with broader-than-CALOMAPS Fermilab notes
 - The DD4hep, Geant4, and Key4hep upstream issue trackers if you're hitting something deeper.

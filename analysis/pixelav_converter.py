@@ -161,7 +161,7 @@ def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, var
                                                               # energy-weighted mid-crossing position
                                                               # (~mid-plane), NOT the entry face)
         "cot_alpha": cot_a, "cot_beta": cot_b,
-        "flipped": int(dw >= 0),       # 1 = outward-going (dw>=0). VERIFIED vs the patched driver
+        "flipped": int(dw >= 0),       # 1 = outward-going (dw>=0). Matches the patched driver
                                        # (pixelav-integration branch,
                                        # analysis/pixelav/ppixelav2_list_trkpy_real_entry.c):
                                        # flipped=1 -> locdir_z>0, entry face z=0; flipped=0 -> z=thick.
@@ -343,7 +343,7 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
         elif layout == "badeaa3":
             # 7-col format read by ppixelav2_list_trkpy_n_2f.c / our patched real-entry driver
             # (pixelav-integration branch: analysis/pixelav/, built by setup/setup_pixelav.sh).
-            # Axis map VERIFIED against the
+            # Axis map checked against the
             # driver source: col1 cot_alpha pairs with y(13-px, Lorentz) = our u and col6 mody;
             # col2 cot_beta pairs with x(21-px) = our v and col5 modx. Impact is written
             # full-truth in um; the patched driver reduces it mod-pitch to the sub-pixel impact.

@@ -64,7 +64,7 @@ CALOMAPS/
 ├── docs/
 │   ├── handbook.md                    ← OPERATIONAL guide; read this first
 │   ├── troubleshooting.md             ← infrastructure quirks (SSHFS, JupyterHub, CVMFS, quotas)
-│   ├── DECAL_pipeline.md              ← PHYSICS writeup (advisor's PDF transcribed)
+│   ├── DECAL_pipeline.md              ← PHYSICS writeup (motivation, method, expected results)
 │   ├── pixelav_reference.md           ← PIXELAV itself: what it is, input formats, conventions
 │   ├── pixelav_handoff.md             ← end-to-end recipe: produce + hand off the PIXELAV deck
 │   └── figures/                       ← rendered dashboards + figures

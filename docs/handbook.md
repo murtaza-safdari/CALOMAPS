@@ -383,7 +383,7 @@ A second product line — **per-sensor track crossings for PIXELAV** — branche
 
 ### 6.1 Accounts
 
-1. **FNAL computing account** + Kerberos principal `<username>@FNAL.GOV` (your advisor sets this up).
+1. **FNAL computing account** + Kerberos principal `<username>@FNAL.GOV` (your group's Fermilab contact can set this up).
 2. **EAF account** — automatic with your FNAL account. Log in at <https://eaf.fnal.gov>.
 
 ### 6.2 Spawn an EAF server
@@ -633,8 +633,8 @@ python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* 
 
 ⚠️ **Key4hep release**: both runs keep the full ~78k-particle cascade. On the older EAF image the
 pinned `2026-02-01` release crashed (`free(): invalid pointer`) while *finalizing* such a large
-EDM4hep file; on the current AlmaLinux 9 image this no longer reproduces (verified 2026-07-09,
-50 GeV photon, both steering files). If you do hit it, source the `2026-04-08` release for these
+EDM4hep file; on the current AlmaLinux 9 images with the pinned release the crash has not been
+observed. If you do hit it, source the `2026-04-08` release for these
 two runs — see `troubleshooting.md`, "EDM4hep podio writer crashes on very large events".
 
 `pixelav_converter.py` auto-selects **Variant C** (tracker hits → real per-crossing `|p|`, direction
