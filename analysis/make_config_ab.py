@@ -1,4 +1,4 @@
-"""Regenerate models/config_ab_gamma50.npz for notebook 04 section 2's A/B panel.
+"""Regenerate models/config_ab_gamma50.npz for notebook 05 section 2's A/B panel.
 
 The panel shows the cascade-persistency settings change WHICH truth is written, not the physics.
 It contrasts the stock ddsim config with the full-cascade config over 20 events each (same seed
@@ -10,7 +10,7 @@ Run on EAF under Key4hep 2026-04-08 with lib_hack on LD_LIBRARY_PATH (see docs/h
     python analysis/make_config_ab.py
 
 Reads the existing models/fullcascade_gamma50_1evt.npz for the full-cascade MCParticle count, so
-run the main experiment-B pipeline (extract_cascade.py) first.
+run the full-cascade pipeline (extract_cascade.py) first.
 """
 import os, subprocess
 import numpy as np

@@ -30,7 +30,7 @@ The single SiD file we *don't* use is [`ECalBarrel_o2_v03.xml`](ECalBarrel_o2_v0
   bare-silicon layer (Si/Cu/Kapton/Air, **no tungsten** — a preshower-style first sensor, 31 Si
   layers total). `my_custom_ecal.xml` drops it, so CALOMAPS has exactly **30** Si layers, every
   one behind an absorber. Everything downstream (layer indexing in the notebooks,
-  `analysis/pixelav_converter.py`, the handbook) assumes the 30-layer scheme.
+  `analysis/sensor_crossings.py`, the handbook) assumes the 30-layer scheme.
 - **Different**: pixel pitch is 100 µm × 100 µm (vs SiD's millimeter-scale pads), defined by the `ECal_cell_size` constant in `../SiD_TestBeam.xml`. This is the central modification.
 
 ## How to verify the inheritance

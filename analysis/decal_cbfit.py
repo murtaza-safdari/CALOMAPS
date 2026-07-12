@@ -1,15 +1,15 @@
 """Shared conventional Crystal-Ball fit + calibration inversion for the DECAL
 resolution notebooks.
 
-Both the conventional notebook (03c) and the CB-density-net notebook (03d) quote a
+Both the conventional notebook (03) and the CB-density-net notebook (04) quote a
 resolution the same two-step way:
   1. fit a low-tail Crystal Ball to a response distribution -> core width sigma, and
   2. invert the calibration mu(E) to turn that READOUT width into an ENERGY
      resolution sigma_E/E (essential for the saturating digital readouts, where a
      small readout width maps to a large energy interval).
 
-Keeping the estimator here -- imported by 03c, 03d, and analysis/cbnet.py -- guarantees
-the "conventional (03c)" numbers 03d overlays are produced by the SAME code as 03c, not a
+Keeping the estimator here -- imported by notebooks 03, 04, and analysis/cbnet.py -- guarantees
+the "conventional (notebook 03)" numbers notebook 04 overlays are produced by the SAME code, not a
 re-implementation that can silently drift.
 """
 from __future__ import annotations
@@ -23,9 +23,11 @@ def fit_response(values, nbins=40, min_events=300):
     """Binned single-sided (low-tail) Crystal-Ball fit of a response distribution.
     Returns dict(mu, sigma, sigma_err, beta, m, model, ok, n). Never raises. The
     graceful-degrade ladder is Crystal Ball -> Gaussian -> mean/RMS, and it triggers on
-    DISCRETENESS too: small-integer count distributions (hit/cluster counts at very low
+    DISCRETENESS too: sufficiently discrete small-integer count distributions (e.g. hit/cluster counts at very low
     energy) are Poisson-like, not a low-side-tail shape, so a CB is the wrong model and we
-    quote the RMS instead. sigma_err is the fit uncertainty on the width (from the
+    quote the RMS instead. (For the photon dataset used in notebooks 03/04 the guard happens
+    not to trigger -- every fixed-energy fit stays a genuine Crystal Ball -- but it protects
+    the digital readouts for other particles / pitches.) sigma_err is the fit uncertainty on the width (from the
     covariance), used to put error bars on the resolution and weight the sqrt(E) fit."""
     v = np.asarray(values, float); v = v[np.isfinite(v)]
     n = v.size

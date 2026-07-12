@@ -1,4 +1,8 @@
-"""Load trained ensembles and produce the 3-panel reconstruction dashboard.
+"""LEGACY quantile-regression surrogate -- superseded by notebook 04 /
+analysis/cbnet.py (the Crystal-Ball density model). The workflow notebooks no longer
+use this file; it is kept for reference.
+
+Load trained ensembles and produce the 3-panel reconstruction dashboard.
 
 Reads:
     $CALOMAPS_HOME/models/decal_extracted_data_<particle>.npz

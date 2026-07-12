@@ -1,4 +1,8 @@
-"""Deep Quantile Ensemble surrogate model for DECAL response curves.
+"""LEGACY quantile-regression surrogate -- superseded by notebook 04 /
+analysis/cbnet.py (the Crystal-Ball density model). The workflow notebooks no longer
+use this file; it is kept for reference.
+
+Deep Quantile Ensemble surrogate model for DECAL response curves.
 
 A `QuantileNet` is a small MLP that maps normalized true energy to three
 quantile predictions (15.87%, 50.00%, 84.13%) of the readout response, in

@@ -1,8 +1,8 @@
-"""DDSim steering for PER-CROSSING MOMENTUM truth (experiment "B"), EDM4hep format.
+"""DDSim steering for PER-CROSSING MOMENTUM truth, EDM4hep format.
 
 The standard calorimeter readout (run_sim_fullcascade.py) writes CaloHitContributions that carry
 step position/PDG/time but NO momentum (EDM4hep CaloHitContribution has no momentum field). To
-get the real per-sensor-crossing momentum PIXELAV wants, this steering maps the ECalBarrel Si to
+get the real per-sensor-crossing momentum the crossing records want, this steering maps the ECalBarrel Si to
 Geant4's TRACKER sensitive action instead of the calorimeter action:
 
     SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
@@ -11,12 +11,12 @@ A tracker SD produces SimTrackerHits, which DO carry momentum[3], position[3], p
 time and a link to the producing MCParticle -- i.e. one record per charged-track crossing of a Si
 sensor, with the true Geant4 momentum at that crossing. (The hit position is the action's
 energy-weighted COMBINED position over the crossing, ~the sensor mid-plane -- not the
-entry-face point; see docs/pixelav_reference.md.) Same gun, physics and seed (424242) as
+entry-face point; see notebooks 06/07.) Same gun, physics and seed (424242) as
 run_sim_fullcascade.py, so the shower is identical; only the Si readout differs.
 
-This is a SEPARATE run from the calorimeter one: nb04 (shower display) and nb05's calo view still
-use the calorimeter output; the PIXELAV deck (pixelav_converter.py) uses THIS tracker output for
-real per-crossing momentum + entry + direction.
+This is a SEPARATE run from the calorimeter one: notebook 05 (shower display) and notebook 07's
+calo route still use the calorimeter output; the crossing records (sensor_crossings.py) use THIS
+tracker output for real per-crossing momentum + impact + direction.
 
 Run (from geometry/, on EAF, Key4hep + lib_hack on LD_LIBRARY_PATH):
     ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py --numberOfEvents 1
@@ -61,8 +61,8 @@ SIM.physicsList = "FTFP_BERT"
 
 # ---- Geant4 production range cut (PHYSICS knob) ----
 # Below this range Geant4 does not create soft secondaries as tracks (their energy is deposited
-# along the parent step instead). Lower => more soft delta-rays => more sensor crossings for
-# PIXELAV, at higher CPU cost; higher => a coarser shower. This changes the simulated physics.
+# along the parent step instead). Lower => more soft delta-rays => more sensor crossings,
+# at higher CPU cost; higher => a coarser shower. This changes the simulated physics.
 # DDSim default is 0.7*mm; overridden only if CALOMAPS_RANGECUT_MM is set.
 _rangecut_mm = os.environ.get("CALOMAPS_RANGECUT_MM", "")
 if _rangecut_mm:
@@ -81,7 +81,7 @@ SIM.part.printStartTracking = False
 # ---- THE KEY LINE: read the ECal Si out as a TRACKER -> SimTrackerHits with momentum ----
 # Geant4TrackerWeightedAction combines the steps of one sensor crossing into a single hit with an
 # energy-weighted position (~mid-crossing, not the entry face) and the track momentum; one hit
-# per crossing = one PIXELAV deck line.
+# per crossing = one crossing record.
 SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
 
 # ---- output ----

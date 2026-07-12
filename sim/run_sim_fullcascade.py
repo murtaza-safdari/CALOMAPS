@@ -1,4 +1,4 @@
-"""DDSim steering for FULL-CASCADE truth output (experiment "A"), EDM4hep format.
+"""DDSim steering for FULL-CASCADE truth output, EDM4hep format.
 
 Goal: persist the 4-vector of *every* shower particle (the complete Geant4 cascade) into
 the output, not just the primary + a sparse subset. Output is EDM4hep ROOT -- the Key4hep
@@ -29,8 +29,8 @@ NOTE: keep this file pure ASCII. A non-ASCII character (em-dash, "smart quote") 
 steering file gets copied into the run metadata and breaks the EDM4hep RunHeader
 std::map<string,string> conversion -- see docs/troubleshooting.md.
 
-Read the output with uproot (see analysis/extract_cascade.py). The per-step hit truth a
-pixel-level simulation (PIXELAV / experiment "B") needs lives in the ECalBarrelHits
+Read the output with uproot (see analysis/extract_cascade.py). The per-step hit truth the
+per-sensor crossing records need lives in the ECalBarrelHits
 'contributions' (CaloHitContribution: PDG, energy, stepPosition, stepLength, + a link to
 MCParticle). Those per-step fields are populated ONLY because enableDetailedShowerMode is set
 below; without it the contributions carry energy + the particle link but zero position.
@@ -72,7 +72,7 @@ SIM.physicsList = "FTFP_BERT"
 # The production cut decides which secondaries Geant4 physically CREATES as tracks: below this
 # range, soft e-/e+/gamma are not made as separate particles -- their energy is deposited
 # continuously along the parent's step instead. Lowering it produces more soft delta-rays
-# (=> more per-sensor crossings for PIXELAV) at higher CPU cost; raising it coarsens the
+# (=> more per-sensor crossings) at higher CPU cost; raising it coarsens the
 # shower. This CHANGES the simulated physics and the energy-deposition pattern. DDSim's default
 # is 0.7*mm; we keep that default unless CALOMAPS_RANGECUT_MM is set.
 #   Example: CALOMAPS_RANGECUT_MM=0.05 ddsim ...   (finer delta-ray production)
@@ -99,7 +99,7 @@ SIM.part.printEndTracking = False
 SIM.part.printStartTracking = False
 
 # ==========================================
-# CALORIMETER HIT DETAIL -- per-step truth for PIXELAV (experiment "B")
+# CALORIMETER HIT DETAIL -- per-step truth for the sensor-crossing records
 # ==========================================
 # enableDetailedShowerMode puts the calorimeter sensitive actions in DETAILED_MODE
 # (HitCreationMode=2), the only mode under which the EDM4hep writer fills each

@@ -1,15 +1,15 @@
 """Extract the full shower cascade from the EDM4hep ROOT file into a compact .npz.
 
 Reads the EDM4hep output of run_sim_fullcascade.py with uproot (no ROOT/PyROOT needed)
-and writes a numpy archive the visualization notebook (04) loads with plain numpy.
+and writes a numpy archive the visualization notebook (05) loads with plain numpy.
 
 Units: EDM4hep stores momentum / mass / hit energy in GeV, positions / vertices in mm.
 
-Per-step hit truth (experiment "B"): when run_sim_fullcascade.py sets enableDetailedShowerMode,
+Per-step hit truth: when run_sim_fullcascade.py sets enableDetailedShowerMode,
 each ECalBarrelHitsContributions entry (one Geant4 step deposit) carries PDG, energy, stepLength,
 stepPosition (mm) and a link to the producing MCParticle. Those are extracted here -- cbeg/cend
 index the per-hit contribution ranges, and the flat contribution arrays are cpdg/cE/cslen/
-csx/csy/csz/cmc -- and feed analysis/pixelav_converter.py. Without detailed mode the position/PDG
+csx/csy/csz/cmc -- and feed analysis/sensor_crossings.py. Without detailed mode the position/PDG
 fields come out zero (only energy + the MCParticle link are written).
 
 Usage: python extract_cascade.py [in.root] [out.npz] [event_index]
@@ -69,7 +69,7 @@ hx, hy, hz = g("ECalBarrelHits.position.x"), g("ECalBarrelHits.position.y"), g("
 he = g("ECalBarrelHits.energy")   # GeV
 pid = np.arange(len(pdg), dtype=np.int64)
 
-# --- per-step hit contributions (experiment "B"; populated only with enableDetailedShowerMode) ---
+# --- per-step hit contributions (populated only with enableDetailedShowerMode) ---
 cellID = g("ECalBarrelHits.cellID").astype(np.uint64)
 cbeg = g("ECalBarrelHits.contributions_begin").astype(np.int64)
 cend = g("ECalBarrelHits.contributions_end").astype(np.int64)
@@ -101,5 +101,5 @@ print(f"  n_particles={len(pdg)}  n_hits={len(hx)}  n_contributions={len(cpdg)}"
 print(f"  particle E range (GeV): {E.min():.4f} .. {E.max():.2f}")
 print(f"  total hit energy deposited (GeV): {he.sum():.4f}")
 print(f"  contribution stepPosition populated: {_detailed}"
-      + ("" if _detailed else "  <-- WARN: detailed mode NOT active; experiment-B (Variant A) unavailable"))
+      + ("" if _detailed else "  <-- WARN: detailed mode NOT active; per-step crossings (variant A) unavailable"))
 print(f"  file size: {os.path.getsize(OUT)/1024:.0f} KB")

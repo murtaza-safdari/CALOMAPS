@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Per-energy readout extraction for the conventional-resolution notebook
-(03c_conventional_resolution.ipynb).
+(03_resolution_conventional.ipynb).
 
 Runs over ONE mono-energetic ddsim dataset (a fixed-energy beam) and writes a
-per-energy .npz with the four readouts that 03c consumes:
+per-energy .npz with the four readouts that notebook 03 consumes:
     all_truth, all_visible, all_mip, all_hits, all_cluster, E_nominal
 
 The readout definitions (analog sum, MIPs-per-pixel, fired-pixel count, 8-connected
 clusters) and the +y wedge / half-MIP cuts match notebooks/02_data_extraction.ipynb
--- this is the batch/per-energy CLI form of that extraction (as train_ensembles.py is
-to nb03). Loop it over your fixed-energy datasets:
+-- this is the batch/per-energy CLI form of that extraction. Loop it over your fixed-energy datasets:
 
     for E in 1 2 5 10 20 50 100 200 400; do
       python analysis/extract_readouts.py \\

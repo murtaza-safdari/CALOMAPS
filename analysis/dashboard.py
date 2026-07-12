@@ -1,4 +1,8 @@
-"""Plotting + reconstruction utilities for the DECAL 3-panel physics dashboard.
+"""LEGACY quantile-regression surrogate -- superseded by notebook 04 /
+analysis/cbnet.py (the Crystal-Ball density model). The workflow notebooks no longer
+use this file; it is kept for reference.
+
+Plotting + reconstruction utilities for the DECAL 3-panel physics dashboard.
 
 Given trained `QuantileNet` ensembles, this module:
   1. builds SciPy interpolators of the ensemble-averaged quantile curves vs true
@@ -9,7 +13,7 @@ Given trained `QuantileNet` ensembles, this module:
      check, reconstructed resolution vs E, and the stochastic resolution vs
      1/sqrt(E) with a fitted a/sqrt(E) (+) b (+) c/E term (`plot_dashboard`).
 
-Used by analysis/verify_ensembles.py and the 03_ml_training_and_eval notebook.
+Used by analysis/verify_ensembles.py.
 """
 from __future__ import annotations
 import numpy as np

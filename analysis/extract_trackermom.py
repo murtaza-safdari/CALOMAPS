@@ -4,7 +4,7 @@ run_sim_trackermom.py reads the ECal Si out as a Geant4 TRACKER, so ECalBarrelHi
 collection of SimTrackerHits -- one combined hit per charged-track crossing of a Si sensor,
 each carrying the TRUE Geant4 momentum[3] at that crossing (which the calorimeter
 CaloHitContribution does NOT). This is the real per-step/per-crossing momentum that
-pixelav_converter.py needs (and that nb05 validates).
+sensor_crossings.py needs (and that notebook 06 validates).
 
 This reads that ROOT with uproot and writes a compact .npz holding both the MCParticle cascade
 (for context / production-momentum comparison) and the tracker hits.

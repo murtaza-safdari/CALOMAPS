@@ -6,19 +6,18 @@ A `CBNet` maps normalized true energy to the four Crystal-Ball parameters
 "Crystal-Ball fit done inside the network", learned as a smooth function of
 energy from the whole spectrum -- so:
   * its Gaussian-core sigma is defined IDENTICALLY to the per-energy CB fits
-    in 03d/03c, and
+    in notebooks 03/04, and
   * the same CB's power-law tail gives the tail-inclusive effective width.
 Both readout-space widths are then turned into an ENERGY resolution by inverting
-the network's learned calibration mu(E) with the SAME code 03c uses
+the network's learned calibration mu(E) with the SAME code notebook 03 uses
 (`decal_cbfit.build_calibration`), so the resolutions are directly comparable to
-03c's inverted sigma_E/E and to nb03's Neyman band.
+notebook 03's inverted sigma_E/E.
 
 The CB is parametrized exactly as scipy.stats.crystalball (beta=alpha, m=n), the
-same shape 03c fits, so a number-for-number comparison is meaningful.
+same shape notebook 03 fits, so a number-for-number comparison is meaningful.
 
-Mirrors quantilenet.py: same `train_one_ensemble(x, y, ...)` signature, same y/x
-normalization, same save/load bundle -- so 03d differs from nb03 only in the
-model and the resolution extraction. Backbone is the same tiny MLP as QuantileNet.
+Mirrors the legacy quantilenet.py: same `train_one_ensemble(x, y, ...)` signature, same
+y/x normalization, same save/load bundle. Backbone is the same tiny MLP as QuantileNet.
 """
 from __future__ import annotations
 import math
@@ -187,7 +186,7 @@ def cb_params_over_grid(ensemble, x_max, y_frac_max, device, e_grid):
     """Ensemble-typical CB params vs energy, in FRACTIONAL-RESPONSE (y/E) units, for the
     density-overlay plots. mu,sigma are the ensemble MEAN; the shape params alpha,n use the
     ensemble MEDIAN (robust to a member with a runaway tail), both after the same [_ALPHA_CLIP,
-    _N_CLIP] clip resolution_over_grid uses -- so the plotted CB (03d section 5) and the
+    _N_CLIP] clip resolution_over_grid uses -- so the plotted CB (notebook 04 section 5) and the
     effective width (section 7) correspond to a consistent shape."""
     import numpy as np
     mus, sigs, als, ns = _member_params(ensemble, x_max, y_frac_max, device, e_grid)
@@ -201,14 +200,15 @@ def resolution_over_grid(ensemble, x_max, y_frac_max, device, e_grid):
 
     Returns (cb, core, eff) where core and eff are FRACTIONAL ENERGY resolutions
     (sigma_E/E), NOT raw readout widths. Both are obtained by INVERTING the network's
-    learned calibration mu(E) exactly as 03c inverts its measured calibration
-    (decal_cbfit.build_calibration), so they are directly comparable to 03c's inverted
-    sigma_E/E and to nb03's Neyman band:
+    learned calibration mu(E) exactly as notebook 03 inverts its measured calibration
+    (decal_cbfit.build_calibration), so they are directly comparable to notebook 03's
+    inverted sigma_E/E:
 
       core = (ginv(mu_r + sc_r) - ginv(mu_r - sc_r)) / (2E)
-             Gaussian-core energy resolution  (excludes the low-side tail; == 03c core)
+             Gaussian-core energy resolution  (excludes the low-side tail; == the
+             notebook-03 core definition)
       eff  = (ginv(readout_P84) - ginv(readout_P16)) / (2E)
-             tail-inclusive energy resolution (includes the leakage tail; ~ nb03 band)
+             tail-inclusive energy resolution (includes the leakage tail)
 
     For the linear analog readout the inversion is ~identity (sigma_E/E ~ sigma/mu); for the
     SATURATING digital readouts it is essential -- a small readout width maps to a large energy

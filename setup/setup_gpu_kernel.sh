@@ -1,11 +1,11 @@
 #!/bin/bash
-# One-shot GPU kernel setup for notebook 03 (the DECAL ML / dashboard notebook).
+# One-shot GPU kernel setup for notebook 04 (the ML resolution notebook).
 #
 # The CVMFS Key4hep stack ships a CPU-only PyTorch, so notebook 03 needs a venv
 # with a CUDA build. This script builds a *self-contained* venv (CUDA torch +
 # the few packages nb03 imports) and registers a "Key4hep + GPU" Jupyter kernel
 # whose launcher uses a clean PYTHONPATH, so the venv's cu121 torch always wins
-# (no CVMFS shadowing). nb00 / nb01 / nb02 don't need this — they use "Python (Key4hep)".
+# (no CVMFS shadowing). nb00 / nb01 / nb02 don't need this — they use "Key4hep (CPU)".
 #
 # Usage (from a JupyterLab terminal, after `source ~/setup_calomaps.sh`):
 #     bash setup/setup_gpu_kernel.sh
@@ -83,5 +83,5 @@ if not ok:
 PYEOF
 
 echo
-echo "Done. In JupyterLab, open notebooks/03_ml_training_and_eval.ipynb and pick"
-echo "the 'Key4hep + GPU' kernel. (nb00 / nb01 / nb02 use 'Python (Key4hep)'.)"
+echo "Done. In JupyterLab, open notebooks/04_resolution_ml_crystalball.ipynb and pick"
+echo "the 'Key4hep + GPU' kernel. (nb00 / nb01 / nb02 use 'Key4hep (CPU)'.)"

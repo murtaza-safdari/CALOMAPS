@@ -1,8 +1,11 @@
-"""CLI entry point: train 4 Deep Quantile Ensembles on GPU.
+"""LEGACY quantile-regression surrogate -- superseded by notebook 04 /
+analysis/cbnet.py (the Crystal-Ball density model). The workflow notebooks no longer
+use this file; it is kept for reference.
 
-This is the headless / batch version. For interactive notebook use, prefer
-notebooks/03_ml_training_and_eval.ipynb — it imports `train_one_ensemble`
-from `quantilenet.py` and shows the training loop in the notebook UI.
+CLI entry point: train 4 Deep Quantile Ensembles on GPU.
+
+This is the headless / batch version. It imports `train_one_ensemble`
+from `quantilenet.py` (the quantile model that predated the CB-density net).
 
 This script does:
   reads $CALOMAPS_HOME/models/decal_extracted_data_<particle>.npz
