@@ -1,0 +1,258 @@
+# PIXELAV reference
+
+PIXELAV (also written "PixelAV") is Morris Swartz's detailed, first-principles Monte Carlo of
+charge deposition and transport in a silicon pixel sensor. It is the simulation engine behind
+the CMS `SiPixelTemplate` / generic-error pixel templates and the calibration engine for the
+CMS Phase-2 Inner Tracker. CALOMAPS produces **PIXELAV Stage-B track-crossing inputs** from the
+Geant4 shower (see [`analysis/pixelav_converter.py`](../analysis/pixelav_converter.py) and
+notebooks [`06_sensor_crossings_tracker.ipynb`](../notebooks/06_sensor_crossings_tracker.ipynb),
+[`07_sensor_crossings_calo.ipynb`](../notebooks/07_sensor_crossings_calo.ipynb) and
+[`08_pixelav_deck_inspection.ipynb`](../notebooks/08_pixelav_deck_inspection.ipynb)); this file is the
+collected reference on PIXELAV itself — what it is, how to get it, and the exact input format —
+so the converter and the deck writer can be finished against a concrete spec.
+
+> Status of the facts below: most are read directly from the public PIXELAV C source and the CMS
+> note; a few (the "canonical" deck choice, the CMS-internal copy) are inferred or gated and are
+> marked as such. Where the two public source copies disagree, both are given.
+
+---
+
+## 1. What it models
+
+PIXELAV is slow and physical, not a fast parametrisation. From CMS NOTE 2002/027 §3, it chains:
+
+1. **Charge deposition** — the *exact* Bichsel pion–electron cross section (H. Bichsel,
+   Rev. Mod. Phys. 60, 663 (1988)); interaction spacing drawn from an exponential; delta-ray
+   energies from Bichsel's distribution with two-body kinematics; e–h pairs Poisson-distributed
+   at 3.68 eV/pair; delta-ray range from the Damerell relation. (The Landau/Vavilov shapes are
+   *approximations* to what this algorithm generates.)
+2. **Electric field** — a realistic 3-D map from TCAD (Silvaco Atlas), solving Poisson + the
+   electron/hole continuity equations on a lattice (3×3×3 µm, four-fold pixel symmetry).
+3. **Charge transport** — `dv/dt = (e/m*)[qE + q·rH·(v×B) − v/µ(E)]` integrated with a 5th-order
+   Runge–Kutta, field-dependent mobilities, the Hall effect / Lorentz drift, and 3-D diffusion
+   (Einstein relation). Effective masses 0.260 mₑ (e), 0.241 mₑ (h); Hall factors rH = 1.15 (e),
+   0.90 (h).
+4. **Signal induction** — Ramo's theorem, with Kramberger radiation-damage trapping (per-carrier
+   trapping test every 100 RK steps; trapped charge induces a segmented image-charge sum). For an
+   unirradiated sensor τ_eff⁻¹ = 0, so only electrons are transported.
+5. **Electronics** (noise, ROC response/saturation, FED digitisation) are applied *afterward in
+   separate analysis code*, so they can be varied without re-running the costly transport.
+
+**Key consequence for us:** PIXELAV is **not** an energy-deposit consumer. It generates its own
+ionisation from the track geometry + kinematics. We feed it **track segments**, never the Geant4
+energy deposits.
+
+---
+
+## 2. How to obtain it (public, no CERN login)
+
+| Repo | What it is |
+|------|------------|
+| **`github.com/badeaa3/pixelav`** | Swartz's actual code, "housed for preservation" (A. Badea). `ppixelav2.c` (engine) + four list/random drivers, `ppixel2.init`, `wgt_pot.init`, `SIRUTH.SPR`, weighting map, build scripts (x86-64/ARM/Apple-silicon), `docs/Pixelav_ac_file_format.pdf`, `docs/Pixelav_coordinates.pdf`. **No README.** |
+| **`github.com/elizahoward/Muon_Collider_Smart_Pixels`** (`…/PixelAV/`) | The **Smart Pixels** lineage — same Swartz engine plus `ppixelav2_custom.c`, a **9-column, PID-aware** track-list wrapper, `compile_pixelav.sh`, Silvaco field maps. This is the variant CALOMAPS targets (we collaborate with Smart Pixels). |
+| **`github.com/CodexForster/TCADtoPixelAV`** (MIT) | Converts Silvaco/Synopsys TCAD E-field + weighting maps into the `ppixel2.init` / `wgt_pot.init` grids PIXELAV consumes. **This is the route for our custom DECAL/MAPS geometry** (supply our own TCAD field map). |
+| **`github.com/OzAmram/PixelTemplateProduction`** | The downstream CMS template producer that *consumes* PIXELAV output; does **not** bundle PIXELAV. |
+
+Not on CVMFS/CMSSW (no `*pixelav*` in CMSSW src). No public `pixelav` on gitlab.cern.ch; a
+CMS-internal copy exists behind CERN SSO (TWiki `Main/MakingSiPixelTemplates`, gated). Contact:
+**morris@jhu.edu**.
+
+**Build** (badeaa3): `gcc -O2 <driver>.c -msse -lm -o <driver>` (each driver `#include`s
+`ppixelav2.c`). Smart Pixels: `compile_pixelav.sh` → `gcc ppixelav2_custom.c -o
+bin/ppixelav2_custom.exe -lm -O2`. Intel `icc` is ~40% faster but discontinued.
+
+**Run:** `./<driver> <frun> <runsize>` reading `track_list.txt` + the `.init` files +
+`SIRUTH.SPR` from the working directory; writes `pixel_clusters_d*.out` + a seed file. ~30 000
+tracks/run, splittable across jobs by `frun`.
+
+---
+
+## 3. Inputs — two separate files
+
+### 3a. Stage A — detector / field configuration (`ppixel2.init`)
+
+Hand-authored per sensor (or generated by `TCADtoPixelAV`). Structure:
+
+| Line | Content |
+|------|---------|
+| 1 | ASCII header string (a leading `1` enables header output) |
+| 2 | `pimom filebase` — pion momentum (if < 1.1 → defaults to 45 GeV) and output-file base index |
+| 3 | `Bx By Bz` — magnetic field (Tesla) |
+| 4 | `thick xsize ysize temp flux_e flux_h rhe rhh peaktim samptim ehole new_drde npixx npixy npixz` |
+| 5… | `npixx·npixy·npixz` rows of `ix iy iz Ex Ey Ez` — the 3-D E-field grid (**V/cm**) |
+
+Plus a **weighting-potential** map and **`SIRUTH.SPR`** (Bichsel cross-section table), same
+indexed-grid format. Verbatim example header (Smart Pixels `silvaco25x25x50_final_efield.out`):
+
+```
+dot1_25x25_phase3:BPix@-50V,3.57T@90deg,253K,rhe=1.10,rhh=0.7
+1.00 16400
+3.57 0.0 0.00
+50. 25. 25. 253. 0.0 0.0 1.10 0.70 20000. 4000. 0 1 13 13 51
+   1   1   1   0.000000e+00 1.600000e-05 -1.569615e+04
+```
+
+Decoding line 4: thickness 50 µm, pixel 25×25 µm, T = 253 K, rhe 1.10, rhh 0.70, peaktim 20000,
+samptim 4000, ehole 0, new_drde 1, grid 13×13×51.
+
+### 3b. Stage B — the per-track list (what `pixelav_converter.py` writes)
+
+Plain ASCII, **one whitespace-separated track per line**, read by `fscanf`. **The column set is
+driver-specific** — the two public copies differ:
+
+- **badeaa3 base** (`ppixelav2_list_trkpy_n_2f.c`) — **7 columns**, pion-only, no PID:
+  `cot_alpha  cot_beta  ppion  flipped  modx  mody  pT`
+  (`modx/mody/pT` are pass-through labels for ML; a simpler driver reads only the first 4.)
+- **Smart Pixels** (`ppixelav2_custom.c`, the CALOMAPS target) — **9 columns**, adds PID:
+  `cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID`
+  (`fscanf("%f %f %f %d %f %f %f %f %f")`; `ylocal zglobal pT hittime` are pass-through labels.)
+
+What each driving field means:
+
+- **`cot_alpha`, `cot_beta`** — the track direction. In the Smart Pixels wrapper:
+  `locdir_z = 1/√(1 + cot_α² + cot_β²)`, `locdir_x = cot_α·locdir_z`, `locdir_y = cot_β·locdir_z`.
+  So **`cot_alpha = p_x/p_z`, `cot_beta = p_y/p_z`** in the sensor-local frame (z = depth/normal,
+  x and y the in-plane pixel axes). This matches the CMS convention `cot(alpha) = cosx/cosz`,
+  `cot(beta) = cosy/cosz` (CMS NOTE 2002/027; CMS IN 2004/014; CMSSW `SiPixelTemplate.h`), where
+  α is the incidence angle in the x–z plane and β in the y–z (magnetic-bending) plane.
+  **Caveat — the two lineages differ, so verify against the driver you run.** The *badeaa3* list
+  drivers (and our patched real-entry driver, which inherits from them) apply the columns the
+  other way around: `locdir[0] = cot_beta·locdir[2]`, `locdir[1] = cot_alpha·locdir[2]` — i.e.
+  the **first** deck column steers the **y** (13-pixel, Lorentz) axis and the **second** steers
+  **x** (21-pixel). **Verified against the driver source** (`ppixelav2_list_trkpy_real_entry.c`
+  in `analysis/pixelav/` on the `pixelav-integration` branch) and confirmed with an
+  end-to-end run: our deck writes `cot_alpha = p_u/p_w` (col 1) + `mody = u` (col 6) onto PIXELAV's
+  y axis, and `cot_beta = p_v/p_w` (col 2) + `modx = v` (col 5) onto PIXELAV's x axis — angles and
+  impact labels land on the same axes, self-consistently. The stock snippet quoted below (from
+  `ppixelav2.c`'s randomizing wrapper) names the variables the Smart-Pixels way; only the
+  fscanf-to-axis pairing of the list drivers is swapped.
+- **`ppion`** — momentum magnitude in **GeV/c**.
+- **`flipped`** (int 0/1) — selects the entry face and the sign of the depth direction: `flipped`
+  picks z-entry = 0 with n_z > 0, or z-entry = thickness with n_z < 0.
+- **`PID`** (Smart Pixels only) — 211 (π), 13 (µ), 11 (e). **Non-pion handling is approximate:**
+  the wrapper only rescales the momentum by the pion/particle mass ratio so β ≈ matches; the
+  Bichsel dE/dx model stays pion-like. Feeding e±/µ is therefore an approximation, not a separate
+  energy-loss model. Tracks with |cot| > 10 are skipped.
+
+### ⚠️ The entry point is **not** an input (important design point)
+
+Stock PIXELAV does **not** read a local entry point. It **randomises the impact uniformly over
+the central 3×3 pixel area** each event and projects it to the sensor face via the angles:
+
+```c
+vect[0] = 3.*xsize * (rvec[0] - 0.5) + (vect[2] - thick/2.)*cotalpha;   // rvec = RANLUX uniforms
+vect[1] = 3.*ysize * (rvec[1] - 0.5) + (vect[2] - thick/2.)*cotbeta;
+```
+
+So what stock PIXELAV consumes per track is **angles + momentum (+ type)** — *not* the entry
+point. Two ways to use it:
+
+1. **Standard / template mode** — accept the internal randomisation. Our converter's precise
+   `entry_u/entry_v` are then carried only as **labels** (in the `ylocal/zglobal` slots) for
+   bookkeeping / matching, not as transport inputs.
+2. **Truth-injection mode** — to make PIXELAV use *our* real per-crossing entry point, **patch
+   the wrapper** (`vect[0]/vect[1]`) to read the entry from the deck instead of randomising. This
+   is the route if the goal is the cluster for a *specific* shower crossing rather than a template.
+
+This is a decision for the collaboration; the converter emits the entry point either way.
+
+### Units
+
+**Lengths = microns (µm); time = picoseconds (ps); E-field = V/cm** (converted internally to
+V/m). Firmly sourced from the C comments. So CALOMAPS records (mm) scale by `LENGTH_UNIT_MM =
+1000` when written into the deck's length label columns.
+
+---
+
+## 4. Output
+
+Per cluster: a `<cluster>` tag, a track line (`vect[0..5]` = entry x,y,z [µm] and px,py,pz, then
+`neh` e–h pairs and the pass-through labels), then per time slice a **21×13** pixel charge grid
+(`TXSIZE=21`, `TYSIZE=13`). Time-sliced variants record 20 slices × 200 ps. Pixel charges are
+scaled (×10 sampling) to recover the total = `neh`. Byte-exact layout: `docs/Pixelav_ac_file_format.pdf`
+and `docs/Pixelav_coordinates.pdf` in the badeaa3 repo.
+
+---
+
+## 5. Downstream CMS template pipeline (context)
+
+`OzAmram/PixelTemplateProduction` turns PIXELAV output into `SiPixelTemplate` / `SiPixelGenError`
+payloads via `gen_xy_template` → `gen_xy_template2d` → `gen_zp_template` → `gen_zp_template2d`,
+driven by a `pix_2t.proc` config (reco/threshold params + cot-α/cot-β bin edges) — distinct from
+the Stage-B track list. Not needed to *run* PIXELAV, but it documents the conventions and is the
+path if CALOMAPS ever wants CMS-style templates.
+
+---
+
+## 6. How this maps onto CALOMAPS
+
+- `analysis/pixelav_converter.py` builds one record per (MCParticle, Si layer, face) crossing
+  with local entry (u, v), `cot_alpha = p_u/p_w`, `cot_beta = p_v/p_w`, |p|, particle type — which
+  is exactly the Stage-B driving set (our `cot_alpha/cot_beta` match the Smart Pixels columns 1–2;
+  our `u` = local x, `v` = local y, `w` = depth z).
+- `write_pixelav_deck()` emits the **7-column `badeaa3`** layout by default (the format our
+  patched real-entry driver reads), with the Smart Pixels 9-column layout available via
+  `--layout smartpix` (the longer-term collaboration target). Lengths are emitted in microns.
+- For our **custom DECAL geometry**, the Stage-A field map comes from our TCAD via
+  `CodexForster/TCADtoPixelAV` — that, plus the per-track deck, is the full PIXELAV input.
+
+### The CALOMAPS per-crossing record — authoritative schema
+
+`pixelav_converter.py` writes, next to the deck, a `.json`/`.csv` with one 16-field record per
+crossing (the provenance behind every deck line). Coordinates: **u** = across-pitch (tangential),
+**v** = cylinder-z, **w** = sensor depth (outward face normal); all lengths in **mm** here (the
+deck's length labels are in µm).
+
+| Field | Unit | Meaning |
+|---|---|---|
+| `track_id` | – | index into the event's `MCParticles` (trace any line back to its particle) |
+| `layer_id` | – | Si layer 0–29 (0 = innermost); assignment verified against the readout `cellID` |
+| `pdg` | – | PDG code of the crossing particle |
+| `p_GeV` | GeV | \|p\| — variant **C**: true Geant4 momentum *at the crossing*; **A**/**B**: momentum at production |
+| `entry_u`, `entry_v` | mm | sensor-local impact point. Variant **C**: `Geant4TrackerWeightedAction`'s energy-weighted mid-crossing position (~mid-plane), **not** the entry face; **A**: earliest-in-time step position |
+| `cot_alpha` | – | `p_u / p_w` (drives PIXELAV's 13-px/Lorentz **y** axis in our driver) |
+| `cot_beta` | – | `p_v / p_w` (drives PIXELAV's 21-px **x** axis) |
+| `flipped` | 0/1 | 1 = outward-going (`p_w ≥ 0`) → driver entry face `z = 0`; 0 → `z = thick` |
+| `sensor_normal_phi` | rad | outward-normal azimuth of the dodecagon face the crossing is on |
+| `depth_w_mm` | mm | radial depth (apothem) of the impact point |
+| `energy_dep_GeV` | GeV | Geant4 energy deposited in the crossing — bookkeeping only; PIXELAV regenerates its own ionization |
+| `n_steps` | – | Geant4 steps merged into this record (variant C: 1 combined hit) |
+| `time_ns` | ns | crossing time (deck's `hittime` label is this ×1000, in ps, smartpix layout only) |
+| `variant` | – | `C` (tracker truth), `A` (calo step truth), `B` (pixel centroid fallback) |
+| `flags` | – | provenance markers: `tracker_hit`, `dir_from_momentum`, `pixel_centroid`, `grazing` |
+
+Deck-column ↔ record mapping (badeaa3 7-col): `cot_alpha cot_beta ppion flipped modx mody pT` =
+`cot_alpha`, `cot_beta`, `p·(m_π/m_particle)` (βγ-matched), `flipped`, `entry_v·1000` (µm),
+`entry_u·1000` (µm), `p_GeV`. Grazing records (|cot| > 10 or non-finite) are skipped at deck
+writing and counted in the converter's summary line.
+
+### Open decisions (need the collaboration / Swartz)
+
+1. **Which fork/column layout** is canonical for our Smart Pixels target (we assume the 9-col
+   `ppixelav2_custom.c`); confirm there isn't a newer internal version.
+2. **Entry point:** standard randomisation vs truth injection. Our patched driver
+   (on the `pixelav-integration` branch: `analysis/pixelav/ppixelav2_list_trkpy_real_entry.c`,
+   built by `setup/setup_pixelav.sh`)
+   already injects the deck's truth impact (reduced mod-pitch); the collaboration still has to
+   choose which mode their production runs use. Note the "entry" we carry is the
+   energy-weighted **mid-crossing** position from `Geant4TrackerWeightedAction` (~sensor
+   mid-plane), not the entry-face point — the driver back-projects it to the entry face using
+   the track angles, exactly as stock PIXELAV does with its randomized mid-plane impact.
+3. ~~**cot axis/sign** for our sensor orientation (the public copies disagree on x↔y)~~ —
+   **resolved** for the patched driver this project targets — the pairing is verified against
+   the driver source (see the §3b caveat above). Re-verify if you switch to a different
+   driver/lineage (e.g. the 9-column Smart Pixels wrapper).
+4. **Non-pion dE/dx:** is the momentum-rescaling approximation acceptable for the e±-dominated
+   shower, or does Swartz have a proper electron treatment?
+5. The Stage-A field map for the 100 µm-pitch DECAL Si (TCAD → `TCADtoPixelAV`).
+
+---
+
+## 7. References
+
+- M. Swartz, *A Detailed Simulation of the CMS Pixel Sensor*, CMS NOTE 2002/027 — <https://cds.cern.ch/record/687440> ([PDF](https://cds.cern.ch/record/687440/files/note02_027.pdf))
+- M. Swartz, *CMS pixel simulations*, NIM A 511 (2003) 88, doi:10.1016/S0168-9002(03)01757-1 — <https://cds.cern.ch/record/726082>
+- *Pixel Hit Reconstruction with the CMS Detector*, arXiv:0808.3804 — <https://arxiv.org/abs/0808.3804>
+- Smart Pixels: arXiv:2312.11676; *Sensor Co-design for smartpixels*, arXiv:2510.06588 — <https://arxiv.org/html/2510.06588v1>; dataset doi:10.5281/zenodo.7331128
+- Source: <https://github.com/badeaa3/pixelav> · <https://github.com/elizahoward/Muon_Collider_Smart_Pixels> · <https://github.com/CodexForster/TCADtoPixelAV> · <https://github.com/OzAmram/PixelTemplateProduction>
+- Angle convention: CMS IN 2004/014 (referenced in CMSSW `CondFormats/SiPixelTransient/interface/SiPixelTemplate.h`)
