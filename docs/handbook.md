@@ -18,9 +18,9 @@ The companion document [DECAL_pipeline.md](DECAL_pipeline.md) is the canonical p
 8. [Running a smoke-test simulation](#8-running-a-smoke-test-simulation)
 9. [Running the production simulation](#9-running-the-production-simulation)
 10. [Data extraction](#10-data-extraction)
-11. [Training the deep-ensemble surrogate](#11-training-the-deep-ensemble-surrogate)
-12. [Neyman-inversion reconstruction](#12-neyman-inversion-reconstruction)
-13. [Interpreting the 3-panel physics dashboard](#13-interpreting-the-3-panel-physics-dashboard)
+11. [Training the ML resolution model](#11-training-the-ml-resolution-model-notebook-04)
+12. [Energy reconstruction = calibration inversion](#12-energy-reconstruction--calibration-inversion)
+13. [Interpreting the resolution results](#13-interpreting-the-resolution-results)
 14. [Common gotchas (code-level)](#14-common-gotchas-code-level)
 15. [Where to ask for help](#15-where-to-ask-for-help)
 
@@ -32,11 +32,18 @@ CALOMAPS is a digital calorimeter (**DECAL**) R&D study. The pipeline:
 
 1. Use a Geant4-based simulation (driven by DD4hep, configured by XML) to fire **photons of varying energies** into a custom electromagnetic calorimeter made of **silicon pixel layers** instead of analog pads.
 2. From the raw hit data — restricted to the +y entry segment — compute four per-event readouts: **visible energy** (analog), **MIP count** (MIPs-per-pixel, `Σ max(1, round(E_pix/E_MIP))`), **raw hit count** (pixels above ½-MIP threshold, purely digital), and **cluster count** (number of 8-connected pixel clusters, summed over layers).
-3. Train a **Deep Quantile Ensemble** — 20 small networks per readout, trained with Pinball loss at the 15.87 / 50 / 84.13 percentiles — to map true energy → readout, with uncertainty quantification baked in.
-4. Use the trained surrogate to **reconstruct** new shower energies via a **Neyman construction** (a statistical inversion that survives the surrogate curve saturating at high energy).
-5. Produce a **3-panel physics dashboard** showing linearity, resolution, and stochastic terms — the canonical way calorimeter performance is reported in the literature.
+3. Measure the **energy resolution** σ_E/E of each readout two independent ways: the
+   **conventional** test-beam method (fixed-energy runs + a Crystal-Ball fit per energy +
+   calibration inversion, notebook 03) and an **ML density model** (a network that outputs the
+   Crystal-Ball parameters as a smooth function of energy, trained on the spectrum,
+   notebook 04) — and overlay them point-by-point across 1–400 GeV.
+4. Separately, reduce the full shower cascade to **per-sensor charged-track crossings** —
+   the impact point, direction and true momentum of every charged particle at every silicon
+   layer (notebooks 05–07) — the input a detailed sensor-level simulation consumes.
 
-A working end-to-end run produces all 5 stages. The more interesting direction is to **change** something in the geometry (pixel size, number of layers, tungsten thickness) and watch how the dashboard changes.
+A working end-to-end run produces all of it. The more interesting direction is to **change**
+something in the geometry (pixel size, number of layers, tungsten thickness) and watch how the
+resolution curves respond.
 
 ---
 
@@ -106,7 +113,7 @@ counted
 
 So at high energy (E > 100 GeV), **digital loses by saturating** while analog stays linear.
 
-### 2.3 The story the dashboard tells
+### 2.3 The story the resolution plots tell
 
 ```
                 LOW E              MID E              HIGH E
@@ -123,7 +130,12 @@ Linearity      both OK            both OK            digital
 
 A central question for the project is: **at what pixel size does this trade-off look most attractive?** You can re-run the simulation at 25 µm, 50 µm, 100 µm, 200 µm pixels and watch the saturation knee move. That's a real publishable result.
 
-The point of training a neural-network surrogate is that we want the **multiple readout views** to all be useful — and we want to combine them cleverly without making Gaussian assumptions. Pinball-loss quantile training handles asymmetric Landau-like uncertainties; ensembles handle epistemic uncertainty from limited training data.
+The resolution is measured **twice, independently** — the conventional test-beam way
+(fixed-energy beams + Crystal-Ball fits, notebook 03) and with an ML density model trained on
+the continuous spectrum (notebook 04) — and the two are overlaid point-by-point across
+1–400 GeV. Where they agree, both are validated; where either strains (discrete counts at
+1–2 GeV, near-flat calibrations deep in saturation), that is physics worth understanding, not
+a bug.
 
 ---
 
@@ -345,37 +357,40 @@ The first line ("Shoot") is the gun's *intrinsic* axis before angles are applied
 flowchart TD
     A["XML geometry<br/>SiD_TestBeam.xml + my_custom_ecal.xml"] --> B
     C["Steering file<br/>run_sim.py (gun config)"] --> B
-    B["ddsim<br/>(Geant4 via DD4hep)"] --> D["1000 ROOT files<br/>data_spectrum_100um_400GeV/<br/>20 events × 1000 = 20k events"]
+    B["ddsim<br/>(Geant4 via DD4hep)"] --> D["1000 ROOT files<br/>data_spectrum_100um_400GeV/<br/>20 events × 1000 jobs (≈890 land; see §9)"]
     D --> E["notebooks/02_data_extraction.ipynb"]
     E --> F["decal_extracted_data.npz"]
-    F --> G["Deep Quantile Ensemble<br/>PyTorch training<br/>(notebooks/03 + Key4hep + GPU kernel)"]
-    G --> H["models/saved_ensembles_gpu_v2/<br/>(4 readouts × 20 models)"]
-    H --> I["Neyman inversion (Brent's method)"]
-    I --> J["3-panel physics dashboard"]
+    B --> M["fixed-energy runs<br/>one per energy, 1-400 GeV"]
+    M --> N["analysis/extract_readouts.py<br/>models/mono_gamma/*.npz"]
+    N --> O["notebook 03<br/>Crystal-Ball fits + calibration inversion"]
+    F --> P["notebook 04<br/>CB-density net (Key4hep + GPU kernel)"]
+    N --> P
+    O --> Q["sigma_E/E vs E, two independent ways,<br/>overlaid across 1-400 GeV"]
+    P --> Q
 
     style B fill:#fffbb,stroke:#aa0
-    style G fill:#bef,stroke:#06a
-    style J fill:#bfb,stroke:#070
+    style P fill:#bef,stroke:#06a
+    style Q fill:#bfb,stroke:#070
 ```
 
-Stage 1 (simulation) happens in a JupyterLab terminal (via `sim/generate_batched.sh`). Stages 2-5 happen in JupyterLab notebooks: stage 2 (extraction) in notebook 02, stages 3-5 (training / inversion / dashboard) in notebook 03 on the `Key4hep + GPU` kernel.
+Stage 1 (simulation) happens in a JupyterLab terminal (via `sim/generate_batched.sh` for the spectrum, `sim/generate_dataset.sh` per fixed energy). The rest happens in JupyterLab notebooks: extraction in notebook 02 (spectrum) and `analysis/extract_readouts.py` (per energy), the conventional resolution in notebook 03 (CPU kernel), and the ML resolution in notebook 04 on the `Key4hep + GPU` kernel.
 
-A second product line — **per-sensor track crossings for PIXELAV** — branches off after simulation
-(§10.1 and [`docs/pixelav_handoff.md`](pixelav_handoff.md)). The full notebook set, in pipeline order:
+A second product line — **per-sensor track crossings** for sensor-level simulation — branches
+off after simulation (§10.1). The full notebook set, in pipeline order:
 
 | Notebook | What it does |
 |---|---|
 | `00_simulate_your_samples` | generate your own datasets (terminal recipes) |
-| `01_detector_and_data` (+ `01b` pions) | geometry, pixel quantization, one event, first look |
-| `02_data_extraction` (+ `02b` pions) | canonical extraction → `decal_extracted_data*.npz` |
-| `03_ml_training_and_eval` (+ `03b` pions) | quantile ensembles + Neyman dashboard |
-| `03c_conventional_resolution` | Crystal-Ball fixed-energy resolution cross-check (§13.3) |
-| `03d_ml_crystalball_density` | ML CB-density-net resolution study |
-| `04_shower_4vectors` | full-cascade MCParticle 4-vectors (experiment A) |
-| `05a`/`05b_pixelav_inputs` | per-sensor track crossings for PIXELAV — tracker / calo routes (§10.1) |
-| `05c_pixelav_input_inspection` | deck/npz sanity + physics inspection before hand-off |
+| `01_detector_and_data` (+ `01b` pion contrast) | the detector from first principles: X₀/λ_I budget, shower max vs ln E, Molière containment, the MIP scale, sampling fraction |
+| `02_data_extraction` | canonical extraction → `decal_extracted_data*.npz` |
+| `03_resolution_conventional` | fixed-energy Crystal-Ball fits + calibration inversion (§13) |
+| `04_resolution_ml_crystalball` | ML CB-density net, overlaid on 03 across 1–400 GeV (§13) |
+| `05_shower_4vectors` | full-cascade MCParticle 4-vectors |
+| `06`/`07_sensor_crossings` | per-sensor track crossings — tracker / calorimeter routes (§10.1) |
 
-(Building and *running* PIXELAV on the deck lives on the `pixelav-integration` branch — see §10.1.)
+(Converting the crossing records into input decks for PIXELAV — our collaborators' silicon
+charge-transport simulation — lives on the `pixelav-inputs` branch; building and *running*
+PIXELAV lives on `pixelav-integration`.)
 
 ---
 
@@ -389,7 +404,7 @@ A second product line — **per-sensor track crossings for PIXELAV** — branche
 ### 6.2 Spawn an EAF server
 
 1. <https://eaf.fnal.gov> → Login
-2. Spawner profile: **"GPU A100 10GB"** (or the current GPU non-CMS profile).
+2. Spawner profile: **"GPU A100 20GB MIG"** (or the current GPU non-CMS profile).
 3. Wait ~30s. You land in JupyterLab.
 
 **Why this profile**: CALOMAPS needs `/nashome` (mounted) and a GPU. The CMS profile mounts `/uscms_data/` (not needed here) and uses a different image.
@@ -440,8 +455,8 @@ The script only *warns* (never `exit`s) on a missing piece, so sourcing it can't
 
 #### Notebook kernels
 
-- **CPU notebooks** (00, 01/01b, 02/02b, 03c, 04, 05a/05b/05c, 06) are saved against the **`Key4hep (CPU)`** kernel (`calomaps_cpu`), which `source ~/setup_calomaps.sh` registers automatically (step 3 above). A GUI-launched kernel never inherits a terminal's environment, so this wrapper kernel — whose launcher sources Key4hep itself — is what makes the notebooks work for a fresh clone. Reload JupyterLab after first sourcing to see it.
-- **GPU notebooks** (03/03b/03d) need the **`Key4hep + GPU`** kernel (`calomaps_gpu`) from `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2).
+- **CPU notebooks** (00, 01/01b, 02, 03, 05, 06, 07) are saved against the **`Key4hep (CPU)`** kernel (`calomaps_cpu`), which `source ~/setup_calomaps.sh` registers automatically (step 3 above). A GUI-launched kernel never inherits a terminal's environment, so this wrapper kernel — whose launcher sources Key4hep itself — is what makes the notebooks work for a fresh clone. Reload JupyterLab after first sourcing to see it.
+- **The GPU notebook** (04) needs the **`Key4hep + GPU`** kernel (`calomaps_gpu`) from `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (§11.2).
 
 ### 6.5 Editing files
 
@@ -546,7 +561,7 @@ source ~/setup_calomaps.sh
 bash $CALOMAPS_HOME/sim/generate_batched.sh
 ```
 
-Defaults: 1000 jobs × 20 events each = **20,000 events**, uniform momentum 5–400 GeV, written to `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/sim_photons_part*.root`. Runs in batches of 20 parallel jobs.
+Defaults: 1000 jobs × 20 events each = **20,000 events** nominal, uniform momentum 5–400 GeV, written to `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/sim_photons_part*.root`. Runs in batches of 20 parallel jobs. Individual jobs occasionally die under load, so a ~90% file yield is normal (the shipped run has 889 files / 17,780 events); the extraction simply uses the files present.
 
 **Rough timing**: ~30 minutes to 2 hours wall time depending on EAF load.
 
@@ -567,7 +582,7 @@ Both scripts resolve the geometry + steering by absolute path, so they run corre
 
 ## 10. Data extraction
 
-Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipynb) with the **`Python (Key4hep)`** kernel (CPU; extraction is I/O-bound). The cells:
+Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipynb) with the **`Key4hep (CPU)`** kernel (extraction is I/O-bound). The cells:
 
 1. Loop over all `sim_photons_part*.root` files in `$CALOMAPS_DATA_BASE/data_spectrum_100um_400GeV/`.
 2. Per event, compute:
@@ -580,9 +595,9 @@ Open [`notebooks/02_data_extraction.ipynb`](../notebooks/02_data_extraction.ipyn
 
 The notebook parallelizes with `ProcessPoolExecutor(max_workers=min(32, os.cpu_count() or 8))`. Lower the cap if memory-pressed.
 
-### 10.1 Cascade + per-crossing-momentum extraction (experiments "A" + "B": full-cascade 4-vectors + PIXELAV inputs)
+### 10.1 Cascade + per-crossing-momentum extraction (shower 4-vectors + sensor crossings)
 
-Preparing inputs for a per-pixel device simulation (PIXELAV) needs the full shower cascade and, per
+The per-sensor crossing product (notebooks 05–07) needs the full shower cascade and, per
 charged-track sensor crossing, the impact point, direction and **momentum**. Two single-event `ddsim`
 runs of the same 50 GeV photon (both pin seed 424242 → identical shower), steered from `sim/`, produce it:
 
@@ -607,18 +622,10 @@ five lines are load-bearing (the rest just reproduces the canonical gun or is op
 | `SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'` | tracker | reads the ECal Si as a tracker → one `SimTrackerHit` per crossing **with momentum** |
 
 The first three are truth-persistency — they change *which* truth is written, not the physics
-(nb04 §2 shows the deposit distribution is unchanged); the last two switch on the per-crossing
-readout PIXELAV needs.
+(notebook 05 §2 shows the deposit distribution is unchanged); the last two switch on the
+per-crossing readouts the crossing records need.
 
-**One command runs the whole chain** — both sims, both extractors, and the converter
-([`sim/make_pixelav_inputs.sh`](../sim/make_pixelav_inputs.sh); particle/energy via the usual env vars):
-
-```bash
-bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh --fullcascade            # gamma 50 GeV
-CALOMAPS_GUN_PARTICLE=pi+ CALOMAPS_GUN_ENERGY_GEV=80 bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh
-```
-
-Or run the steps manually (EAF terminal; `ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
+Run the chain from an EAF terminal (`ddsim` needs `lib_hack` on `LD_LIBRARY_PATH`, §6.3):
 
 ```bash
 source ~/setup_calomaps.sh                       # Key4hep + lib_hack + CALOMAPS_* env
@@ -628,7 +635,7 @@ ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_fullcascade.p
 ddsim --compactFile SiD_TestBeam.xml --steeringFile ../sim/run_sim_trackermom.py  --numberOfEvents 1
 python ../analysis/extract_cascade.py            # -> models/fullcascade_*.npz  (cascade + step truth)
 python ../analysis/extract_trackermom.py         # -> models/trackermom_*.npz   (per-crossing momentum)
-python ../analysis/pixelav_converter.py          # -> models/pixelav_segments_* (auto-picks Variant C)
+python ../analysis/sensor_crossings.py           # -> models/sensor_crossings_* (auto-picks variant C)
 ```
 
 ⚠️ **Key4hep release**: both runs keep the full ~78k-particle cascade. On the older EAF image the
@@ -637,23 +644,23 @@ EDM4hep file; on the current AlmaLinux 9 images with the pinned release the cras
 observed. If you do hit it, source the `2026-04-08` release for these
 two runs — see `troubleshooting.md`, "EDM4hep podio writer crashes on very large events".
 
-`pixelav_converter.py` auto-selects **Variant C** (tracker hits → real per-crossing `|p|`, direction
-and entry) when the trackermom `.npz` is present, else falls back to Variant A (calo step truth,
-production momentum). Notebooks [`04_shower_4vectors`](../notebooks/04_shower_4vectors.ipynb),
-[`05a_pixelav_inputs_tracker`](../notebooks/05a_pixelav_inputs_tracker.ipynb) (§5 validates the
-per-crossing momentum) and [`05b_pixelav_inputs_calo`](../notebooks/05b_pixelav_inputs_calo.ipynb)
-inspect these outputs. Main deliberately stops at the validated input package: building and
-running PIXELAV itself lives on the `pixelav-integration` branch (`setup/setup_pixelav.sh`
-builds the reference PIXELAV plus our patched real-entry driver in `analysis/pixelav/`;
-notebook `06_pixelav_clusters` runs and parses it there).
-[`docs/pixelav_handoff.md`](pixelav_handoff.md) is the end-to-end hand-off recipe (deck format,
-Stage-A sensor model, open decisions for the collaboration).
+`sensor_crossings.py` auto-selects **variant C** (tracker hits → real per-crossing `|p|`,
+direction and impact) when the trackermom `.npz` is present, else falls back to variant A (calo
+step truth, production momentum). Notebooks
+[`05_shower_4vectors`](../notebooks/05_shower_4vectors.ipynb),
+[`06_sensor_crossings_tracker`](../notebooks/06_sensor_crossings_tracker.ipynb) (§5 validates
+the per-crossing momentum) and
+[`07_sensor_crossings_calo`](../notebooks/07_sensor_crossings_calo.ipynb) inspect these
+outputs. Main deliberately stops at the validated crossing records: converting them into input
+decks for **PIXELAV** (our collaborators' silicon charge-transport simulation) lives on the
+`pixelav-inputs` branch, and building/running PIXELAV itself on the `pixelav-integration`
+branch.
 
-Notebook 04 §2 also contrasts the stock vs full-cascade config over 20 events each to show the
+Notebook 05 §2 also contrasts the stock vs full-cascade config over 20 events each to show the
 persistency settings don't change the physics; it reads `models/config_ab_gamma50.npz`, which
 [`analysis/make_config_ab.py`](../analysis/make_config_ab.py) regenerates (the panel is skipped
 gracefully if the file is absent). The cross-readout consistency checks (byte-identical cascade,
-crossings-per-layer agreement, the silicon-MIP dE/dx) are in notebook 05a §8.
+crossings-per-layer agreement, the silicon-MIP dE/dx) are in notebook 06 §8.
 
 ### 10.2 Controlling which secondaries are produced and saved
 
@@ -672,7 +679,7 @@ reproduce the canonical run, so existing outputs are unchanged.
 threshold, given as a range (converted per material to an energy). Below it, soft delta-rays and
 low-energy photons are **not created as separate tracks** — their energy is deposited continuously
 along the parent's step. It is a genuine physics/CPU knob: lowering it produces more soft
-secondaries (→ more charged-track sensor crossings for PIXELAV) at higher CPU cost; raising it
+secondaries (→ more charged-track sensor crossings) at higher CPU cost; raising it
 coarsens the shower and the deposited-energy pattern. DDSim's default is 0.7 mm.
 
 ```bash
@@ -699,7 +706,7 @@ parents. So on the tracker-readout `run_sim_trackermom.py` run — where *every*
 `SimTrackerHit` — the sub-10-MeV crossing tracks **survive** the floor; to thin soft sensor
 crossings there, use the range cut, not the persistency floor.
 
-**Which one do you want?** For **PIXELAV per-crossing inputs**, the physically meaningful knob is
+**Which one do you want?** For **per-crossing records**, the physically meaningful knob is
 almost always the **production cut** — it controls how many soft charged tracks actually exist to
 cross a sensor. The persistency floor only prunes the *saved* truth; and for ECal secondaries its
 upstream semantics are entangled with `userParticleHandler`, which both SD files clear to `""` so
@@ -710,30 +717,41 @@ cut when you want to change what the shower actually produces. To change the **g
 
 ---
 
-## 11. Training the deep-ensemble surrogate
+## 11. Training the ML resolution model (notebook 04)
 
-The model in [`analysis/quantilenet.py`](../analysis/quantilenet.py):
+Notebook [`04_resolution_ml_crystalball.ipynb`](../notebooks/04_resolution_ml_crystalball.ipynb)
+trains the Crystal-Ball density ensembles in [`analysis/cbnet.py`](../analysis/cbnet.py):
 
-- **Architecture**: `Linear(1→32) → SiLU → Linear(32→64) → SiLU → Linear(64→32) → SiLU → Linear(32→3)`. 4,355 parameters.
-- **Targets**: predict **fractional response** `E_signal / E_true` normalized by its max — works for any signal unit.
-- **Loss**: Pinball at the 15.87 / 50 / 84.13 percentiles (symmetric 1-σ Gaussian percentiles, but no Gaussianity assumed).
-- **Ensemble**: 20 networks per readout, each with its own 80/20 train/val split (drawn without replacement).
+- **Model**: a small MLP mapping normalized true energy to the four Crystal-Ball parameters
+  (μ, σ, α, n) of the fractional response `readout / E_true` at that energy.
+- **Loss**: unbinned negative log-likelihood of the Crystal Ball on the raw per-event readouts.
+- **Ensemble**: 20 networks per readout, each with its own 80/20 train/val split; the predicted
+  CB parameters are averaged.
+- **Training set**: the 5–400 GeV spectrum extraction plus the 1 and 2 GeV fixed-energy runs
+  (low-energy anchors), so the learned curves cover the full 1–400 GeV of notebook 03's scan.
 
-**Total work**: 4 readouts × 20 models × up to 5000 epochs. On an A100 MIG slice: ~10 minutes. On CPU: 30–60 minutes.
+**Total work**: 4 readouts × 20 models — about 20 minutes on the standard A100 MIG slice (a few minutes on a full A100); ~an hour on CPU.
+
+*(The repository also carries a legacy quantile-regression surrogate — `analysis/quantilenet.py`
+with the `train_ensembles.py` / `verify_ensembles.py` CLIs and `analysis/dashboard.py` — from an
+earlier iteration of the resolution analysis. The notebooks no longer use it; the files remain
+for reference.)*
 
 ### 11.1 Reusing pre-trained models
 
-The repo expects pre-trained ensembles at `models/saved_ensembles_gpu_v2/` (4 files, ~400 KB each — the dir notebook 03 writes; the headless `analysis/train_ensembles.py` writes `saved_ensembles_gpu_gamma/` instead, and `verify_ensembles.py` accepts either). These are **not committed to git** (`.gitignore` excludes `models/`). They're produced by the training step below, or distributed separately.
+Notebook 04 writes its ensembles to `models/saved_cbnet_gpu_<tag>/` (4 small `.pth` bundles).
+These are **not committed to git** (`.gitignore` excludes `models/`). Set `CB_RETRAIN=0` in the
+environment to reuse existing ensembles instead of retraining; `CB_NMODELS` / `CB_EPOCHS` size a
+quick smoke run.
 
-If you have the `.npz` but no saved ensembles, train once (next subsection).
-
-**CPU-loading caveat**: GPU-trained ensembles serialize CUDA tensors. To load on a CPU kernel, `torch.load(...)` needs `map_location=device`. The repo's [`analysis/quantilenet.py::load_ensemble`](../analysis/quantilenet.py) handles this.
+**CPU-loading caveat**: GPU-trained ensembles serialize CUDA tensors. To load on a CPU kernel,
+`torch.load(...)` needs `map_location=device`; `cbnet.load_ensemble` handles this.
 
 ### 11.2 Training new models on the GPU
 
 The CVMFS Key4hep `2026-02-01` release ships a **CPU-only** PyTorch (`torch.backends.cuda.is_built() → False`). You need to install a CUDA-enabled torch into a venv first.
 
-**Recommended path (one command)**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step, then asserts `torch.cuda.is_available()` so a failed install is obvious. The venv defaults to `/tmp` (wiped on container restart — just re-run); set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free. Then open notebook 03 and pick the **Key4hep + GPU** kernel.
+**Recommended path (one command)**: from a JupyterLab terminal (after `source ~/setup_calomaps.sh`) run `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh`. It builds a self-contained CUDA-torch venv and registers the **Key4hep + GPU** kernel in one step, then asserts `torch.cuda.is_available()` so a failed install is obvious. The venv defaults to `/tmp` (wiped on container restart — just re-run); set `CALOMAPS_GPU_ENV=$HOME/calomaps_gpu_env` for a persistent install if home has ~5 GB free. Then open notebook 04 and pick the **Key4hep + GPU** kernel.
 
 The script's canonical names are venv `calomaps_gpu_env` and kernel dir `calomaps_gpu` (display name **Key4hep + GPU**). The two manual paths below explain what it automates — use them only to do it by hand or to debug; note they use *different* example names (`my_gpu_env`, `cu_torch_env`), so don't mix a hand-built install with the script's.
 
@@ -762,7 +780,7 @@ python -m venv --system-site-packages ~/my_gpu_env
 
 ##### Install GPU torch into the kernel
 
-1. Open [`notebooks/03_ml_training_and_eval.ipynb`](../notebooks/03_ml_training_and_eval.ipynb) in JupyterLab.
+1. Open [`notebooks/04_resolution_ml_crystalball.ipynb`](../notebooks/04_resolution_ml_crystalball.ipynb) in JupyterLab.
 2. Switch kernel to **`Key4hep + GPU`**.
 3. In a cell:
    ```python
@@ -777,7 +795,7 @@ python -m venv --system-site-packages ~/my_gpu_env
    print(torch.cuda.is_available())     # expect True
    print(torch.cuda.get_device_name(0)) # expect "NVIDIA A100 ..."
    ```
-6. Set `RETRAIN = True` in the training cell. Run.
+6. Run the notebook top to bottom (training is on by default; `CB_RETRAIN=0` skips it).
 
 Why this works: the JupyterLab launcher invokes `~/my_gpu_env/bin/python` directly without sourcing CVMFS, so your venv-installed cu121 torch wins on `sys.path`.
 
@@ -785,7 +803,8 @@ Why this works: the JupyterLab launcher invokes `~/my_gpu_env/bin/python` direct
 
 From a CVMFS-sourced terminal, `sys.path` already has CVMFS torch ahead of any venv. Workarounds:
 
-- **Use the `sys.path` shim** (see [§11.3](#113-why-the-syspath-hack-path-b-only)). [`analysis/train_ensembles.py`](../analysis/train_ensembles.py) has it baked in.
+- **Use the `sys.path` shim** (see [§11.3](#113-why-the-syspath-hack-path-b-only)); the legacy
+  [`analysis/train_ensembles.py`](../analysis/train_ensembles.py) CLI has it baked in.
 - **Install to `/tmp/cu_torch_env/`** instead of `~/my_gpu_env/` if `/home/<u>` is full (the 4.4 GB install often doesn't fit in EAF's 23 GB home quota).
 
 Full recipe:
@@ -808,8 +827,7 @@ import torch
 print('cuda available:', torch.cuda.is_available())
 print('device:', torch.cuda.get_device_name(0))"
 
-# Train
-/tmp/cu_torch_env/bin/python $CALOMAPS_HOME/analysis/train_ensembles.py
+# Then register this venv as a Jupyter kernel (as in Path A) and run notebook 04 with it.
 ```
 
 `/tmp` on EAF is overlay, several TB free, but **wiped on container restart** — re-do the install each fresh session.
@@ -829,115 +847,89 @@ Only needed in **Path B**. In Path A (JupyterLab UI), the kernel spawns without 
 
 ---
 
-## 12. Neyman-inversion reconstruction
+## 12. Energy reconstruction = calibration inversion
 
-Use the trained ensemble as a surrogate. For a measured readout `y_obs`, find the `E_true` whose predicted readout matches.
+Both resolution notebooks reconstruct energy the same way: build a monotonic forward response
+model μ(E) — **measured** point-by-point from the fixed-energy fits in notebook 03, **learned**
+from the spectrum in notebook 04 — then invert it: `E_reco = μ⁻¹(readout)`. The width of the
+response, pushed through the same inverse, becomes the energy resolution. Where a digital
+readout saturates, μ(E) flattens and a small readout width maps onto a huge energy interval —
+quoting the raw σ/μ of the counts would hide exactly that, which is why the inversion is not
+optional (notebook 03 §7 demonstrates it graphically).
 
-[`analysis/dashboard.py`](../analysis/dashboard.py) uses **Brent's method**, extending the bracket (and returning `NaN` rather than clipping) when the surrogate saturates:
+The shared implementation is `build_calibration()` in
+[`analysis/decal_cbfit.py`](../analysis/decal_cbfit.py): a monotonic PCHIP interpolation of
+μ(E) with a log-log linear extension beyond the fitted range, so an up-fluctuation inverts
+instead of being silently clamped. Points a saturated readout genuinely cannot reach are
+reported as `NaN` and dropped rather than clipped — clipping would fabricate a resolution
+turnover at the edge of the grid.
 
-```python
-def invert_brent(y_obs, f_curve, lo=5.0, hi=450.0, hi_max=5000.0):
-    def objective(e):
-        return float(f_curve(e)) - y_obs
-    if objective(lo) > 0.0:          # y_obs below the curve at lo -> physical floor
-        return lo
-    h = hi
-    while objective(h) < 0.0 and h < hi_max:
-        h *= 2.0                     # extend the upper bracket through saturation
-    if objective(h) < 0.0:
-        return float("nan")          # genuinely cannot bracket -> drop the point
-    return brentq(objective, lo, h)
-```
-
-Brent is O(log n) on a monotonic surrogate. An earlier version clipped to a fixed `hi=450` when it couldn't bracket — which made the resolution curve *turn over* at the top of the grid, an inversion artifact that mimicked a saturation knee. Extending the bracket / returning `NaN` fixes that: the reported curve covers only the energies where both band edges truly invert, and rises monotonically through the saturation regime.
-
-### 12.1 The Neyman crossover
-
-Asymmetric error bar pairing:
-
-- **Upper E bound** comes from inverting the *lower* signal quantile (`f_low`)
-- **Lower E bound** comes from inverting the *upper* signal quantile (`f_high`)
-
-If your detector might be undermeasuring the signal, the same observation could correspond to a higher true energy — hence `f_low → e_high`.
+(The legacy quantile pipeline in [`analysis/dashboard.py`](../analysis/dashboard.py) performs
+the same inversion per event with Brent root-finding; the notebooks no longer use it.)
 
 ---
 
-## 13. Interpreting the 3-panel physics dashboard
+## 13. Interpreting the resolution results
 
-| Panel | Plot | What you want to see |
-|---|---|---|
-| **1. Linearity** | E_reco / E_true vs E_true | A flat line at y = 1 |
-| **2. Resolution** | σ_reco / E_true vs E_true | Rising with E for the digital readouts, with a sharp upward turn where pixels saturate — *the* DECAL physics result |
-| **3. Stochastic** | σ_reco / E_true vs 1/√E_true | Straight line through origin in the stochastic regime; left-side (high-E) uptick = saturation/leakage constant-term contributions |
-
-Standard parameterization:
+The headline plots are **notebook 03 §8** and **notebook 04 §8**: σ_E/E against 1/√E, where a
+purely stochastic resolution is a straight line through the origin. Both fit the standard
+calorimeter parameterization
 
 $$\frac{\sigma_E}{E} = \frac{a}{\sqrt{E}} \oplus b \oplus \frac{c}{E}$$
 
-where ⊕ is quadrature sum, *a* = stochastic, *b* = constant, *c* = electronic noise.
+(⊕ = quadrature; *a* = stochastic, *b* = constant, *c* = electronic noise — this simulation has
+no electronics noise, so the two-term `a/√E ⊕ b` form is fitted).
 
-### 13.1 What it actually looks like (current 100 µm config, ~17,780 events)
+### 13.1 What it actually looks like (100 µm pixels, photons, 1–400 GeV)
 
-**Reconstructed Linearity** (panel 1): all four readouts on `y = 1`. This panel is a **self-consistency check**, true largely *by construction* -- Neyman inversion uses the median surrogate for both the forward map and its inverse, so the median is trivially self-consistent. The honest test is the **held-out closure** (`figures/dashboard_heldout.png`, and the section-11 cell of `03_ml_training_and_eval.ipynb`): reconstruct events no ensemble member trained on. On 3,556 held-out gamma events the response is flat to ~1% at 10 GeV and droops to about 0.97-0.99 at 100-300 GeV (a small saturation bias the self-inversion cannot reveal), while the held-out sigma/E (about 0.075 at 10 GeV, rising to about 0.09 for Analog/MIP and about 0.10-0.12 for Hits/Cluster) tracks the Neyman-band resolution -- confirming the bands are roughly calibrated rather than badly overfit.
+- **True Analog** is the benchmark: a near-straight line with a stochastic term of roughly
+  17%·√GeV and a small constant term (~4%) — stochastic-dominated at low energy (the exact
+  fitted numbers print in notebook 03 §8 / notebook 04 §8).
+- **MIP counting** tracks analog closely — at 100 µm pitch each MIP crossing reliably fires
+  one pixel.
+- **Raw Hits** actually has the *smallest* stochastic term (~16–17%·√GeV — Landau-tail
+  truncation helps the fine binary readout at low E) and a constant term comparable to
+  analog, so at 100 µm pitch its Gaussian **core** tracks or slightly beats analog across the
+  whole range: pixel saturation is mild at this fine pitch. The high-E digital penalty shows
+  up instead in the **tail-inclusive effective width** (notebook 04 §7) and, most clearly, in
+  the naive clustering below.
+- **Naive 2D Clustering** is the one readout with a clearly inflated constant term (~5%) and
+  the worst high-E resolution — the cluster *count* stops growing as the dense core merges
+  adjacent pixels into a few blobs.
+- The **conventional (03) and ML (04) measurements agree point-by-point across 1–400 GeV** on
+  the core width (a small ~0.5% constant-term offset is the binned-χ² vs unbinned-ML
+  fit-method difference, quantified in 04 §8). Notebook 04 additionally separates the
+  tail-inclusive **effective** width from the Gaussian **core** — the gap between the two is
+  the growing low-side leakage tail.
 
-**Reconstructed Resolution + Stochastic** (panels 2 + 3):
+The DECAL physics is visible in two places: the Landau-truncation advantage that gives the
+digital readouts a *smaller* stochastic term at low E, and the saturation penalty at high E —
+mild for raw hits at this fine pitch, pronounced for the clustering and for the tail-inclusive
+width.
 
-- **True Analog** and **MIP counting** overlap; rise from σ/E ≈ 0.07 at 10 GeV to ≈ 0.095 at 400 GeV. Best readouts at all energies. MIP tracks analog tightly because at 100 µm pitch each MIP-crossing reliably triggers one hit.
-- **Raw Hits** tracks analog at low E, **diverges upward from ~100 GeV**, rising monotonically to σ/E ≈ 0.113 at 400 GeV. **Pixel saturation** — exactly the DECAL physics.
-- **Naive 2D Clustering** is the worst, rising to σ/E ≈ 0.14 at 400 GeV. The cluster *count* saturates as the dense core merges adjacent pixels into a few big blobs, so it doesn't recover the lost multiplicity.
-
-The crossover where Hits start losing to Analog at 100 µm pitch is **around 100 GeV**.
-
-Stochastic panel: all four σ/E *rise* with energy, so a fit to a/√E ⊕ b ⊕ c/E degenerates to *a* ≈ 0 (no stochastic 1/√E term) — the resolution is constant/saturation-dominated, with constant term *b* ≈ 0.08 (Analog/MIP) rising to ≈ 0.11 (Cluster). Hits and Cluster climb most steeply at high E (low 1/√E) — pixel saturation.
-
-**Suggested experiment**: pixel-pitch scan (25 / 50 / 100 / 200 µm). The "saturation knee vs pitch" curve is a publishable result.
+**Suggested experiment**: a pixel-pitch scan (25 / 50 / 100 / 200 µm). The "saturation knee vs
+pitch" curve is a real publishable result.
 
 ### 13.2 Other diagnostic plots in the notebooks
 
-- **Geometry sanity check** (notebook 01): hit positions, layer reconstruction from data.
-- **Longitudinal shower profile**: average energy per layer, binned by truth energy.
-- **Per-readout linearity scatter plots**: each readout vs E_true with a low-E linear fit.
-- **Ensemble quantile dashboards**: how well ensembles agree, quantile bands vs raw data.
-- **Neyman demo**: event-by-event inversion visualization.
+- **First-principles budgets** (notebook 01): X₀/λ_I stack budget, shower max vs ln E,
+  Molière containment, the per-pixel MIP spectrum.
+- **Longitudinal shower profiles** by truth energy (notebook 02 §7).
+- **Fit-quality overlays** at fixed energies (03 §5, 04 §5) — never quote a σ you haven't
+  looked at.
+- **Calibration / linearity curves**, measured (03 §6) and learned (04 §9) — flattening is
+  saturation.
 
----
+### 13.3 Generating the fixed-energy datasets
 
-### 13.3 Conventional cross-check: fixed-energy Crystal-Ball fits (`03c_conventional_resolution.ipynb`)
+Notebook 03 (and notebook 04's anchors + overlay points) need one dataset **per energy**, each
+with a **distinct `CALOMAPS_DATASET_NAME`** — the generate scripts wipe their output dir on
+start (see §14 "Pre-existing generate scripts wipe the data dir"), so two fixed-energy runs
+into the same dir would clobber each other. The raw ROOT is large, so keep it on a roomy
+scratch area and extract to the small per-energy `.npz`, deleting the ROOT as you go (EAF
+`/home` is a tight ~23 GB):
 
-Notebook 03c measures the same energy resolution as nb03, but the **conventional
-test-beam way** — a transparent, ground-truth cross-check of the ML surrogate:
 
-- **Fixed-energy beams, not a spectrum.** Simulate photons at a handful of fixed
-  energies (a mono-energetic gun: set `CALOMAPS_GUN_ENERGY_GEV` in `sim/run_sim.py`,
-  one dataset per energy). At a fixed energy the response spread is *purely* the
-  detector, so the resolution is read off directly — no model is needed to disentangle
-  it from a spread of input energies.
-- **A Crystal-Ball fit per point.** At fixed energy the response is a Gaussian core with
-  a low-side leakage tail; fit a Crystal Ball and quote the **core σ** (the tail is real
-  physics, but it is not what "resolution" means).
-- **Invert the calibration.** The fitted peaks μ(E) form the response/calibration curve.
-  To turn a readout width into an *energy* resolution you invert it,
-  `E_reco = μ⁻¹(readout)` — exactly as nb03 inverts its learned median curve, only here
-  the forward model is a curve through fixed-energy points instead of a neural net. Where
-  the calibration flattens (digital saturation) a small readout band maps to a wide
-  energy band and the resolution blows up; this is why quoting σ/μ of the raw counts
-  would *hide* the saturation.
-- **σ_E/E vs 1/√E.** Fit `a/√E ⊕ b ⊕ c/E`. Analog tracks a near-straight line
-  (stochastic-dominated); the digital readouts peel upward at high energy (saturation),
-  the naive clustering earliest.
-
-**When to use which.** nb03 (ML) trains once on a spectrum and covers the whole continuum;
-03c needs dedicated fixed-energy runs but every step is auditable and is the ground truth.
-Run both and overlay — agreement validates both methods; divergence (at very low energy, or
-deep in saturation where the calibration is nearly flat) is physics, not error.
-
-#### Generating the fixed-energy datasets
-
-You need one dataset **per energy**, each with a **distinct `CALOMAPS_DATASET_NAME`** —
-the generate scripts wipe their output dir on start (see §14 "Pre-existing generate scripts
-wipe the data dir"), so two fixed-energy runs into the same dir would clobber each other.
-The raw ROOT is large, so keep it on a roomy scratch area and extract to the small
-per-energy `.npz`, deleting the ROOT as you go (EAF `/home` is a tight ~23 GB):
 
 ```bash
 for E in 1 2 5 10 20 50 100 200 400; do
@@ -946,7 +938,7 @@ for E in 1 2 5 10 20 50 100 200 400; do
   CALOMAPS_DATA_BASE=/scratch/$USER/CALOMAPS-mono \
   bash sim/generate_dataset.sh
   # >>> extract the four readouts into one .npz per energy <<<
-  #   main:   python analysis/extract_readouts.py --datadir .../mono_gamma_${E}GeV \
+  #   python analysis/extract_readouts.py --datadir .../mono_gamma_${E}GeV \
   #             --energy $E --out $CALOMAPS_HOME/models/mono_gamma/decal_mono_gamma_E$(printf '%04d' $E)GeV.npz
   #   (or reuse your notebook-02 readout code on each dataset)
   rm -rf /scratch/$USER/CALOMAPS-mono/mono_gamma_${E}GeV   # free scratch as you go
@@ -963,10 +955,11 @@ CVMFS Key4hep 2026-02-01 torch is a CPU-only build (`torch.backends.cuda.is_buil
 **Fix**: install CUDA-enabled torch into your venv. See [§11.2 Path A](#112-training-new-models-on-the-gpu).
 
 ### Loading saved ensembles fails with `Attempting to deserialize object on a CUDA device but torch.cuda.is_available() is False`
-GPU-trained ensembles use CUDA tensors. The repo's [`analysis/quantilenet.py::load_ensemble`](../analysis/quantilenet.py) passes `map_location=device` to `torch.load(...)` to handle this. If you write your own loader, remember the `map_location` argument.
-
-### `NameError: e_test is not defined` in the dashboard cell
-An older fork of the notebook defined `calculate_reco_metrics_brent` but never called it. The current notebooks call [`dashboard.reco_metrics_over_grid`](../analysis/dashboard.py) explicitly. If you write your own dashboard cell, compute the metrics before plotting.
+GPU-trained ensembles use CUDA tensors. The repo's `load_ensemble` functions
+([`analysis/cbnet.py`](../analysis/cbnet.py), and the legacy
+[`analysis/quantilenet.py`](../analysis/quantilenet.py)) pass `map_location=device` to
+`torch.load(...)` to handle this. If you write your own loader, remember the `map_location`
+argument.
 
 ### Notebook can't find the data files
 You're using an old relative path like `"data_spectrum_100um_400GeV/sim_photons_part1.root"`. All current code uses `$CALOMAPS_DATA_BASE`:

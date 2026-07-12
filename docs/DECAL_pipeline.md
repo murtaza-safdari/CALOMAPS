@@ -122,6 +122,14 @@ Open `kernel.json` in that folder and replace the path to the python binary with
 1. **Extraction (default Key4hep kernel):** Use `uproot` to read the `.root` files, extract True Energy and Visible Signals, save with `np.savez_compressed('decal_data.npz', ...)`.
 2. **Machine learning (Key4hep + GPU kernel):** Switch kernels, load the `.npz`, run the PyTorch pipeline.
 
+> **Implementation note.** This section preserves the original design specification. The
+> current implementation realizes the same forward-model + inversion program with a
+> **Crystal-Ball density network** (notebook `04_resolution_ml_crystalball.ipynb`): the network
+> outputs the Crystal-Ball parameters of the response as a smooth function of energy (trained by
+> unbinned maximum likelihood) and the learned calibration μ(E) is inverted, exactly as the
+> measured calibration is in the conventional analysis (notebook 03). The pinball-loss quantile
+> ensemble described below survives as legacy code (`analysis/quantilenet.py`).
+
 ### 5.1 The Forward Model (Deep Quantile Ensembles)
 
 Train the neural network to map True Energy → Visible Energy (E_true → E_vis). Do **not** train an inverse model, because asking a neural net to guess the true energy bakes the flat training spectrum into its weights, causing massive "Prior Bias" in real experiments.
@@ -161,6 +169,12 @@ resolution  = (e_reco_high - e_reco_low) / (2.0 * e_true)
 ```
 
 ## Part 6: Interpreting the Physics Dashboard
+
+> **Implementation note (as in Part 5).** The current pipeline reports these same quantities
+> across notebooks 03/04 rather than as one dashboard image: linearity / calibration →
+> notebook 03 §6 (measured) and notebook 04 §9 (learned); resolution and the stochastic-term
+> fit → notebook 03 §8 and notebook 04 §8. The single 3-panel figure below is the legacy
+> `analysis/dashboard.py` output, kept for reference.
 
 The pipeline outputs a 3-Panel Physics Dashboard. This is how you verify if XML hardware modifications succeeded:
 

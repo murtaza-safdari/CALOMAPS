@@ -125,7 +125,7 @@ find .git -name '._*' -type f -delete
 **Workaround.**
 
 - For interactive notebook work: open the notebook in **JupyterLab UI**, pick the `Key4hep + GPU` kernel from the kernel selector. This path works.
-- For programmatic code execution: use the **`Python (Key4hep)`** kernel (different kernelspec, sources CVMFS in its own launcher) — it spawns cleanly from the REST API. Or use a terminal + subprocess, as in the API-500 workaround above.
+- For programmatic code execution: use the **`Key4hep (CPU)`** kernel (different kernelspec, sources CVMFS in its own launcher) — it spawns cleanly from the REST API. Or use a terminal + subprocess, as in the API-500 workaround above.
 
 ---
 
@@ -177,7 +177,7 @@ env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir torch \
 # wrapper.sh:   unset PYTHONPATH PYTHONHOME; exec "$VENV/bin/python" -m ipykernel_launcher "$@"
 ```
 
-`setup/setup_gpu_kernel.sh` does exactly this. Notebook 03 needs only
+`setup/setup_gpu_kernel.sh` does exactly this. Notebook 04 needs only
 torch/numpy/scipy/matplotlib (no ROOT/uproot), so a self-contained venv covers it
 without CVMFS at all. This supersedes the older `~/my_gpu_env` + `sys.path`-shim
 recipe for the *notebook* path (the shim is still fine for headless scripts).
@@ -258,7 +258,7 @@ documented above.)
 
 ## Training the ensembles on a CPU-only EAF session thrashes across all cores
 
-Training the quantile ensembles without a GPU (a CPU-only EAF session, or `cuda=False`
+Training notebook 04's CB-density ensembles without a GPU (a CPU-only EAF session, or `cuda=False`
 because CVMFS ships CPU-only torch) can stall: PyTorch parallelizes each tiny full-batch
 step across every core, and for a model this small (~4,400 parameters, full-batch) the
 threading overhead dominates. You will see ~2000% CPU with *no* per-model progress for
@@ -267,6 +267,8 @@ many minutes. Pin it to a single thread and it runs far faster (~15-30 s per mod
 
 ```bash
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+# (the OMP/MKL pinning above applies to notebook 04's in-notebook training; the legacy
+# quantile CLI below is kept only for reference)
 python analysis/train_ensembles.py --particle gamma
 ```
 
@@ -276,5 +278,5 @@ A GPU session is still faster end-to-end; this is the fallback when none is avai
 
 ## Where else to check
 
-- **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, cell-19/26 bugs, scripts that wipe data dirs, etc.)
+- **handbook.md §14** — code-level errors and project-specific gotchas (CUDA torch, artifact paths, scripts that wipe data dirs, etc.)
 - The DD4hep, Geant4, and Key4hep upstream issue trackers if you're hitting something deeper.
