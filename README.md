@@ -138,7 +138,7 @@ source ~/setup_calomaps.sh
 
 `setup_calomaps.sh` is safe to source repeatedly; it creates the `~/lib_hack` OpenGL shim and the data directory for you. Confirm your environment with the smoke test in `docs/handbook.md` §8.
 
-New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it walks you from zero to your own samples (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`) — then read `01 → 02 → 03 → 04` in order: they build the calorimetry up from first principles and end with the resolution measured two independent ways. For the sensor-level product, `05 → 06/07` go from the full shower cascade to the validated per-crossing records (PIXELAV input decks are produced on this branch (see docs/pixelav_handoff.md and notebook 08)).
+New here? Start with `notebooks/00_simulate_your_samples.ipynb` — it generates your own samples from scratch (photons by default; any particle via `CALOMAPS_GUN_PARTICLE`) — then read `01 → 02 → 03 → 04` in order: they build the calorimetry up from first principles and end with the resolution measured two independent ways. For the sensor-level product, `05 → 06/07` go from the full shower cascade to the validated per-crossing records (PIXELAV input decks are produced on this branch (see docs/pixelav_handoff.md and notebook 08)).
 
 The ML notebook (`04_resolution_ml_crystalball.ipynb`) needs a GPU kernel — register it once with `bash $CALOMAPS_HOME/setup/setup_gpu_kernel.sh` (see [docs/handbook.md](docs/handbook.md) §11.2).
 
