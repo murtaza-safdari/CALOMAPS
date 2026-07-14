@@ -55,6 +55,13 @@ export LD_LIBRARY_PATH="$HOME/lib_hack:$LD_LIBRARY_PATH"
 # PYTHONPATH. Register a kernel whose launcher *sources* Key4hep first — same
 # pattern as setup_gpu_kernel.sh's GPU kernel. Rewritten on every source so it
 # tracks the release pin above.
+# Resolve the project root + data dir NOW (before the kernel wrapper is written) so the wrapper
+# can bake CALOMAPS_HOME in: a GUI-launched Jupyter kernel does NOT inherit this terminal's
+# environment, and without CALOMAPS_HOME the notebooks cannot put analysis/ on sys.path (the
+# "No module named decal_cbfit" error). Override by exporting either before sourcing.
+export CALOMAPS_HOME="${CALOMAPS_HOME:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+export CALOMAPS_DATA_BASE="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}"
+
 _CPU_KDIR="$HOME/.local/share/jupyter/kernels/calomaps_cpu"
 _cpu_was_new=0; [ -f "$_CPU_KDIR/kernel.json" ] || _cpu_was_new=1
 mkdir -p "$_CPU_KDIR"
@@ -65,6 +72,9 @@ cat > "$_CPU_KDIR/wrapper.sh" <<EOF
 # (e.g. nbconvert), setup.sh would otherwise short-circuit and set no paths.
 unset KEY4HEP_STACK
 source /cvmfs/sw.hsf.org/key4hep/setup.sh -r "$KEY4HEP_RELEASE" >/dev/null 2>&1
+# a GUI kernel does not inherit the sourcing terminal's env, so bake the project paths in:
+export CALOMAPS_HOME="$CALOMAPS_HOME"
+export CALOMAPS_DATA_BASE="$CALOMAPS_DATA_BASE"
 exec python -m ipykernel_launcher "\$@"
 EOF
 chmod +x "$_CPU_KDIR/wrapper.sh"

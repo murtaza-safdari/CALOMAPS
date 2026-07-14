@@ -53,11 +53,18 @@ TMPDIR=/tmp env -u PYTHONPATH "$VENV/bin/pip" install --no-cache-dir \
     torch --index-url https://download.pytorch.org/whl/cu121
 
 echo "[4/4] Registering the 'Key4hep + GPU' kernel"
+# setup_calomaps.sh normally already exported these; resolve as a fallback so the wrapper below
+# can bake them in (a GUI kernel does not inherit this terminal's environment).
+CALOMAPS_HOME="${CALOMAPS_HOME:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+CALOMAPS_DATA_BASE="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}"
 mkdir -p "$KDIR"
 cat > "$KDIR/wrapper.sh" <<EOF
 #!/bin/bash
 # clean PYTHONPATH -> the venv's cu121 torch wins over CVMFS's CPU torch
 unset PYTHONPATH PYTHONHOME
+# a GUI kernel does not inherit the sourcing terminal's env, so bake the project paths in:
+export CALOMAPS_HOME="$CALOMAPS_HOME"
+export CALOMAPS_DATA_BASE="$CALOMAPS_DATA_BASE"
 exec "$VENV/bin/python" -m ipykernel_launcher "\$@"
 EOF
 chmod +x "$KDIR/wrapper.sh"
