@@ -150,7 +150,7 @@ Use the neural network as a surrogate simulator and numerically invert it with a
 
 ```python
 def invert_signal_grid(y_obs, e_grid, signal_curve):
-    """Bulletproof grid-search inversion that survives curve saturation."""
+    """Grid-search inversion that stays well-defined when the signal curve saturates."""
     idx = np.argmin(np.abs(signal_curve - y_obs))
     return e_grid[idx]
 
