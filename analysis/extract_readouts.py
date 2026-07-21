@@ -16,28 +16,48 @@ clusters) and the +y wedge / half-MIP cuts match notebooks/02_data_extraction.ip
         --glob 'sim_photons_part*.root' --energy $E \\
         --out $CALOMAPS_HOME/models/mono_gamma/decal_mono_gamma_E$(printf '%04d' $E)GeV.npz
     done
+
+Geometry sweeps: the pixel pitch (ECal_cell_size) and the layer depths are
+re-read from <home>/geometry/*.xml, so point --home at the (possibly
+copied-and-edited) geometry you simulated with and those follow automatically.
+The barrel envelope is assumed unchanged: the wedge cut uses the baseline
+NSIDES/RMIN/RMAX constants below, so if you edit ECalBarrel_rmin/rmax/symmetry,
+update those constants to match. The MIP scale cannot come from geometry (it is
+a measured Landau MPV, 85 keV for 320 um silicon): pass --mip-energy when you
+change the silicon thickness. A startup probe cross-checks the first file's hit
+lattice and layer depths against --home and aborts on a mismatch.
 """
-import os, glob, argparse, xml.etree.ElementTree as ET
+import os, glob, re, argparse, xml.etree.ElementTree as ET
 import numpy as np, uproot
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# ---- constants (must match notebooks/02_data_extraction.ipynb) ----
-CELL_SIZE    = 0.1           # mm, 100 um pitch
-MIP_ENERGY   = 85e-6         # GeV, Landau MPV
+# ---- readout constants (baseline defaults; match notebooks/02_data_extraction.ipynb).
+#      main() re-resolves CELL_SIZE from --home's geometry XML and MIP_ENERGY from
+#      --mip-energy, so the CLI cannot silently disagree with the simulated detector. ----
+CELL_SIZE    = 0.1           # mm, 100 um pitch (ECal_cell_size; re-read per --home)
+MIP_ENERGY   = 85e-6         # GeV, Landau MPV for 320 um Si (see --mip-energy)
 THRESHOLD    = 0.5 * MIP_ENERGY
-NSIDES       = 12
+NSIDES       = 12              # ECalBarrel_symmetry (NOT re-read; assumed unchanged in sweeps)
 SEG_HALF_DEG = 180.0 / NSIDES  # 15 deg
-RMIN, RMAX   = 1264.0, 1403.0  # mm
+RMIN, RMAX   = 1264.0, 1403.0  # mm, ECalBarrel_rmin/rmax (NOT re-read; assumed unchanged)
+
+
+_UNITS_MM = {'m': 1000.0, 'cm': 10.0, 'mm': 1.0, 'um': 1e-3, 'micron': 1e-3, 'nm': 1e-6}
 
 
 def _pv(v, c):
     if not v: return 0.0
     if v in c: return _pv(c[v], c)
-    s = v.replace('*', ' * ').replace('cm', '10').replace('mm', '1')
+    # Whole-word unit substitution: '50*um' parses; '50um' (juxtaposition, which
+    # ddsim also rejects) or an unknown unit fails loudly instead of yielding 0.
+    s = re.sub(r'\b[A-Za-z_]\w*',
+               lambda m: repr(_UNITS_MM[m.group(0)]) if m.group(0) in _UNITS_MM else m.group(0), v)
     try: return float(eval(s, {"__builtins__": None}, {}))
     except Exception:
         try: return float(v)
-        except Exception: return 0.0
+        except Exception:
+            raise ValueError(f"cannot parse geometry value {v!r} "
+                             f"(units understood: {', '.join(sorted(_UNITS_MM))})")
 
 
 def layer_radii(calomaps_home):
@@ -57,6 +77,20 @@ def layer_radii(calomaps_home):
         for _ in range(rep):
             planes.append(cur + sioff); cur += thick
     return np.array(planes)
+
+
+def cell_size_mm(calomaps_home):
+    """Pixel pitch [mm] from the compact's ECal_cell_size -- the same constant that
+    drives the CartesianGridXY segmentation, so the cluster readout is built on the
+    simulated pitch instead of trusting a hand-synced copy."""
+    g = os.path.join(calomaps_home, "geometry")
+    consts = {x.get("name"): x.get("value")
+              for x in ET.parse(os.path.join(g, "SiD_TestBeam.xml")).getroot().findall(".//constant")}
+    v = _pv(consts.get("ECal_cell_size"), consts)
+    if v <= 0:
+        raise SystemExit(f"could not resolve ECal_cell_size from {g}/SiD_TestBeam.xml "
+                         f"(got {v!r}) -- does --home point at the geometry you simulated with?")
+    return v
 
 
 def naive_clusters(x, z, layer_idx, e):
@@ -142,24 +176,98 @@ def process_single_file(filepath, radii):
     return T, V, M, H, C
 
 
+def _init_readout_constants(cell_size, mip_energy):
+    """Executor initializer: propagate the resolved pitch/MIP scale into each worker
+    process (module globals would only survive fork, not spawn)."""
+    global CELL_SIZE, MIP_ENERGY, THRESHOLD
+    CELL_SIZE, MIP_ENERGY, THRESHOLD = cell_size, mip_energy, 0.5 * mip_energy
+
+
+def _lattice_probe(x, z, y, radii):
+    """Return an error message if the hits are inconsistent with the resolved
+    geometry (i.e. --home does not match the simulated detector), else None.
+    Fraction/mean based: hits from the wedge's rotated neighbour staves sit off
+    the +y module's lattice, so a small off-lattice tail is normal."""
+    frac_off = max(np.mean(np.abs(x / CELL_SIZE - np.round(x / CELL_SIZE)) > 0.05),
+                   np.mean(np.abs(z / CELL_SIZE - np.round(z / CELL_SIZE)) > 0.05))
+    if frac_off > 0.10:
+        return (f"{frac_off:.0%} of hit positions are off the {CELL_SIZE} mm pixel "
+                f"lattice -- the simulated pitch is finer than {CELL_SIZE} mm (or unrelated)")
+    odd_frac = np.mean(np.abs(x / (2 * CELL_SIZE) - np.round(x / (2 * CELL_SIZE))) > 0.25)
+    if odd_frac < 0.05:
+        return (f"hits only populate every second {CELL_SIZE} mm cell -- the "
+                f"simulated pitch is coarser than {CELL_SIZE} mm")
+    mean_dy = float(np.mean(np.min(np.abs(y[:, None] - radii[None, :]), axis=1)))
+    if mean_dy > 0.5:
+        return (f"hit depths sit {mean_dy:.2f} mm (mean) from the nearest layer "
+                f"plane -- the layer stack (Si thickness) does not match")
+    return None
+
+
+def _probe_geometry(files, radii, min_hits=500):
+    """Read hits from the first readable file and abort if they are not on the
+    pixel lattice / layer planes implied by --home -- catches extracting a swept
+    dataset with the wrong geometry BEFORE burning the whole pool run on it."""
+    xs, ys, zs, n = [], [], [], 0
+    for fp in files:
+        try:
+            with uproot.open(fp) as f:
+                a = f["events"].arrays(["ECalBarrelHits.position.x",
+                                        "ECalBarrelHits.position.y",
+                                        "ECalBarrelHits.position.z"])
+        except Exception:
+            continue
+        for ev in range(len(a["ECalBarrelHits.position.x"])):
+            hx = np.asarray(a["ECalBarrelHits.position.x"][ev], float)
+            hy = np.asarray(a["ECalBarrelHits.position.y"][ev], float)
+            hz = np.asarray(a["ECalBarrelHits.position.z"][ev], float)
+            ang = np.degrees(np.arctan2(hx, hy))
+            m = (np.abs(ang) < SEG_HALF_DEG) & (hy > RMIN - 4) & (hy < RMAX + 14)
+            xs.append(hx[m]); ys.append(hy[m]); zs.append(hz[m]); n += int(m.sum())
+            if n >= min_hits:
+                break
+        break                          # first readable file is enough
+    if n < min_hits:
+        return                         # too few hits to judge -- proceed
+    err = _lattice_probe(np.concatenate(xs), np.concatenate(zs), np.concatenate(ys), radii)
+    if err:
+        raise SystemExit(f"geometry mismatch: {err}. Is --home pointing at the "
+                         f"geometry these files were simulated with?")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--datadir", required=True, help="dir of mono-energetic .root files")
     ap.add_argument("--glob", default="sim_photons_part*.root")
     ap.add_argument("--energy", type=float, required=True, help="nominal beam energy [GeV]")
     ap.add_argument("--out", required=True, help="output .npz path")
-    ap.add_argument("--home", default=os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS")))
+    ap.add_argument("--home", default=os.environ.get("CALOMAPS_HOME", os.path.expanduser("~/CALOMAPS")),
+                    help="config root whose geometry/*.xml supplies the pixel pitch and layer "
+                         "depths (default: $CALOMAPS_HOME, else ~/CALOMAPS); for sweeps, point "
+                         "at the copied-and-edited geometry you simulated with")
+    ap.add_argument("--mip-energy", type=float, default=MIP_ENERGY, metavar="GEV",
+                    help="MIP Landau MPV in GeV (default 85e-6 = 320 um Si). Re-derive and pass "
+                         "this when the Si thickness changes; the 1/2-MIP threshold follows it.")
     ap.add_argument("--workers", type=int, default=min(32, os.cpu_count() or 8))
     args = ap.parse_args()
 
-    radii = layer_radii(args.home)
+    try:
+        radii = layer_radii(args.home)
+    except FileNotFoundError:
+        raise SystemExit(f"--home {args.home!r} has no geometry/SiD_TestBeam.xml + "
+                         f"my_custom_ecal.xml -- point it at the repo/config root")
+    _init_readout_constants(cell_size_mm(args.home), args.mip_energy)
     files = sorted(glob.glob(os.path.join(args.datadir, args.glob)))
     if not files:
         raise SystemExit(f"no files match {os.path.join(args.datadir, args.glob)}")
-    print(f"E={args.energy} GeV: {len(files)} files, {args.workers} workers")
+    print(f"E={args.energy} GeV: {len(files)} files, {args.workers} workers  "
+          f"[pitch {CELL_SIZE*1e3:g} um from --home geometry, MIP {MIP_ENERGY*1e6:g} keV]")
+    _probe_geometry(files, radii)      # abort early on a data/geometry mismatch
 
     T, V, M, H, C = [], [], [], [], []
-    with ProcessPoolExecutor(max_workers=args.workers) as ex:
+    with ProcessPoolExecutor(max_workers=args.workers,
+                             initializer=_init_readout_constants,
+                             initargs=(CELL_SIZE, MIP_ENERGY)) as ex:
         futs = {ex.submit(process_single_file, f, radii): f for f in files}
         for n, fut in enumerate(as_completed(futs), 1):
             r = fut.result()
