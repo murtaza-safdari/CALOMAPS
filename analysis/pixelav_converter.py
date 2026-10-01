@@ -55,7 +55,7 @@ import numpy as np
 # itself are imported too, so pixelav_converter.<name> keeps resolving for existing callers.
 from sensor_crossings import (
     ECAL_RMIN_MM, ECAL_STACK_OFFSET_MM, ECAL_RMAX_MM, SI_THICK_MM, N_FACES, FACE_PHI0_DEG,
-    _NEUTRAL_PDGS, si_layer_centers, face_phi, to_local, is_charged, _record,
+    _NEUTRAL_PDGS, load_cascade, si_layer_centers, face_phi, to_local, is_charged, _record,
     build_segments_A, build_segments_B, build_segments_C, write_intermediate,
 )
 
@@ -86,15 +86,6 @@ def ppion_betagamma_matched(p_gev, pdg):
     electron as a slow pion and hugely over-ionize via the 1/beta^2 rise. Unknown species -> pion."""
     m = _MASS_GEV.get(abs(int(pdg)), M_PION_GEV)
     return p_gev * (M_PION_GEV / m)
-
-
-def load_cascade(npz_path):
-    try:
-        return np.load(npz_path, allow_pickle=True)
-    except (FileNotFoundError, OSError, ValueError) as e:
-        raise FileNotFoundError(
-            f"Cannot load cascade .npz '{npz_path}': {e}. Run analysis/extract_cascade.py first."
-        ) from None
 
 
 def write_pixelav_deck(segs, out_path, layout="badeaa3"):
