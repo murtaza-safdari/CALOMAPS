@@ -11,6 +11,12 @@ Conceptual background and source provenance are in
 Branch: `pixelav-integration`. Stable return point: tag `pre-pixelav-journey`
 (`git fetch --tags && git checkout pre-pixelav-journey`).
 
+Notebook numbers in the dated sections below are the ones in use at the time. Notebook 05
+(later split into 05a, tracker route, and 05b, calorimeter route) is now
+`notebooks/06_sensor_crossings_tracker.ipynb` / `notebooks/07_sensor_crossings_calo.ipynb`;
+05c is `notebooks/08_pixelav_deck_inspection.ipynb`. The cluster notebook called 06 here
+(`06_pixelav_clusters.ipynb`) exists only on the `pixelav-integration` branch.
+
 ---
 
 ## 0. Where things live
