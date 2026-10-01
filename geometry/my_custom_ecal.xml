@@ -38,19 +38,19 @@
 
       <layer repeat="20" vis="GrayVis">
         <slice material = "TungstenDens24" thickness = "0.25*cm" />
-        <slice material = "Air"     thickness = "0.025*cm" />
-        <slice material = "Silicon" thickness = "0.032*cm" sensitive = "yes" limits="cal_limits" />
+        <slice material = "Air"     thickness = "ECal_Si_air_in" />
+        <slice material = "Silicon" thickness = "ECal_Si_thickness" sensitive = "yes" limits="cal_limits" />
         <slice material = "Copper"  thickness = "0.005*cm" />
         <slice material = "Kapton"  thickness = "0.030*cm" />
-        <slice material = "Air"     thickness = "0.033*cm" />
+        <slice material = "Air"     thickness = "ECal_Si_air_out" />
       </layer>
       <layer repeat="10" vis="GreenVis">
         <slice material = "TungstenDens24" thickness = "0.5*cm" />
-        <slice material = "Air"     thickness = "0.025*cm" />
-        <slice material = "Silicon" thickness = "0.032*cm" sensitive = "yes" limits="cal_limits" />
+        <slice material = "Air"     thickness = "ECal_Si_air_in" />
+        <slice material = "Silicon" thickness = "ECal_Si_thickness" sensitive = "yes" limits="cal_limits" />
         <slice material = "Copper"  thickness = "0.005*cm" />
         <slice material = "Kapton"  thickness = "0.030*cm" />
-        <slice material = "Air"     thickness = "0.033*cm" />
+        <slice material = "Air"     thickness = "ECal_Si_air_out" />
       </layer>
 
     </detector>

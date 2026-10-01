@@ -85,6 +85,11 @@
     <!-- <constant name="ECal_cell_size" value="3.5*mm" /> -->
     <!-- <constant name="ECal_cell_size" value="0.05*mm" /> -->
     <constant name="ECal_cell_size" value="0.1*mm" />
+    <!-- ECal sensor silicon. Each layer's depth and the Si mid-plane stay fixed for any thickness:
+         the silicon removed (or added) is taken up by the air pads, half before and half after. -->
+    <constant name="ECal_Si_thickness" value="0.032*cm" />
+    <constant name="ECal_Si_air_in" value="0.025*cm + (0.032*cm - ECal_Si_thickness)/2" />
+    <constant name="ECal_Si_air_out" value="0.033*cm + (0.032*cm - ECal_Si_thickness)/2" />
     <constant name="ECalBarrel_half_length" value="1765.0*mm" />
     <constant name="ECalBarrel_rmin" value="1264.0*mm" />
     <constant name="ECalBarrel_rmax" value="1403.0*mm" />

@@ -27,8 +27,10 @@ a measured Landau MPV, 85 keV for 320 um silicon): pass --mip-energy when you
 change the silicon thickness. A startup probe cross-checks the first file's hit
 lattice and layer depths against --home and aborts on a mismatch.
 """
-import os, glob, re, argparse, xml.etree.ElementTree as ET
+import os, glob, argparse
 import numpy as np, uproot
+# _UNITS_MM and _pv are unused here but stay importable from this module
+from decal_geometry import UNITS_MM as _UNITS_MM, _pv, layer_radii, cell_size_mm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ---- readout constants (baseline defaults; match notebooks/02_data_extraction.ipynb).
@@ -40,57 +42,6 @@ THRESHOLD    = 0.5 * MIP_ENERGY
 NSIDES       = 12              # ECalBarrel_symmetry (NOT re-read; assumed unchanged in sweeps)
 SEG_HALF_DEG = 180.0 / NSIDES  # 15 deg
 RMIN, RMAX   = 1264.0, 1403.0  # mm, ECalBarrel_rmin/rmax (NOT re-read; assumed unchanged)
-
-
-_UNITS_MM = {'m': 1000.0, 'cm': 10.0, 'mm': 1.0, 'um': 1e-3, 'micron': 1e-3, 'nm': 1e-6}
-
-
-def _pv(v, c):
-    if not v: return 0.0
-    if v in c: return _pv(c[v], c)
-    # Whole-word unit substitution: '50*um' parses; '50um' (juxtaposition, which
-    # ddsim also rejects) or an unknown unit fails loudly instead of yielding 0.
-    s = re.sub(r'\b[A-Za-z_]\w*',
-               lambda m: repr(_UNITS_MM[m.group(0)]) if m.group(0) in _UNITS_MM else m.group(0), v)
-    try: return float(eval(s, {"__builtins__": None}, {}))
-    except Exception:
-        try: return float(v)
-        except Exception:
-            raise ValueError(f"cannot parse geometry value {v!r} "
-                             f"(units understood: {', '.join(sorted(_UNITS_MM))})")
-
-
-def layer_radii(calomaps_home):
-    g = os.path.join(calomaps_home, "geometry")
-    consts = {x.get("name"): x.get("value")
-              for x in ET.parse(os.path.join(g, "SiD_TestBeam.xml")).getroot().findall(".//constant")}
-    det = ET.parse(os.path.join(g, "my_custom_ecal.xml")).getroot().find(".//detector[@name='ECalBarrel']")
-    cur, planes = _pv(det.find("dimensions").get("rmin"), consts), []
-    for layer in det.findall("layer"):
-        rep = int(layer.get("repeat", 1)); sl = layer.findall("slice")
-        thick = sum(_pv(s.get("thickness"), consts) for s in sl)
-        off = sioff = 0.0
-        for s in sl:
-            t = _pv(s.get("thickness"), consts)
-            if s.get("material") == "Silicon": sioff = off + t / 2
-            off += t
-        for _ in range(rep):
-            planes.append(cur + sioff); cur += thick
-    return np.array(planes)
-
-
-def cell_size_mm(calomaps_home):
-    """Pixel pitch [mm] from the compact's ECal_cell_size -- the same constant that
-    drives the CartesianGridXY segmentation, so the cluster readout is built on the
-    simulated pitch instead of trusting a hand-synced copy."""
-    g = os.path.join(calomaps_home, "geometry")
-    consts = {x.get("name"): x.get("value")
-              for x in ET.parse(os.path.join(g, "SiD_TestBeam.xml")).getroot().findall(".//constant")}
-    v = _pv(consts.get("ECal_cell_size"), consts)
-    if v <= 0:
-        raise SystemExit(f"could not resolve ECal_cell_size from {g}/SiD_TestBeam.xml "
-                         f"(got {v!r}) -- does --home point at the geometry you simulated with?")
-    return v
 
 
 def naive_clusters(x, z, layer_idx, e):
