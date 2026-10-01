@@ -55,7 +55,8 @@ import numpy as np
 # itself are imported too, so pixelav_converter.<name> keeps resolving for existing callers.
 from sensor_crossings import (
     ECAL_RMIN_MM, ECAL_STACK_OFFSET_MM, ECAL_RMAX_MM, SI_THICK_MM, N_FACES, FACE_PHI0_DEG,
-    _NEUTRAL_PDGS, load_cascade, si_layer_centers, face_phi, to_local, is_charged, _record,
+    _NEUTRAL_PDGS, load_cascade, si_layer_centers, si_thickness_mm, face_phi, to_local, is_charged,
+    _record,
     build_segments_A, build_segments_B, build_segments_C, write_intermediate,
 )
 
@@ -88,7 +89,7 @@ def ppion_betagamma_matched(p_gev, pdg):
     return p_gev * (M_PION_GEV / m)
 
 
-def write_pixelav_deck(segs, out_path, layout="badeaa3"):
+def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
     layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (read by our patched
@@ -104,7 +105,8 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
     over the central 3x3 pixels and does NOT consume them unless the wrapper is patched (see
     docs/pixelav_reference.md). hittime is written in ps. Grazing tracks (non-finite or |cot|>10)
     are skipped, as PIXELAV itself skips them. Also writes <out_path>.columns.txt (a legend; NOT
-    read by PIXELAV's fscanf).
+    read by PIXELAV's fscanf), which records si_thick_mm when given: the deck carries no thickness,
+    so the PIXELAV Stage-A sensor model has to be built for it.
     """
     U = LENGTH_UNIT_MM
     lines, n_skip = [], 0
@@ -141,6 +143,9 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3"):
         f.write(f"# PIXELAV track-list ({layout}); lengths in microns; modx/mody carry the truth "
                 f"mid-plane impact as a LABEL (stock PIXELAV randomizes the impact; our patched "
                 f"real-entry driver consumes it -- see docs/pixelav_reference.md)\n{legend}\n")
+        if si_thick_mm is not None:
+            f.write(f"# sensor: {si_thick_mm * 1e3:g} um silicon; the PIXELAV Stage-A model must "
+                    f"have this thickness\n")
     return out_path, len(lines), n_skip
 
 
@@ -187,7 +192,11 @@ def main():
     builder = {"A": build_segments_A, "B": build_segments_B, "C": build_segments_C}[variant]
     segs, stats = builder(d)
     j, c = write_intermediate(segs, out_prefix)
-    deck, n_deck, n_skip = write_pixelav_deck(segs, out_prefix + ".pixelav.txt", layout=layout)
+    # Only an npz that records its geometry gets a sensor line; one without it was simulated
+    # at SI_THICK_MM.
+    thick = si_thickness_mm(d) if "geo_si_thick_mm" in d else None
+    deck, n_deck, n_skip = write_pixelav_deck(segs, out_prefix + ".pixelav.txt", layout=layout,
+                                              si_thick_mm=thick)
 
     n_charged = int(is_charged(d["pdg"]).sum())
     n_src = len(np.atleast_1d(d["thx"])) if ("thx" in d) else (len(d["cpdg"]) if "cpdg" in d else 0)
@@ -208,6 +217,9 @@ def main():
     print(f"wrote per-crossing table:\n  {j}\n  {c}")
     print(f"wrote PIXELAV deck ({layout}, lengths in um): {deck}  "
           f"[{n_deck} tracks, {n_skip} grazing skipped]  (+ {deck}.columns.txt)")
+    if thick is not None:
+        print(f"  sensor: {thick * 1e3:g} um silicon (npz geometry provenance); build the PIXELAV "
+              f"Stage-A model for this thickness")
 
 
 if __name__ == "__main__":

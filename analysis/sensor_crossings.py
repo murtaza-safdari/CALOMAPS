@@ -43,6 +43,8 @@ Usage:
 import os, sys, json
 import numpy as np
 
+import decal_geometry
+
 ECAL_RMIN_MM = 1264.0
 # The ECalBarrel_o2_v03 driver does NOT start the layer stack at rmin: it places the stave at
 # mod_y_off = inner_r + ry + trd_z + tolerance (k4geo ECalBarrel_o2_v03_geo.cpp), where
@@ -54,7 +56,7 @@ ECAL_STACK_OFFSET_MM = 0.1
 # Outer apothem = inner apothem + stack offset + total radial stack depth (20 x 3.75 mm +
 # 10 x 6.25 mm layers; pitches match si_layer_centers() / geometry/my_custom_ecal.xml).
 ECAL_RMAX_MM = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM + 20 * 3.75 + 10 * 6.25   # = 1401.6 mm
-SI_THICK_MM = 0.32   # silicon sensor thickness (320 um); matches geometry/my_custom_ecal.xml
+SI_THICK_MM = 0.32   # baseline sensor thickness (320 um); si_thickness_mm(d) prefers the npz's own
 N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
 
@@ -80,9 +82,10 @@ def si_layer_centers():
     """Per-layer Si depths (mm): perpendicular (face-normal) distance from the barrel axis to
     each sensor mid-plane (the apothem, built from ECAL_RMIN_MM); compared against the local depth w.
 
-    NOTE: the slice thicknesses below MUST match geometry/my_custom_ecal.xml -- the single source of
-    truth that nb02's layer_radii() parses from the XML. They agree today; if you change the geometry
-    (pitch / thickness scans), update them here too (ideally refactor layer_radii() into a shared module).
+    The slices below are the 320 um baseline stack. The mid-planes they give hold for any
+    ECal_Si_thickness, because the compact's air pads (ECal_Si_air_in/out) take up the thickness
+    change symmetrically. Other changes to the layer stack generally move them; the extractors
+    refuse a geometry whose mid-planes differ (geometry_provenance), so update the slices here first.
     The stack starts at rmin + ECAL_STACK_OFFSET_MM (driver placement tolerance, see above); the
     offset is uniform so it does not affect nearest-centre layer ASSIGNMENT, only absolute depths."""
     r, centers = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM, []
@@ -92,6 +95,47 @@ def si_layer_centers():
             centers.append(r + w + 0.25 + 0.16)        # Si mid-plane = after W + air + half-Si
             r += pitch
     return np.array(centers)
+
+
+def si_thickness_mm(d):
+    """Sensor silicon thickness (mm) the npz `d` was simulated with: its geo_si_thick_mm, or
+    SI_THICK_MM for an npz extracted before the extractors stored geometry provenance."""
+    return float(d["geo_si_thick_mm"]) if "geo_si_thick_mm" in d else SI_THICK_MM
+
+
+def geometry_provenance(home):
+    """The geo_* keys the extractors store in their npz, read from the config root `home` whose
+    geometry/ was simulated (the repo, or a sim/make_geometry_variant.py copy):
+      geo_si_thick_mm    sensor silicon thickness
+      geo_si_centers_mm  per-layer Si mid-plane apothems as the compact defines them (the driver
+                         places the stack ECAL_STACK_OFFSET_MM further out; si_layer_centers()
+                         includes that offset)
+      geo_cell_size_mm   pixel pitch
+      geo_home           the config root, as an absolute path
+    Aborts (SystemExit) when the compact's mid-planes are not the ones si_layer_centers()
+    assumes, because every crossing would then be assigned against the wrong layer centres."""
+    try:
+        centers = decal_geometry.layer_radii(home)
+        thick = decal_geometry.si_thickness_mm(home)
+        cell = decal_geometry.cell_size_mm(home)
+    except FileNotFoundError:
+        raise SystemExit(f"--home {home!r} has no geometry/SiD_TestBeam.xml + my_custom_ecal.xml -- "
+                         f"point it at the config root that was simulated")
+    except ValueError as e:
+        raise SystemExit(f"cannot read the geometry under --home {home!r}: {e}")
+    expected = si_layer_centers() - ECAL_STACK_OFFSET_MM
+    if centers.shape != expected.shape:
+        raise SystemExit(f"{home}/geometry has {centers.size} Si layers; the crossing code "
+                         f"(sensor_crossings.si_layer_centers) assumes {expected.size}")
+    dev = np.abs(centers - expected)
+    if dev.max() > 1e-6:
+        k = int(np.argmax(dev))
+        raise SystemExit(f"Si mid-planes in {home}/geometry differ from the ones the crossing code "
+                         f"assumes (sensor_crossings.si_layer_centers): layer {k} at {centers[k]:.6f} mm "
+                         f"vs {expected[k]:.6f} mm. Only ECal_Si_thickness may change without updating "
+                         f"si_layer_centers().")
+    return {"geo_si_thick_mm": np.float64(thick), "geo_si_centers_mm": centers,
+            "geo_cell_size_mm": np.float64(cell), "geo_home": np.array(os.path.abspath(home))}
 
 
 def face_phi(x, y):

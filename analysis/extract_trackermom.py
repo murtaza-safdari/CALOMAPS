@@ -11,17 +11,27 @@ This reads that ROOT with uproot and writes a compact .npz holding both the MCPa
 
 Units: momentum in GeV, positions/pathLength in mm, time in ns, energy in GeV.
 
-Usage: python extract_trackermom.py [in.root] [out.npz] [event_index]
+Usage: python extract_trackermom.py [in.root] [out.npz] [event_index] [--home CONFIG_ROOT]
+
+--home is the config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this
+repo); sim/make_pixelav_inputs.sh passes it. The npz records that geometry (geo_si_thick_mm,
+geo_si_centers_mm, geo_cell_size_mm, geo_home; see sensor_crossings.geometry_provenance), and
+the extraction stops before reading the ROOT file if its Si mid-planes are not the ones the
+crossing code assumes.
 """
 import os, sys
 import numpy as np
 import uproot
+from decal_geometry import pop_home_arg
+from sensor_crossings import geometry_provenance
 
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-IN  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_data_base, "trackermom", "trackermom_gamma50_1evt.root")
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_home, "models", "trackermom_gamma50_1evt.npz")
-EV  = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+GEO_HOME, _args = pop_home_arg(sys.argv[1:], _home)
+IN  = _args[0] if len(_args) > 0 else os.path.join(_data_base, "trackermom", "trackermom_gamma50_1evt.root")
+OUT = _args[1] if len(_args) > 1 else os.path.join(_home, "models", "trackermom_gamma50_1evt.npz")
+EV  = int(_args[2]) if len(_args) > 2 else 0
+GEO = geometry_provenance(GEO_HOME)   # before any ROOT I/O
 
 
 # Stamp provenance honestly: parse particle/energy from the input filename written by the
@@ -80,11 +90,13 @@ np.savez_compressed(
     pid=pid, status=status, gstat=gstat, dbeg=dbeg, dend=dend, dau=dau,
     thx=thx, thy=thy, thz=thz, tpx=tpx, tpy=tpy, tpz=tpz,
     tpath=tpath, ttime=ttime, tedep=tedep, tcellID=tcellID, tmc=tmc,
+    **GEO,
     meta=np.array([_meta_particle, _meta_energy, "+y pencil beam", "seed=424242",
                    "ECalBarrel as Geant4TrackerWeightedAction", "SimTrackerHit w/ momentum", "EDM4hep"]),
 )
 tp = np.sqrt(tpx**2 + tpy**2 + tpz**2)
 print(f"saved {OUT}")
+print(f"  geometry: {GEO['geo_si_thick_mm'] * 1e3:g} um Si, config root {GEO['geo_home']}")
 print(f"  n_particles={len(pdg)}  n_tracker_hits={len(thx)}")
 print(f"  hit |p| (GeV): min={tp.min():.4f}  median={np.median(tp):.4f}  max={tp.max():.2f}" if len(thx) else "  no tracker hits in this event")
 print(f"  total eDep in Si (GeV): {tedep.sum():.4f}")

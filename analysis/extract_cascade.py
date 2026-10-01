@@ -12,17 +12,27 @@ index the per-hit contribution ranges, and the flat contribution arrays are cpdg
 csx/csy/csz/cmc -- and feed analysis/sensor_crossings.py. Without detailed mode the position/PDG
 fields come out zero (only energy + the MCParticle link are written).
 
-Usage: python extract_cascade.py [in.root] [out.npz] [event_index]
+Usage: python extract_cascade.py [in.root] [out.npz] [event_index] [--home CONFIG_ROOT]
+
+--home is the config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this
+repo); sim/make_pixelav_inputs.sh passes it. The npz records that geometry (geo_si_thick_mm,
+geo_si_centers_mm, geo_cell_size_mm, geo_home; see sensor_crossings.geometry_provenance), and
+the extraction stops before reading the ROOT file if its Si mid-planes are not the ones the
+crossing code assumes.
 """
 import os, sys
 import numpy as np
 import uproot
+from decal_geometry import pop_home_arg
+from sensor_crossings import geometry_provenance
 
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-IN  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_data_base, "fullcascade", "fullcascade_gamma50_1evt.root")
-OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_home, "models", "fullcascade_gamma50_1evt.npz")
-EV  = int(sys.argv[3]) if len(sys.argv) > 3 else 0   # cascade files are single-event
+GEO_HOME, _args = pop_home_arg(sys.argv[1:], _home)
+IN  = _args[0] if len(_args) > 0 else os.path.join(_data_base, "fullcascade", "fullcascade_gamma50_1evt.root")
+OUT = _args[1] if len(_args) > 1 else os.path.join(_home, "models", "fullcascade_gamma50_1evt.npz")
+EV  = int(_args[2]) if len(_args) > 2 else 0   # cascade files are single-event
+GEO = geometry_provenance(GEO_HOME)   # before any ROOT I/O
 
 
 # Stamp provenance honestly: parse particle/energy from the input filename written by the
@@ -92,11 +102,13 @@ np.savez_compressed(
     dbeg=dbeg, dend=dend, dau=dau,
     hx=hx, hy=hy, hz=hz, he=he, cellID=cellID,
     cbeg=cbeg, cend=cend, cpdg=cpdg, cE=cE, cslen=cslen, ctime=ctime, csx=csx, csy=csy, csz=csz, cmc=cmc,
+    **GEO,
     meta=np.array([_meta_particle, _meta_energy, "+y pencil beam", "keepAllParticles",
                    "userParticleHandler=off", "enableDetailedShowerMode", "EDM4hep"]),
 )
 _detailed = bool(np.any((csx != 0) | (csy != 0) | (csz != 0)))
 print(f"saved {OUT}")
+print(f"  geometry: {GEO['geo_si_thick_mm'] * 1e3:g} um Si, config root {GEO['geo_home']}")
 print(f"  n_particles={len(pdg)}  n_hits={len(hx)}  n_contributions={len(cpdg)}")
 print(f"  particle E range (GeV): {E.min():.4f} .. {E.max():.2f}")
 print(f"  total hit energy deposited (GeV): {he.sum():.4f}")
