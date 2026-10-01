@@ -13,6 +13,19 @@ CONCURRENT_JOBS="${CALOMAPS_NCONCURRENT:-20}"  # How many run at once (a typical
 # whole files.) Set CALOMAPS_SEED_BASE to generate a statistically independent dataset.
 SEED_BASE="${CALOMAPS_SEED_BASE:-0}"
 
+# Resolve the compact geometry + steering by ABSOLUTE path (relative to this script),
+# so the script runs correctly from any working directory. SiD_TestBeam.xml lives in
+# geometry/ and run_sim.py in sim/, so bare relative names can't both resolve.
+# CALOMAPS_SI_THICKNESS_UM=T (unset/320 = the repo geometry) simulates the thickness-T variant
+# and tags the dataset dir and file names with _si<T>um, e.g. T=100:
+#   data_spectrum_100um_400GeV_si100um/sim_photons_si100um_part*.root
+# (see sim/geometry_variant.sh; extract with extract_readouts.py
+#  --home $CALOMAPS_DATA_BASE/geometry_si<T>um).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+STEER="$REPO_DIR/sim/run_sim.py"
+source "$SCRIPT_DIR/geometry_variant.sh" || exit 1   # COMPACT, GEO_HOME, SI_TAG
+
 # --- PARTICLE / DATASET ---
 # Particle type is read from CALOMAPS_GUN_PARTICLE (default "gamma") and passed
 # through to run_sim.py. Defaults reproduce the original photon dataset exactly:
@@ -32,16 +45,9 @@ if [ "$CALOMAPS_GUN_PARTICLE" = "gamma" ]; then
 else
     DATASET_NAME="${CALOMAPS_DATASET_NAME:-data_spectrum_100um_400GeV_${TAG}}"
 fi
-FILE_PREFIX="sim_${TAG}_part"
+DATASET_NAME="$(si_tagged "$DATASET_NAME")"
+FILE_PREFIX="sim_${TAG}${SI_TAG}_part"
 OUT_DIR="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}/${DATASET_NAME}"
-
-# Resolve the compact geometry + steering by ABSOLUTE path (relative to this script),
-# so the script runs correctly from any working directory. SiD_TestBeam.xml lives in
-# geometry/ and run_sim.py in sim/, so bare relative names can't both resolve.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPACT="$REPO_DIR/geometry/SiD_TestBeam.xml"
-STEER="$REPO_DIR/sim/run_sim.py"
 
 TOTAL_EVENTS=$(($NUM_JOBS * $EVENTS_PER_JOB))
 

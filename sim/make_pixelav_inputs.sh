@@ -6,11 +6,17 @@
 # pipeline (no file edits):
 #   CALOMAPS_GUN_PARTICLE     particle name (default gamma; e.g. pi+, pi-, proton)
 #   CALOMAPS_GUN_ENERGY_GEV   beam energy in GeV (default 50; legacy alias CALOMAPS_GUN_GEV)
+#   CALOMAPS_SI_THICKNESS_UM  ECal sensor thickness in um (default: the repo geometry, 320). Any
+#                             other value simulates $CALOMAPS_DATA_BASE/geometry_si<T>um (see
+#                             sim/geometry_variant.sh) and appends _si<T>um to every file name below
 #
 # Usage (EAF JupyterLab terminal, after `source ~/setup_calomaps.sh`):
 #   bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh                 # gamma 50 GeV
 #   CALOMAPS_GUN_PARTICLE=pi+ bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh
 #   CALOMAPS_GUN_PARTICLE=pi- CALOMAPS_GUN_ENERGY_GEV=80 bash .../make_pixelav_inputs.sh --fullcascade
+#   CALOMAPS_SI_THICKNESS_UM=100 bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh   # 100 um silicon
+#     -> trackermom_gamma50_1evt_si100um.{root,npz}, pixelav_segments_gamma50_1evt_si100um.*
+#        (check it: python $CALOMAPS_HOME/analysis/validate_crossings.py <that npz>)
 #
 # Produces (ROOT under $CALOMAPS_DATA_BASE, the rest under $CALOMAPS_HOME/models):
 #   trackermom_<tag><E>_1evt.root        tracker-SD readout: per-crossing momentum (the PIXELAV source)
@@ -26,10 +32,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPACT="$REPO_DIR/geometry/SiD_TestBeam.xml"
 HOME_DIR="${CALOMAPS_HOME:-$REPO_DIR}"
 DATA="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}"
 PY="${CALOMAPS_PY:-python3}"
+source "$SCRIPT_DIR/geometry_variant.sh" || exit 1   # COMPACT, GEO_HOME, SI_TAG
 
 PARTICLE="${CALOMAPS_GUN_PARTICLE:-gamma}"
 GEV="${CALOMAPS_GUN_ENERGY_GEV:-${CALOMAPS_GUN_GEV:-50}}"
@@ -53,25 +59,26 @@ echo " PIXELAV inputs:  $PARTICLE @ ${ETAG} GeV"
 echo "=========================================="
 
 echo "[1/3] tracker-SD simulation (per-crossing momentum)"
-TRK_ROOT="$DATA/trackermom/trackermom_${TAG}${ETAG}_1evt.root"
+TRK_ROOT="$DATA/trackermom/trackermom_${TAG}${ETAG}_1evt${SI_TAG}.root"
 ddsim --compactFile "$COMPACT" --steeringFile "$REPO_DIR/sim/run_sim_trackermom.py" \
       --numberOfEvents 1 --outputFile "$TRK_ROOT"
 
 echo "[2/3] extract -> .npz"
-TRK_NPZ="$HOME_DIR/models/trackermom_${TAG}${ETAG}_1evt.npz"
-"$PY" "$REPO_DIR/analysis/extract_trackermom.py" "$TRK_ROOT" "$TRK_NPZ"
+TRK_NPZ="$HOME_DIR/models/trackermom_${TAG}${ETAG}_1evt${SI_TAG}.npz"
+"$PY" "$REPO_DIR/analysis/extract_trackermom.py" "$TRK_ROOT" "$TRK_NPZ" --home "$GEO_HOME"
 
 echo "[3/3] convert -> PIXELAV deck (variant C tracker, badeaa3 layout)"
-SEG_PREFIX="$HOME_DIR/models/pixelav_segments_${TAG}${ETAG}_1evt"
+SEG_PREFIX="$HOME_DIR/models/pixelav_segments_${TAG}${ETAG}_1evt${SI_TAG}"
 "$PY" "$REPO_DIR/analysis/pixelav_converter.py" "$TRK_NPZ" "$SEG_PREFIX"
 
 if [ "$DO_FULL" = "1" ]; then
   echo "[+] full calorimeter cascade (for notebook 05 / notebook 07)"
   mkdir -p "$DATA/fullcascade"
-  FC_ROOT="$DATA/fullcascade/fullcascade_${TAG}${ETAG}_1evt.root"
+  FC_ROOT="$DATA/fullcascade/fullcascade_${TAG}${ETAG}_1evt${SI_TAG}.root"
   ddsim --compactFile "$COMPACT" --steeringFile "$REPO_DIR/sim/run_sim_fullcascade.py" \
         --numberOfEvents 1 --outputFile "$FC_ROOT"
-  "$PY" "$REPO_DIR/analysis/extract_cascade.py" "$FC_ROOT" "$HOME_DIR/models/fullcascade_${TAG}${ETAG}_1evt.npz"
+  "$PY" "$REPO_DIR/analysis/extract_cascade.py" "$FC_ROOT" \
+        "$HOME_DIR/models/fullcascade_${TAG}${ETAG}_1evt${SI_TAG}.npz" --home "$GEO_HOME"
 fi
 
 echo

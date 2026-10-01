@@ -26,6 +26,12 @@ update those constants to match. The MIP scale cannot come from geometry (it is
 a measured Landau MPV, 85 keV for 320 um silicon): pass --mip-energy when you
 change the silicon thickness. A startup probe cross-checks the first file's hit
 lattice and layer depths against --home and aborts on a mismatch.
+
+Silicon-thickness variants: with CALOMAPS_SI_THICKNESS_UM=T the sim wrappers simulate the
+copy sim/make_geometry_variant.py writes at $CALOMAPS_DATA_BASE/geometry_si<T>um and tag
+their outputs _si<T>um, e.g. for T=100:
+    --datadir $CALOMAPS_DATA_BASE/mono_gamma_50GeV_si100um --glob 'sim_photons_si100um_part*.root'
+    --home $CALOMAPS_DATA_BASE/geometry_si100um --mip-energy <MPV for 100 um>
 """
 import os, glob, argparse
 import numpy as np, uproot
