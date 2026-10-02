@@ -24,7 +24,8 @@
 #   SI_TAG     "" for the baseline, else [_si<T>um][_cut<C>um][_stepmax<S>um]
 # and defines si_tagged NAME, which prints NAME with SI_TAG appended unless it already ends in it.
 # Returns non-zero (callers: `source .../geometry_variant.sh || exit 1`) on a value that is not a
-# plain number of microns or when the variant cannot be generated.
+# plain number of microns, or one whose tag would carry an exponent (below 0.0001 or from 1e6),
+# before anything is written, or when the variant cannot be generated.
 
 COMPACT="$REPO_DIR/geometry/SiD_TestBeam.xml"
 GEO_HOME="$REPO_DIR"
@@ -37,6 +38,18 @@ si_tagged() {
     esac
 }
 
+# The %g spelling of the knob $1's value $2, which the output-name tags use; refused when it has an
+# exponent (1e-05, 2e+06), since the extractors read only plain numbers back from a name.
+_si_knob_g() {
+    local g
+    g="$(LC_ALL=C printf '%g' "$2")"
+    if ! [[ "$g" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "ERROR: $1='$2' would be spelled $g in the output names, which the extractors cannot read back; give a value of at least 0.0001 and below 1000000" >&2
+        return 1
+    fi
+    printf '%s\n' "$g"
+}
+
 if [ -n "${CALOMAPS_SI_THICKNESS_UM:-}" ] || [ -n "${CALOMAPS_SI_CUT_UM:-}" ] || \
    [ -n "${CALOMAPS_SI_STEP_UM:-}" ]; then
     _variant_args=()
@@ -45,21 +58,24 @@ if [ -n "${CALOMAPS_SI_THICKNESS_UM:-}" ] || [ -n "${CALOMAPS_SI_CUT_UM:-}" ] ||
             echo "ERROR: CALOMAPS_SI_THICKNESS_UM='$CALOMAPS_SI_THICKNESS_UM' is not a thickness in microns" >&2
             return 1
         fi
-        _variant_args+=(--si-thickness-um "$(LC_ALL=C printf '%g' "$CALOMAPS_SI_THICKNESS_UM")")
+        _g="$(_si_knob_g CALOMAPS_SI_THICKNESS_UM "$CALOMAPS_SI_THICKNESS_UM")" || return 1
+        _variant_args+=(--si-thickness-um "$_g")
     fi
     if [ -n "${CALOMAPS_SI_CUT_UM:-}" ]; then
         if ! [[ "$CALOMAPS_SI_CUT_UM" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
             echo "ERROR: CALOMAPS_SI_CUT_UM='$CALOMAPS_SI_CUT_UM' is not a production cut in microns" >&2
             return 1
         fi
-        _variant_args+=(--si-cut-um "$(LC_ALL=C printf '%g' "$CALOMAPS_SI_CUT_UM")")
+        _g="$(_si_knob_g CALOMAPS_SI_CUT_UM "$CALOMAPS_SI_CUT_UM")" || return 1
+        _variant_args+=(--si-cut-um "$_g")
     fi
     if [ -n "${CALOMAPS_SI_STEP_UM:-}" ]; then
         if ! [[ "$CALOMAPS_SI_STEP_UM" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
             echo "ERROR: CALOMAPS_SI_STEP_UM='$CALOMAPS_SI_STEP_UM' is not a step length in microns" >&2
             return 1
         fi
-        _variant_args+=(--si-step-um "$(LC_ALL=C printf '%g' "$CALOMAPS_SI_STEP_UM")")
+        _g="$(_si_knob_g CALOMAPS_SI_STEP_UM "$CALOMAPS_SI_STEP_UM")" || return 1
+        _variant_args+=(--si-step-um "$_g")
     fi
     # The generator prints the repo's own compact for the repo thickness without a cut or step limit.
     COMPACT="$("${CALOMAPS_PY:-python3}" "$REPO_DIR/sim/make_geometry_variant.py" \
@@ -79,5 +95,6 @@ PY
         fi
         echo "Si variant: geometry $COMPACT (outputs tagged $SI_TAG)"
     fi
-    unset _variant_args
+    unset _variant_args _g
 fi
+unset -f _si_knob_g

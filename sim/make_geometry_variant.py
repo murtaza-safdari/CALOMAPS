@@ -50,7 +50,8 @@ is written to a temporary directory beside OUT, validated, and renamed into plac
 sees a partial tree and a refused variant leaves nothing behind.
 
 Refused: a thickness <= 0, one that leaves either air pad without positive thickness, a cut or
-step limit <= 0, a source tree without exactly one definition of each of the three constants (in
+step limit <= 0, a value below 0.0001 um or from 1e6 um (its name tag would carry an exponent,
+which the extractors cannot read back), a source tree without exactly one definition of each of the three constants (in
 SiD_TestBeam.xml), and a variant whose Si mid-planes or layer depths differ from the repo's, or
 whose silicon does not read back with the requested cut and step limit.
 """
@@ -297,6 +298,12 @@ def main():
     step_um = args.si_step_um
     if step_um is not None and not (math.isfinite(step_um) and step_um > 0):
         _fail(f"--si-step-um must be a positive length, got {step_um!r}")
+    # the names geometry_si<T>um[_cut<C>um][_stepmax<S>um] and the output tags spell values with %g
+    for option, um in (("--si-thickness-um", t_um), ("--si-cut-um", cut_um), ("--si-step-um", step_um)):
+        if um is not None and "e" in "%g" % um:
+            _fail(f"{option} {um!r} would be spelled {'%g' % um} in the variant's name and the output "
+                  f"names, which the extractors cannot read back; give a value of at least 0.0001 "
+                  f"and below 1000000")
     if dg.si_production_cut_mm(REPO) is not None:
         _fail(f"the repo's geometry/ already puts its silicon in a region of its own; this script "
               f"writes variants of a geometry without one")

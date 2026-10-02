@@ -721,8 +721,9 @@ production cut of its own (in µm, through a DD4hep region), and `CALOMAPS_SI_ST
 Geant4 step length of its own; everywhere else the run's cut and the calorimeter's 5 mm step
 limit still apply. Only the `sim/*.sh` wrappers act on them (through `sim/geometry_variant.sh`):
 they simulate a variant geometry that `sim/make_geometry_variant.py` writes under
-`$CALOMAPS_DATA_BASE`, and every output name carries `_cut<C>um` / `_stepmax<S>um`. Unset (the
-default), the geometry and the names are unchanged. The PIXELAV deposits route sets them to 1 µm
+`$CALOMAPS_DATA_BASE`, and every output name carries `_cut<C>um` / `_stepmax<S>um`. A value the
+tags would have to spell with an exponent (below 0.0001 µm, or from 10⁶ µm) is refused before
+anything is written. Unset (the default), the geometry and the names are unchanged. The PIXELAV deposits route sets them to 1 µm
 and 5 µm, so delta rays become particles with their own steps and every step in the silicon is
 nearly straight ([`pixelav_handoff.md`](pixelav_handoff.md)).
 

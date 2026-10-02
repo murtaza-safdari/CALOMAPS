@@ -25,9 +25,13 @@ repo geometry, and in every case the tag sim/geometry_variant.sh gives the same 
 CALOMAPS_SI_THICKNESS_UM, CALOMAPS_SI_CUT_UM and CALOMAPS_SI_STEP_UM select a variant compact only
 in the sim/*.sh wrappers. Here they are compared with the compact, and a WARNING is printed when a
 knob and the compact disagree. When the compact cannot be read (no --compactFile on the command
-line, an unreadable file, a compact that is not <config root>/geometry/SiD_TestBeam.xml), the name
-stays untagged, with a WARNING if the thickness knob names a thickness other than the checkout's
-or the cut or step knob is set. si_output_tag() does not raise.
+line, several files, an unreadable file, a compact that is not
+<config root>/geometry/SiD_TestBeam.xml), the name stays untagged, with a WARNING if the thickness
+knob names a thickness other than the checkout's or the cut or step knob is set, or a compact was
+given. si_output_tag() does not raise.
+
+The options are read as ddsim's argparse reads them, abbreviations included (--compact for
+--compactFile, --random.s for --random.seed).
 """
 import os, sys
 
@@ -44,15 +48,30 @@ _SETTINGS = ((CUT_KNOB, dg.compact_si_cut_mm, "cut", "production cut"),
              (STEP_KNOB, dg.compact_si_step_mm, "stepmax", "step limit"))
 
 
+def _long_option(arg, name):
+    """(is it, inline value) for the command-line word arg and ddsim's long option `name`: arg is
+    name or a prefix of it, which ddsim's argparse expands to name unless another option shares
+    the prefix (ddsim then stops on the ambiguity, so nothing is written under the name made
+    here); the inline value is the part after "=", else None. This assumes that no ddsim option
+    is itself a prefix of --compactFile, --numberOfEvents or --random.seed; the parameters the run
+    header of a Key4hep 2026-02-01 ddsim run lists bear that out (no other begins with n or
+    random.s, and only crossingAngleBoost with c)."""
+    opt, eq, value = arg.partition("=")
+    if len(opt) > 2 and opt.startswith("--") and name.startswith(opt):
+        return True, (value if eq else None)
+    return False, None
+
+
 def compact_files(argv):
     """The files given to the last --compactFile in argv (ddsim's option takes one or more, or
-    one as --compactFile=FILE), or [] when there is none."""
+    one as --compactFile=FILE; an abbreviation such as --compact works the same), or [] when there
+    is none."""
     files, i = [], 1
     while i < len(argv):
-        a = argv[i]
-        if a.startswith("--compactFile="):
-            files = [a.split("=", 1)[1]]
-        elif a == "--compactFile":
+        is_compact, value = _long_option(argv[i], "--compactFile")
+        if is_compact and value is not None:
+            files = [value]
+        elif is_compact:
             files = []
             while i + 1 < len(argv) and not argv[i + 1].startswith("-"):
                 i += 1
@@ -62,17 +81,18 @@ def compact_files(argv):
 
 
 def number_of_events(argv):
-    """The value of the last --numberOfEvents N, --numberOfEvents=N, -N N or -NN in argv, or
-    None when there is none or it is not an integer."""
+    """The value of the last --numberOfEvents N, --numberOfEvents=N (or an abbreviation of the
+    option), -N N or -NN in argv, or None when there is none or it is not an integer."""
     n, i = None, 1
     while i < len(argv):
         a, value = argv[i], None
-        if a in ("--numberOfEvents", "-N"):
+        is_long, inline = _long_option(a, "--numberOfEvents")
+        if a == "-N" or (is_long and inline is None):
             if i + 1 < len(argv):
                 i += 1
                 value = argv[i]
-        elif a.startswith("--numberOfEvents="):
-            value = a.split("=", 1)[1]
+        elif is_long:
+            value = inline
         elif a.startswith("-N") and not a.startswith("--"):
             value = a[2:]
         if value is not None:
@@ -101,17 +121,18 @@ def events_tag(argv=None, fallback=None):
 
 
 def random_seed(argv):
-    """The value of the last --random.seed R or --random.seed=R in argv, or None when there is
-    none or it is not an integer."""
+    """The value of the last --random.seed R or --random.seed=R (or an abbreviation of the option)
+    in argv, or None when there is none or it is not an integer."""
     seed, i = None, 1
     while i < len(argv):
         a, value = argv[i], None
-        if a == "--random.seed":
+        is_seed, inline = _long_option(a, "--random.seed")
+        if is_seed and inline is None:
             if i + 1 < len(argv):
                 i += 1
                 value = argv[i]
-        elif a.startswith("--random.seed="):
-            value = a.split("=", 1)[1]
+        elif is_seed:
+            value = inline
         if value is not None:
             try:
                 seed = int(value)
@@ -158,12 +179,13 @@ def si_output_tag(argv=None, environ=None):
     the checkout's, C the production cut of the silicon's own region and S the maximum step length
     of its own limitset, when it has them. Prints a WARNING when a knob in environ (default
     os.environ) disagrees with the compact, or, when the compact cannot be read, when the
-    thickness knob names a thickness other than the checkout's or the cut or step knob is set."""
+    thickness knob names a thickness other than the checkout's or the cut or step knob is set,
+    and otherwise when a compact was given."""
     argv = sys.argv if argv is None else argv
     environ = os.environ if environ is None else environ
     knob, knob_um = _knob_um(environ, KNOB)
     knobs = [_knob_um(environ, name) for name, _, _, _ in _SETTINGS]
-    base_um = None
+    base_um, files = None, []
     try:
         base_um = _um(dg.si_thickness_mm(_REPO))
         files = compact_files(argv)
@@ -173,17 +195,26 @@ def si_output_tag(argv=None, environ=None):
         si_um = _um(dg.compact_si_thickness_mm(files[0]))
         values = [read(files[0]) for _, read, _, _ in _SETTINGS]
     except Exception as e:
+        warned = False
         if knob and knob_um != base_um:
             print("WARNING: %s=%s, but the silicon thickness of the simulated geometry could not be "
                   "confirmed from its compact (%s). The default output name is untagged; pass the "
                   "variant compact that sim/make_geometry_variant.py prints as --compactFile, or "
                   "name the output with --outputFile." % (KNOB, knob, e))
+            warned = True
         for (name, _, _, what), (raw, _) in zip(_SETTINGS, knobs):
             if raw:
                 print("WARNING: %s=%s, but the %s of the simulated silicon could not be "
                       "confirmed from its compact (%s). The default output name is untagged; pass "
                       "the variant compact that sim/make_geometry_variant.py prints as "
                       "--compactFile, or name the output with --outputFile." % (name, raw, what, e))
+                warned = True
+        if files and not warned:
+            print("WARNING: the silicon of the simulated geometry could not be read from its "
+                  "compact (%s), so the default output name carries no _si<T>um, _cut<C>um or "
+                  "_stepmax<S>um tag, whatever the geometry; pass one compact, "
+                  "<config root>/geometry/SiD_TestBeam.xml, as --compactFile, or name the output "
+                  "with --outputFile." % e)
         return ""
     ums = [None if mm is None else _um(mm) for mm in values]
     tag = ("" if si_um == base_um else "_si%sum" % si_um) + "".join(
