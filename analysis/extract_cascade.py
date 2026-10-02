@@ -20,18 +20,25 @@ event_index = 0.
 
 One event per npz: evt_id_particle holds its entry number in the file for every MCParticle, and
 the run prints how many events the file holds. The sim_* keys and meta's particle and energy come
-from the file's ddsim run header (sensor_crossings.sim_provenance), else from the file name.
+from the file's ddsim run header (sensor_crossings.sim_provenance), else from the file name. A
+_seed<R> tag in the input's name must be the seed the run header records
+(sensor_crossings.check_seed_label): nothing is written otherwise. An untagged name, or a file
+without a run header, is not checked.
 
 --home is the config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this
 repo); sim/make_pixelav_inputs.sh passes it. The npz records that geometry (geo_si_thick_mm,
-geo_si_centers_mm, geo_cell_size_mm, geo_home; see sensor_crossings.geometry_provenance), and
-the extraction stops before reading the ROOT file if its Si mid-planes are not the ones the
-crossing code assumes, or if the silicon thickness the input's name implies is not the --home
-thickness (an _si<T>um tag names T; an untagged name means this checkout's own geometry).
+geo_si_centers_mm, geo_cell_size_mm, geo_si_cut_mm, geo_si_step_mm, geo_home; see
+sensor_crossings.geometry_provenance), and the extraction stops before reading the ROOT file if
+its Si mid-planes are not the ones the crossing code assumes, or if the silicon the input's name
+implies is not the --home silicon: an _si<T>um tag names the thickness T, and an untagged name
+means this checkout's own thickness; a _cut<C>um or _stepmax<S>um tag names a production cut or
+a step limit of the silicon's own, and a name without one means silicon without it
+(sensor_crossings.check_thickness_label).
 """
 import argparse, math, os
 import numpy as np
-from sensor_crossings import REPO, geometry_provenance, check_thickness_label, sim_provenance
+from sensor_crossings import (REPO, geometry_provenance, check_thickness_label, check_seed_label,
+                              sim_provenance)
 
 
 def main(argv=None):
@@ -58,6 +65,7 @@ def main(argv=None):
     import uproot
     f = uproot.open(IN)
     SIM, _ = sim_provenance(f, IN)
+    check_seed_label(IN, SIM)
     _meta_particle = str(SIM["sim_gun_particle"])
     _energy = float(SIM["sim_gun_energy_GeV"])
     _meta_energy = f"{_energy:g} GeV" if math.isfinite(_energy) else "unknown"

@@ -7,6 +7,13 @@ takes it). Without one, N is the fallback the steering file passes (its SIM.numb
 ddsim's command line would otherwise set) when that is positive; otherwise the name carries no
 event count, with a WARNING. events_tag() does not raise.
 
+seed_tag(): run_sim_trackermom.py and run_sim_fullcascade.py name their default output _seed<R>
+after the random seed R of the run when it is not DEFAULT_SEED, their seed without
+CALOMAPS_SEED: R is the --random.seed of the command line (the last one), which ddsim applies over
+the steering file's, else the fallback the steering file passes (its SIM.random.seed, read from
+CALOMAPS_SEED). The default seed adds nothing to the name. Without an integer seed from either,
+the name carries no seed tag, with a WARNING. seed_tag() does not raise.
+
 si_output_tag(): run_sim.py, run_sim_trackermom.py and run_sim_fullcascade.py name their default
 output after the geometry ddsim simulates. It finds the compact on the command line, reads its
 ECal silicon thickness, the production cut of the silicon's own region and the maximum step
@@ -28,6 +35,7 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 sys.path.insert(0, os.path.join(_REPO, "analysis"))
 import decal_geometry as dg   # noqa: E402
 
+DEFAULT_SEED = 424242   # the steering files' SIM.random.seed without CALOMAPS_SEED
 KNOB = "CALOMAPS_SI_THICKNESS_UM"
 CUT_KNOB = "CALOMAPS_SI_CUT_UM"
 STEP_KNOB = "CALOMAPS_SI_STEP_UM"
@@ -90,6 +98,44 @@ def events_tag(argv=None, fallback=None):
               "carries no event count. Name the output with --outputFile.")
         return ""
     return "_%devt" % n
+
+
+def random_seed(argv):
+    """The value of the last --random.seed R or --random.seed=R in argv, or None when there is
+    none or it is not an integer."""
+    seed, i = None, 1
+    while i < len(argv):
+        a, value = argv[i], None
+        if a == "--random.seed":
+            if i + 1 < len(argv):
+                i += 1
+                value = argv[i]
+        elif a.startswith("--random.seed="):
+            value = a.split("=", 1)[1]
+        if value is not None:
+            try:
+                seed = int(value)
+            except ValueError:
+                seed = None
+        i += 1
+    return seed
+
+
+def seed_tag(argv=None, fallback=None):
+    """"_seed<R>" for the default output name of the ddsim run whose command line is argv
+    (default sys.argv), or "" when R is DEFAULT_SEED; fallback is the seed to use when the
+    command line gives none (the steering file's SIM.random.seed)."""
+    try:
+        seed = random_seed(sys.argv if argv is None else argv)
+        if seed is None and isinstance(fallback, int) and not isinstance(fallback, bool):
+            seed = fallback
+    except Exception:
+        seed = None
+    if seed is None:
+        print("WARNING: no integer random seed on the ddsim command line or in the steering file; "
+              "the default output name carries no seed. Name the output with --outputFile.")
+        return ""
+    return "" if seed == DEFAULT_SEED else "_seed%d" % seed
 
 
 def _um(mm):

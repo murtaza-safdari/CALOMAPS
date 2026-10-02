@@ -29,7 +29,9 @@ Environment knobs (all optional; the defaults reproduce the canonical 50 GeV pho
     CALOMAPS_MIN_KE_MEV      truth-persistency KE floor in MeV        (default 1.0)
     CALOMAPS_DATA_BASE       output directory root                    (default ~/CALOMAPS-data)
     CALOMAPS_SEED            random seed, an integer; run_sim_fullcascade.py reads the same knob
-                             (default 424242). A --random.seed on the ddsim command line overrides it
+                             (default 424242). A --random.seed on the ddsim command line overrides
+                             it. The default output name is tagged _seed<R> by the seed of the run
+                             (untagged at the default seed)
     CALOMAPS_SI_THICKNESS_UM sensor silicon thickness in um; only the sim/*.sh wrappers act on
                              it, by passing a variant --compactFile. Here the default output name
                              is tagged _si<T>um by the --compactFile's own thickness (untagged at
@@ -45,8 +47,10 @@ Environment knobs (all optional; the defaults reproduce the canonical 50 GeV pho
 See docs/handbook.md "Controlling which secondaries are produced and saved" for the physics
 (production cut) vs. output-only (persistency floor) distinction.
 
-The default output name is trackermom_<tag><E>_<N>evt[_step][_si<T>um][_cut<C>um][_stepmax<S>um].root,
-N being the --numberOfEvents of the ddsim command line; --outputFile replaces it.
+The default output name is
+trackermom_<tag><E>_<N>evt[_seed<R>][_step][_si<T>um][_cut<C>um][_stepmax<S>um].root, N being the
+--numberOfEvents of the ddsim command line and R the random seed when it is not 424242;
+--outputFile replaces it.
 
 Keep this file pure ASCII (non-ASCII breaks the EDM4hep RunHeader std::map conversion).
 """
@@ -118,28 +122,30 @@ if _hits == "step":
 else:
     SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
 
-# ---- default output name: event count, hit mode and silicon from the ddsim command line ----
-# sim/steering_output.py reads ddsim's command line: _<N>evt from --numberOfEvents, and the
-# thickness, silicon production cut and silicon step limit of the --compactFile: no tag for the
-# repo geometry, _si<T>um for another thickness, _cut<C>um for a cut of its own and _stepmax<S>um
-# for a step limit of its own, with a WARNING when CALOMAPS_SI_THICKNESS_UM, CALOMAPS_SI_CUT_UM or
+# ---- default output name: event count, seed, hit mode and silicon from the ddsim command line ----
+# sim/steering_output.py reads ddsim's command line: _<N>evt from --numberOfEvents, _seed<R> from
+# --random.seed, else from SIM.random.seed (no tag at the default 424242), and the thickness,
+# silicon production cut and silicon step limit of the --compactFile: no tag for the repo
+# geometry, _si<T>um for another thickness, _cut<C>um for a cut of its own and _stepmax<S>um for a
+# step limit of its own, with a WARNING when CALOMAPS_SI_THICKNESS_UM, CALOMAPS_SI_CUT_UM or
 # CALOMAPS_SI_STEP_UM disagrees. Step hits add _step.
 # ddsim exec()s this file without __file__; the compiled code keeps the file's path.
-_si_tag, _n_tag = "", ""
+_si_tag, _n_tag, _seed_tag = "", "", ""
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(sys._getframe().f_code.co_filename)))
-    from steering_output import events_tag, si_output_tag
+    from steering_output import events_tag, seed_tag, si_output_tag
     _n_tag = events_tag(fallback=SIM.numberOfEvents)
+    _seed_tag = seed_tag(fallback=SIM.random.seed)
     _si_tag = si_output_tag()
 except Exception as _err:
     print("WARNING: sim/steering_output.py could not be loaded from beside this steering file "
           "(%s): the silicon thickness of the --compactFile is unconfirmed and the default output "
-          "name carries neither the event count nor a thickness tag." % _err)
+          "name carries neither the event count, the seed nor a thickness tag." % _err)
 
 # ---- output ----
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "trackermom")
 os.makedirs(_out_dir, exist_ok=True)
 _hits_tag = "_step" if _hits == "step" else ""
-SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g%s%s%s.root"
-                              % (_tag, _energy_gev, _n_tag, _hits_tag, _si_tag))
+SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g%s%s%s%s.root"
+                              % (_tag, _energy_gev, _n_tag, _seed_tag, _hits_tag, _si_tag))

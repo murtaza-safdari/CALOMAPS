@@ -127,6 +127,9 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 _SI_TAG = re.compile(r"_si([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
 _CUT_TAG = re.compile(r"_cut([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
 _STEP_TAG = re.compile(r"_stepmax([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
+# The steering files and the wrapper append _seed<R> to the names of a run whose random seed R is
+# not their default (sim/steering_output.py).
+_SEED_TAG = re.compile(r"_seed(-?[0-9]+)(?![0-9A-Za-z])")
 
 # Species that leave no reconstructable track in silicon: neutrals (no primary ionization)
 # and nuclei (slow recoils, not minimum-ionizing tracks; PDG |code| > 1e9), which is why the
@@ -283,6 +286,33 @@ def check_thickness_label(in_path, geo, home):
                  f"(the variant `python {REPO}/sim/make_geometry_variant.py {args}` writes)")
     raise SystemExit(f"{os.path.basename(in_path)} {named}, but --home {home} has {has}; nothing "
                      f"written. The --home for this input is {match}")
+
+
+def seed_tag(path):
+    """The random seed a _seed<R> tag in path's file name names, or None."""
+    tags = {int(t) for t in _SEED_TAG.findall(os.path.basename(path))}
+    if len(tags) > 1:
+        raise SystemExit(f"{os.path.basename(path)}: more than one _seed<R> tag")
+    return tags.pop() if tags else None
+
+
+def check_seed_label(in_path, sim):
+    """Exit when in_path's file name carries a _seed<R> tag and the seed of its ddsim run header
+    (sim = the sim_provenance fields, sim_seed) is another. A name without the tag, or a file whose
+    header records no seed (sim_seed "unknown"), passes: an untagged name may hold any seed, from
+    a run named with --outputFile."""
+    tag = seed_tag(in_path)
+    recorded = str(sim["sim_seed"])
+    if tag is None or recorded == "unknown":
+        return
+    try:
+        same = int(recorded) == tag
+    except ValueError:
+        same = False
+    if not same:
+        raise SystemExit(f"{os.path.basename(in_path)} is tagged _seed{tag}, but its ddsim run "
+                         f"header records random.seed {recorded}; nothing written. Rename the file "
+                         f"after its seed.")
 
 
 _RUN_TEXT_KEYS = {"sim_seed": "random.seed", "sim_dd4hep_version": "DD4hepVersion",

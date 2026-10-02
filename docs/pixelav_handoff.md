@@ -145,7 +145,7 @@ The knobs (environment variables; all optional except the deposits route's senso
 | `CALOMAPS_GUN_PARTICLE` | `gamma` | gun particle (`pi+`, `pi-`, `proton`, …) |
 | `CALOMAPS_GUN_ENERGY_GEV` | `50` | beam energy in GeV (legacy alias `CALOMAPS_GUN_GEV`) |
 | `CALOMAPS_N_EVENTS` | `1` | events to simulate; every name carries `_<N>evt`. Above 1 the npz keeps only the MCParticles with a tracker hit |
-| `CALOMAPS_SEED` | `424242` (the steering files') | random seed, a non-negative integer |
+| `CALOMAPS_SEED` | `424242` (the steering files') | random seed, a non-negative integer; any seed other than the default adds `_seed<R>` after `_<N>evt` in every output name, and the extractors refuse a file whose `_seed<R>` is not the seed in its run header |
 | `CALOMAPS_OUTPUT_DIR` | `$CALOMAPS_HOME/models` | directory for the npz, records, deck and jobs. 50 GeV photons take about 9 MB per event there with every MCParticle, 3.7 MB with only the hit particles |
 | `CALOMAPS_DATA_BASE` | `~/CALOMAPS-data` | root of the ROOT output and of the geometry variants |
 | `CALOMAPS_SI_THICKNESS_UM` | the repo geometry's, 320 | sensor thickness in µm; another value simulates a variant geometry (tag `_si<T>um`) |
@@ -332,7 +332,9 @@ python3 analysis/pixelav/charge_maps.py $P
   1). Each part gives `<prefix>.partNNN.out` (clusters, last time slice) and `<prefix>.partNNN.log`;
   a single `<prefix>.jobs.txt` gives `<prefix>.out` and `<prefix>.log`. Existing outputs are
   overwritten. It prints the totals and exits 1 when a part fails. The run directory must be the
-  one the jobs were built for.
+  one the jobs were built for. `<prefix>.run.json` records the run (driver seed, sha256 of the
+  sensor files and the driver, the PIXELAV and CALOMAPS commits, host, time, totals, failed
+  parts); `charge_maps.py` stores it in the charge maps.
 - A job's cluster depends only on the seed and its job id, so the result does not depend on how
   the jobs were split into parts. Parts are the unit of parallelism: write at least as many as the
   cores you will use (`CALOMAPS_JOB_PARTS`).

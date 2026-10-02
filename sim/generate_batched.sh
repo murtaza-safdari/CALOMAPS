@@ -17,8 +17,11 @@ SEED_BASE="${CALOMAPS_SEED_BASE:-0}"
 # CALOMAPS_SI_THICKNESS_UM=T (unset/320 = the repo geometry) simulates the thickness-T variant
 # and tags the dataset dir and file names with _si<T>um, e.g. T=100:
 #   data_spectrum_100um_400GeV_si100um/sim_photons_si100um_part*.root
-# where "100um" is the pixel pitch and "si100um" the silicon thickness. The run prints the
-# variant's compact (see sim/geometry_variant.sh); extract with extract_readouts.py
+# where "100um" is the pixel pitch and "si100um" the silicon thickness. CALOMAPS_SI_CUT_UM=C
+# gives the silicon a Geant4 production cut of its own and CALOMAPS_SI_STEP_UM=S a maximum step
+# length of its own (unset: the run's cut and the calorimeter's 5 mm), and append _cut<C>um and
+# _stepmax<S>um to the same names. The run prints the variant's compact (see
+# sim/geometry_variant.sh); extract with extract_readouts.py
 # --home <the directory above that compact's geometry/> --mip-energy <MPV for T um>.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

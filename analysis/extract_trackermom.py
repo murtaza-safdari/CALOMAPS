@@ -56,7 +56,9 @@ run says so; readers then fall back to the hit azimuth and depth.
 
 PROVENANCE: the sim_* keys (seed, events simulated, gun particle and energy, DD4hep and Geant4
 versions, date) and meta come from the file's ddsim run header (sensor_crossings.sim_provenance);
-without one, particle and energy come from the file name and the seed is "unknown".
+without one, particle and energy come from the file name and the seed is "unknown". A _seed<R> tag
+in the input's name must be the seed the run header records (sensor_crossings.check_seed_label):
+nothing is written otherwise. An untagged name, or a file without a run header, is not checked.
 
 --home is the config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this
 repo); sim/make_pixelav_inputs.sh passes it. The npz records that geometry (geo_si_thick_mm,
@@ -76,8 +78,8 @@ production cut and the step limit of the --home silicon (geo_si_cut_mm, geo_si_s
 import argparse, math, os
 import numpy as np
 from sensor_crossings import (REPO, HIT_MODES, geometry_provenance, check_thickness_label,
-                              sim_provenance, run_header, header_hit_mode, cellid_encoding,
-                              decode_cellid, face_phi, module_face_phi, N_FACES)
+                              check_seed_label, sim_provenance, run_header, header_hit_mode,
+                              cellid_encoding, decode_cellid, face_phi, module_face_phi, N_FACES)
 from validate_crossings import (MIN_SELECTED, MIN_STEPS, PATH_TOL, REACH_TOL, path_length_test,
                                 step_depth_test)
 
@@ -229,6 +231,7 @@ def main(argv=None):
     import uproot
     f = uproot.open(IN)
     SIM, sim_source = sim_provenance(f, IN)
+    check_seed_label(IN, SIM)
     header_mode, setting = header_hit_mode(run_header(f))
     if header_mode is None and args.hits is None:
         raise SystemExit(f"{IN}: the tracker hits are per crossing or per step, and the run header "

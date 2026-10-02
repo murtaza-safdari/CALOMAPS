@@ -28,7 +28,9 @@
 #   CALOMAPS_N_EVENTS         events to simulate (default 1); every name below carries _<N>evt. Above
 #                             1 the npz keeps only the MCParticles with a tracker hit
 #                             (extract_trackermom.py --particles hit), without daughter links
-#   CALOMAPS_SEED             random seed of both steering files (an integer; default: theirs, 424242)
+#   CALOMAPS_SEED             random seed of both steering files (an integer; default: theirs,
+#                             424242). Any other seed appends _seed<R> to every name below, after
+#                             _<N>evt
 #   CALOMAPS_OUTPUT_DIR       directory for the npz, records and deck (default $CALOMAPS_HOME/models).
 #                             50 GeV photons take about 9 MB per event there with every MCParticle,
 #                             3.7 MB with --particles hit (mostly the .json and .csv records)
@@ -55,7 +57,7 @@
 #   CALOMAPS_SI_THICKNESS_UM=100 bash sim/make_pixelav_inputs.sh   # 100 um silicon
 #     -> trackermom_gamma50_1evt_si100um.{root,npz}, pixelav_segments_gamma50_1evt_si100um.*
 #   CALOMAPS_N_EVENTS=200 CALOMAPS_SEED=7 CALOMAPS_OUTPUT_DIR=/path/to/scratch bash sim/make_pixelav_inputs.sh
-#     -> trackermom_gamma50_200evt.{root,npz}, pixelav_segments_gamma50_200evt.*
+#     -> trackermom_gamma50_200evt_seed7.{root,npz}, pixelav_segments_gamma50_200evt_seed7.*
 #   CALOMAPS_PIXELAV_ROUTE=deposits CALOMAPS_SI_THICKNESS_UM=100 PIXELAV_RUN_DIR=/path/to/run \
 #     bash sim/make_pixelav_inputs.sh
 #     -> trackermom_gamma50_1evt_step_si100um_cut1um_stepmax5um.{root,npz},
@@ -64,7 +66,8 @@
 # $CALOMAPS_OUTPUT_DIR, else $CALOMAPS_HOME/models (default: this checkout's models/). The script
 # warns when $CALOMAPS_HOME is set to another directory.
 #
-# Produces (ROOT under $CALOMAPS_DATA_BASE, the rest under the output directory), N = CALOMAPS_N_EVENTS:
+# Produces (ROOT under $CALOMAPS_DATA_BASE, the rest under the output directory), N = CALOMAPS_N_EVENTS
+# (<N>evt stands for <N>evt_seed<R> when the seed R is not the default):
 #   trackermom_<tag><E>_<N>evt.root      tracker-SD readout: per-crossing momentum (the PIXELAV source)
 #   trackermom_<tag><E>_<N>evt.npz       MCParticle cascade + tracker-hit arrays; validated with
 #                                        analysis/validate_crossings.py before the deck is written
@@ -84,7 +87,7 @@
 #   pixelav_jobs_<tag><E>_<N>evt.summary.txt   counts and the energy and window checks
 # With --fullcascade it ALSO makes the calorimeter cascade (for notebook 05 / notebook 07), always
 # one event: the same seed makes it the first event of the tracker run, with the calorimeter readout.
-#   fullcascade_<tag><E>_1evt.root + .npz
+#   fullcascade_<tag><E>_1evt.root + .npz   (_1evt_seed<R> at another seed)
 #
 # Assumes the Key4hep env is sourced (ddsim + python on PATH).
 set -euo pipefail
@@ -155,6 +158,14 @@ if [ -n "${CALOMAPS_SEED:-}" ]; then
   fi
   export CALOMAPS_SEED                  # read by both steering files
 fi
+# _seed<R> after _<N>evt for a seed other than the steering files' default, as they tag it
+SEED_TAG="$("$PY" - "$REPO_DIR/sim" <<'PY'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from steering_output import DEFAULT_SEED, seed_tag
+print(seed_tag(["ddsim"], int(os.environ.get("CALOMAPS_SEED", DEFAULT_SEED))))
+PY
+)" || exit 1
 OUT_DIR="${CALOMAPS_OUTPUT_DIR:-$HOME_DIR/models}"
 
 DO_FULL=0
@@ -172,12 +183,12 @@ if [ "$ROUTE" = "deposits" ]; then
 else
   echo "[1/3] tracker-SD simulation (per-crossing momentum)"
 fi
-TRK_ROOT="$DATA/trackermom/trackermom_${TAG}${ETAG}${NTAG}${HTAG}${SI_TAG}.root"
+TRK_ROOT="$DATA/trackermom/trackermom_${TAG}${ETAG}${NTAG}${SEED_TAG}${HTAG}${SI_TAG}.root"
 ddsim --compactFile "$COMPACT" --steeringFile "$REPO_DIR/sim/run_sim_trackermom.py" \
       --numberOfEvents "$N_EVENTS" --outputFile "$TRK_ROOT"
 
 echo "[2/3] extract -> .npz"
-TRK_NPZ="$OUT_DIR/trackermom_${TAG}${ETAG}${NTAG}${HTAG}${SI_TAG}.npz"
+TRK_NPZ="$OUT_DIR/trackermom_${TAG}${ETAG}${NTAG}${SEED_TAG}${HTAG}${SI_TAG}.npz"
 PARTICLES=()
 if [ "$ROUTE" = "deposits" ]; then
   PARTICLES=(--particles hit)
@@ -200,7 +211,7 @@ fi
 
 if [ "$ROUTE" = "deposits" ]; then
   echo "[3/3] step deposits -> PIXELAV deposit jobs"
-  JOB_PREFIX="$OUT_DIR/pixelav_jobs_${TAG}${ETAG}${NTAG}${SI_TAG}"
+  JOB_PREFIX="$OUT_DIR/pixelav_jobs_${TAG}${ETAG}${NTAG}${SEED_TAG}${SI_TAG}"
   PARTS=()
   [ -n "${CALOMAPS_JOB_PARTS:-}" ] && PARTS=(--parts "$CALOMAPS_JOB_PARTS")
   "$PY" "$REPO_DIR/analysis/pixelav/deposit_jobs.py" "$TRK_NPZ" "$JOB_PREFIX" "${SENSOR[@]}" \
@@ -209,7 +220,7 @@ fi
 
 if [ "$ROUTE" = "track" ]; then
   echo "[3/3] convert -> PIXELAV deck (variant C tracker, badeaa3 layout)"
-  SEG_PREFIX="$OUT_DIR/pixelav_segments_${TAG}${ETAG}${NTAG}${SI_TAG}"
+  SEG_PREFIX="$OUT_DIR/pixelav_segments_${TAG}${ETAG}${NTAG}${SEED_TAG}${SI_TAG}"
   SELECT=()
   [ -n "${CALOMAPS_DECK_SELECT:-}" ] && SELECT+=(--select "$CALOMAPS_DECK_SELECT")
   [ -n "${CALOMAPS_PATH_TOLERANCE:-}" ] && SELECT+=(--path-tolerance "$CALOMAPS_PATH_TOLERANCE")
@@ -219,11 +230,11 @@ fi
 if [ "$DO_FULL" = "1" ]; then
   echo "[+] full calorimeter cascade (for notebook 05 / notebook 07)"
   mkdir -p "$DATA/fullcascade"
-  FC_ROOT="$DATA/fullcascade/fullcascade_${TAG}${ETAG}_1evt${SI_TAG}.root"
+  FC_ROOT="$DATA/fullcascade/fullcascade_${TAG}${ETAG}_1evt${SEED_TAG}${SI_TAG}.root"
   ddsim --compactFile "$COMPACT" --steeringFile "$REPO_DIR/sim/run_sim_fullcascade.py" \
         --numberOfEvents 1 --outputFile "$FC_ROOT"
   "$PY" "$REPO_DIR/analysis/extract_cascade.py" "$FC_ROOT" \
-        "$OUT_DIR/fullcascade_${TAG}${ETAG}_1evt${SI_TAG}.npz" --home "$GEO_HOME"
+        "$OUT_DIR/fullcascade_${TAG}${ETAG}_1evt${SEED_TAG}${SI_TAG}.npz" --home "$GEO_HOME"
 fi
 
 echo
