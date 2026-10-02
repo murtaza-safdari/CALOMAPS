@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================================
-# setup_pixelav.sh — reproducibly (re)build PIXELAV + a sensor-model run directory on EAF.
+# setup_pixelav.sh — reproducibly (re)build PIXELAV + a sensor-model run directory.
 #
-# WHY: PIXELAV is built under /tmp on EAF (OFF-QUOTA; the per-user /home quota is only
-# 23 GB) but /tmp is EPHEMERAL — wiped on container restart. Re-run this to recreate
-# everything from scratch in a fresh session.
+# Runs on any Linux host with the CVMFS Key4hep stack sourced (it supplies gcc and python3 with
+# numpy), e.g. an EAF JupyterLab terminal or an LPC login node, and builds on macOS.
 #
-# Usage (EAF JupyterLab terminal, in the CALOMAPS repo root):
+# WHY: the default work area, /tmp/pixelav_journey, is EPHEMERAL: on EAF /tmp is off the
+# 23 GB per-user /home quota but wiped on container restart, and on other hosts it may be
+# node-local or purged. Re-run this to recreate everything from scratch in a fresh session,
+# or set PIXELAV_WORK to a lasting area (a scratch or data disk).
+#
+# Usage (in the CALOMAPS repo root):
 #     bash setup/setup_pixelav.sh                                     # decal320 sensor model
 #     PIXELAV_SENSOR=bpix100_50x25 PIXELAV_SENSOR_DIR=<dir> bash setup/setup_pixelav.sh
 #

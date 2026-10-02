@@ -10,7 +10,8 @@
 #                             other value simulates a variant geometry under $CALOMAPS_DATA_BASE
 #                             (see sim/geometry_variant.sh) and appends _si<T>um to every file name below
 #
-# Usage, from the checkout (EAF JupyterLab terminal, after `source ~/setup_calomaps.sh`):
+# Usage, from the checkout, with the Key4hep stack sourced (on EAF: a JupyterLab terminal, after
+# `source ~/setup_calomaps.sh`):
 #   bash sim/make_pixelav_inputs.sh                                # gamma 50 GeV
 #   CALOMAPS_GUN_PARTICLE=pi+ bash sim/make_pixelav_inputs.sh
 #   CALOMAPS_GUN_PARTICLE=pi- CALOMAPS_GUN_ENERGY_GEV=80 bash sim/make_pixelav_inputs.sh --fullcascade
