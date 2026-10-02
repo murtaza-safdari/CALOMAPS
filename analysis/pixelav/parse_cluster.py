@@ -13,12 +13,14 @@ driver). Used to confirm the cot/axis mapping (cot_alpha -> y/13px, cot_beta -> 
 summarize a full run.
 
 The file is read one cluster at a time (iter_clusters), so memory does not grow with the number
-of clusters, apart from one float per cluster kept for the median charge.
+of clusters, apart from one float per cluster kept for the median charge. A file whose name ends
+in .gz is read through gzip.
 
 Usage:  python parse_cluster.py clusters.out [--full]
         (--full prints only the summary line, not the first 12 clusters)
 """
 import argparse
+import gzip
 from array import array
 
 import numpy as np
@@ -27,8 +29,14 @@ TY, TX = 13, 21
 HEADER_FIELDS = (9, 10, 5)      # list driver (without / with the deck line number), injection
 
 
+def open_text(path):
+    """The text file path for reading, through gzip when its name ends in .gz."""
+    return gzip.open(path, "rt") if str(path).endswith(".gz") else open(path)
+
+
 def iter_clusters(path):
-    """Yield (hdr, slices) for every <cluster> block of a PIXELAV output file, in file order.
+    """Yield (hdr, slices) for every <cluster> block of a PIXELAV output file (plain, or gzipped
+    with a name ending in .gz), in file order.
 
     hdr is the cluster's header line as a list of strings, or None when the block has none:
       list driver, 9 or 10 fields: x y z px py pz neh mody pt [deck_line] (hdr[3], hdr[4] are
@@ -44,7 +52,7 @@ def iter_clusters(path):
         return hdr, a[:nsl * TY].reshape(nsl, TY, TX)
 
     rows, hdr = None, None
-    with open(path) as f:
+    with open_text(path) as f:
         for line in f:
             s = line.strip()
             if s.startswith("<cluster>"):
@@ -80,7 +88,7 @@ def cluster_summary(slices):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Summarize the clusters of a PIXELAV output file.")
-    ap.add_argument("clusters", help="PIXELAV cluster output file (pixel_clusters / *.out)")
+    ap.add_argument("clusters", help="PIXELAV cluster output file (pixel_clusters / *.out, or *.gz)")
     ap.add_argument("--full", action="store_true",
                     help="print only the summary line, not the first 12 clusters")
     args = ap.parse_args(argv)
