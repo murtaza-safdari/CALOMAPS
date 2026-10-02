@@ -85,7 +85,8 @@ The records are written as <out_prefix>.json + .csv; by default beside the input
 (trackermom_X.npz -> sensor_crossings_X). analysis/pixelav_converter.py builds the PIXELAV deck
 (PIXELAV: the silicon-pixel charge-transport simulation our collaborators run) from the same
 records. Build decks with it rather than by hand: it converts to microns, swaps |p| for the
-betagamma-matched pion momentum and leaves out the grazing crossings.
+betagamma-matched pion momentum and leaves out the crossings PIXELAV would not simulate as they
+happened (pixelav_converter.deck_drop_reason).
 
 Usage:
     python sensor_crossings.py [crossings.npz] [out_prefix] [--variant C|A|B|auto]

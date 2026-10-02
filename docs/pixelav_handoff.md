@@ -23,15 +23,23 @@ rest under `$CALOMAPS_HOME/models`):
 |------|------------|
 | `trackermom_<tag><E>_<N>evt.root` | tracker-SD readout: one `SimTrackerHit` per Si crossing, carrying the **real Geant4 momentum**, entry position, path length, energy, time, and a link to the producing MCParticle |
 | `trackermom_<tag><E>_<N>evt.npz` | the same, plus the MCParticle cascade, as NumPy arrays (for N > 1 only the particles with a tracker hit) |
-| **`pixelav_segments_<tag><E>_<N>evt.pixelav.txt`** | **the deck** — one line per crossing, 7 columns (`cot_alpha cot_beta ppion flipped modx mody pT`), lengths in microns |
-| `..._<N>evt.pixelav.txt.columns.txt` | column legend (human reference; PIXELAV doesn't read it) |
-| `..._<N>evt.json` / `.csv` | per-crossing records, 18 fields each (provenance + the raw numbers behind the deck) |
+| **`pixelav_segments_<tag><E>_<N>evt.pixelav.txt`** | **the deck** — one line per selected crossing, 7 columns (`cot_alpha cot_beta ppion flipped modx mody pT`), lengths in microns |
+| `..._<N>evt.pixelav.txt.columns.txt` | column legend and selection counts (human reference; PIXELAV doesn't read it) |
+| `..._<N>evt.json` / `.csv` | per-crossing records, every crossing, 20 fields each (provenance + the raw numbers behind the deck; `deck_line` is the record's deck line or 0, `deck_drop` why it has none) |
 
 `<tag>` is `gamma`, `piplus`, `piminus`, …, `<E>` is the beam energy in GeV and `<N>` the number
 of events, `CALOMAPS_N_EVENTS` (default 1; e.g. `trackermom_piplus50_1evt.root`). The deck is the hand-off file; the `.npz`/`.json`/`.csv`
 travel with it so the recipient can trace any line back to its MCParticle.
 
-> **All particles, no filtering (current default).** Every charged crossing is written.
+> **Which crossings the deck holds.** PIXELAV simulates every deck line as a straight track
+> through the full silicon thickness at constant momentum. By default
+> (`CALOMAPS_DECK_SELECT=through`) the deck holds only the crossings whose true Geant4 path in
+> the silicon is within 5% (`CALOMAPS_PATH_TOLERANCE=0.05`) of that straight line; soft
+> electrons that start, stop, scatter or curl in the sensor are left out, and so are tracks
+> steeper than |cot| = 10, which PIXELAV skips. In 20-event 50 GeV photon samples that keeps
+> 55% (320 µm) to 65% (100 µm) of the crossings, carrying 41–43% of the deposited energy.
+> `CALOMAPS_DECK_SELECT=all` writes every crossing PIXELAV processes. The legend lists the counts
+> per reason; the `.json`/`.csv` records keep every crossing (`deck_line`, `deck_drop`).
 > Summing PIXELAV's per-crossing charge over a whole shower over-counts the deposited
 > charge (PIXELAV regenerates delta rays that Geant4 already produced as separate
 > crossings) — the per-crossing physics is correct; it is the *shower sum* that needs a
@@ -84,6 +92,9 @@ CALOMAPS_GUN_PARTICLE=pi+ bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh --fullc
 # 200 events, another seed, outputs outside the home quota (~3.7 MB per 50 GeV photon event):
 CALOMAPS_N_EVENTS=200 CALOMAPS_SEED=7 CALOMAPS_OUTPUT_DIR=/path/to/scratch \
     bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh
+
+# every crossing PIXELAV processes, not only those its straight track reproduces (box in §0):
+CALOMAPS_DECK_SELECT=all bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh
 ```
 
 What it does, in order:
@@ -94,7 +105,8 @@ What it does, in order:
 2. **extract** — `extract_trackermom.py` reads every event of the ROOT file into the `.npz` arrays
    (for more than one event, only the MCParticles with a tracker hit).
 3. **convert** — `pixelav_converter.py` builds per-crossing records (variant C, the
-   tracker path) and writes the 7-column deck + the `.json`/`.csv` records.
+   tracker path) and writes the 7-column deck of the selected crossings + the `.json`/`.csv`
+   records of all of them.
 
 The script prints the exact output paths at the end.
 
@@ -114,8 +126,8 @@ cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
   equals the real momentum; for electrons it is ~273× larger (electrons are ~273× lighter).
 - `flipped` — 1 if the crossing direction is outward (dw ≥ 0).
 - `modx`, `mody` — the sub-pixel **mid-plane** entry point in microns, on PIXELAV's axes
-  (`modx` = cylinder-z, `mody` = across-pitch). Grazing crossings (`|cot| > 10`) are skipped,
-  as PIXELAV itself skips them.
+  (`modx` = cylinder-z, `mody` = across-pitch). Steep crossings (`|cot| > 10`) are skipped,
+  as PIXELAV itself skips them; the default selection leaves out more (box in §0).
 - `pT` — the real momentum magnitude (GeV), carried as a label.
 
 Stock PIXELAV randomizes the sub-pixel impact; `modx`/`mody` are the real impact for the

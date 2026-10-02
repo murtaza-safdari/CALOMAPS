@@ -16,6 +16,12 @@
 #   CALOMAPS_OUTPUT_DIR       directory for the npz, records and deck (default $CALOMAPS_HOME/models).
 #                             50 GeV photons take about 9 MB per event there with every MCParticle,
 #                             3.7 MB with --particles hit (mostly the .json and .csv records)
+#   CALOMAPS_DECK_SELECT      which crossings the deck holds (pixelav_converter.py --select):
+#                             through = only those PIXELAV's straight track through the full silicon
+#                             thickness reproduces, their true path within the tolerance of that line;
+#                             all = every crossing the driver simulates (default: the converter's, through)
+#   CALOMAPS_PATH_TOLERANCE   largest |true path / straight chord - 1| of a `through` deck
+#                             (pixelav_converter.py --path-tolerance; default: the converter's, 0.05)
 #
 # Usage, from the checkout, with the Key4hep stack sourced (on EAF: a JupyterLab terminal, after
 # `source ~/setup_calomaps.sh`):
@@ -37,7 +43,9 @@
 #   pixelav_segments_<tag><E>_<N>evt.pixelav.txt      the 7-column badeaa3 PIXELAV deck (the hand-off file):
 #       cot_alpha cot_beta ppion[GeV/c] flipped modx=v[um] mody=u[um] pT=|p|[GeV/c]
 #   pixelav_segments_<tag><E>_<N>evt.pixelav.txt.columns.txt   column legend (units and definitions)
-#   pixelav_segments_<tag><E>_<N>evt.{json,csv}       per-crossing records (18 fields each)
+#                                        and the selection counts: crossings written and left out, why
+#   pixelav_segments_<tag><E>_<N>evt.{json,csv}       per-crossing records, every crossing (20 fields
+#                                        each; deck_line = its line in the deck or 0, deck_drop = why not)
 # With --fullcascade it ALSO makes the calorimeter cascade (for notebook 05 / notebook 07), always
 # one event: the same seed makes it the first event of the tracker run, with the calorimeter readout.
 #   fullcascade_<tag><E>_1evt.root + .npz
@@ -119,7 +127,10 @@ fi
 
 echo "[3/3] convert -> PIXELAV deck (variant C tracker, badeaa3 layout)"
 SEG_PREFIX="$OUT_DIR/pixelav_segments_${TAG}${ETAG}${NTAG}${SI_TAG}"
-"$PY" "$REPO_DIR/analysis/pixelav_converter.py" "$TRK_NPZ" "$SEG_PREFIX"
+SELECT=()
+[ -n "${CALOMAPS_DECK_SELECT:-}" ] && SELECT+=(--select "$CALOMAPS_DECK_SELECT")
+[ -n "${CALOMAPS_PATH_TOLERANCE:-}" ] && SELECT+=(--path-tolerance "$CALOMAPS_PATH_TOLERANCE")
+"$PY" "$REPO_DIR/analysis/pixelav_converter.py" "$TRK_NPZ" "$SEG_PREFIX" ${SELECT[@]+"${SELECT[@]}"}
 
 if [ "$DO_FULL" = "1" ]; then
   echo "[+] full calorimeter cascade (for notebook 05 / notebook 07)"
@@ -135,6 +146,6 @@ echo
 echo "DONE. PIXELAV hand-off package:"
 echo "  deck    : $SEG_PREFIX.pixelav.txt"
 echo "            (7 cols: cot_alpha cot_beta ppion[GeV/c] flipped modx=v[um] mody=u[um] pT=|p|[GeV/c])"
-echo "  legend  : $SEG_PREFIX.pixelav.txt.columns.txt   (units and definitions)"
-echo "  records : $SEG_PREFIX.json / .csv   (18 fields per crossing)"
+echo "  legend  : $SEG_PREFIX.pixelav.txt.columns.txt   (units, definitions, selection counts)"
+echo "  records : $SEG_PREFIX.json / .csv   (every crossing, 20 fields; deck_line, deck_drop)"
 echo "  source  : $TRK_NPZ   (MCParticle cascade + tracker-hit arrays)"

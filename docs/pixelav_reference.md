@@ -198,8 +198,10 @@ path if CALOMAPS ever wants CMS-style templates.
 
 ### The CALOMAPS per-crossing record — authoritative schema
 
-`pixelav_converter.py` writes, next to the deck, a `.json`/`.csv` with one 18-field record per
-crossing (the provenance behind every deck line). Coordinates: **u** = across-pitch (tangential),
+`pixelav_converter.py` writes, next to the deck, a `.json`/`.csv` with one 20-field record per
+crossing, every crossing whether or not it is in the deck (the provenance behind every deck line):
+the 18 fields of `analysis/sensor_crossings.py` and the converter's `deck_line` and `deck_drop`.
+Coordinates: **u** = across-pitch (tangential),
 **v** = cylinder-z, **w** = sensor depth (outward face normal); all lengths in **mm** here (the
 deck's length labels are in µm).
 
@@ -219,14 +221,33 @@ deck's length labels are in µm).
 | `n_steps` | – | Geant4 steps merged into this record (variant C: 1 combined hit) |
 | `time_ns` | ns | crossing time (deck's `hittime` label is this ×1000, in ps, smartpix layout only) |
 | `variant` | – | `C` (tracker truth), `A` (calo step truth), `B` (pixel centroid fallback) |
-| `flags` | – | provenance markers: `tracker_hit`, `dir_from_momentum`, `pixel_centroid`, `grazing` |
+| `flags` | – | provenance markers: `tracker_hit`, `dir_from_momentum`, `pixel_centroid`, `grazing`; variant **C** also `outside_si` (hit position outside its Si slab), `starts_in_si` / `stops_in_si` (the particle's vertex / endpoint within the slab's depth range) |
 | `evt_id` | – | event of the crossing: its entry number in the simulation's ROOT file (0 for an npz without event ids, which holds one event) |
 | `path_length_mm` | mm | variant **C**: the hit's Geant4 path length in the Si (`pathLength`, summed over the hit's steps); **A**/**B**: NaN |
+| `deck_line` | – | the record's line number in the deck, from 1; 0 when it has none (converter records only) |
+| `deck_drop` | – | why it has no deck line, empty when it has one (converter records only; reasons below) |
 
 Deck-column ↔ record mapping (badeaa3 7-col): `cot_alpha cot_beta ppion flipped modx mody pT` =
 `cot_alpha`, `cot_beta`, `p·(m_π/m_particle)` (βγ-matched), `flipped`, `entry_v·1000` (µm),
-`entry_u·1000` (µm), `p_GeV`. Grazing records (|cot| > 10 or non-finite) are skipped at deck
-writing and counted in the converter's summary line.
+`entry_u·1000` (µm), `p_GeV`.
+
+Which crossings get a deck line (`pixelav_converter.deck_drop_reason`, first match wins).
+PIXELAV simulates every deck line as a straight track through the full silicon thickness at
+constant momentum, so a crossing is left out when it is
+
+- `grazing`: a non-finite slope;
+- `steep`: |cot_alpha| or |cot_beta| > 10, for which the driver writes no cluster;
+- `outside_si`: flagged so;
+- `path_short` / `path_long`: its `path_length_mm` differs from the straight chord
+  `thickness·√(1 + cot_alpha² + cot_beta²)` by more than `--path-tolerance` (default 5%): it
+  starts or stops in the silicon, or scatters or curls in it.
+
+`--select through` (the default; `CALOMAPS_DECK_SELECT` in the wrapper) leaves all of these out,
+`--select all` only the grazing and steep ones. Records without a path length (variants A and B)
+pass the path tests and are counted as `path_unknown`. The deck legend carries the counts and the
+share of the deposited energy per reason; in 20-event 50 GeV photon samples `through` writes 55%
+(320 µm) to 65% (100 µm) of the crossings, carrying 41–43% of the energy; the crossings left out
+are mostly electrons below a few MeV/c.
 
 ### Open decisions (need the collaboration / Swartz)
 
