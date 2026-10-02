@@ -331,12 +331,17 @@ python3 analysis/pixelav/charge_maps.py $P
   `nproc` at a time (default: the number of parts, at most 8), with the driver's seed (default
   1). Each part gives `<prefix>.partNNN.out` (clusters, last time slice) and `<prefix>.partNNN.log`;
   a single `<prefix>.jobs.txt` gives `<prefix>.out` and `<prefix>.log`. Existing outputs are
-  overwritten. It prints the totals and exits 1 when a part fails. The run directory must be the
-  one the jobs were built for. `<prefix>.run.json` records the run (driver seed, sha256 of the
+  overwritten, and a part's old `.out` is removed before it runs. It prints the totals and exits 1
+  when a part fails. The run directory must be the one the jobs were built for. Before running
+  anything it refuses job files other than the parts `<prefix>.jobs.npz` names (a rerun of
+  `deposit_jobs.py` with another `--parts` removes those of the earlier run) and a sensor model
+  with a magnetic field. `<prefix>.run.json` records the run (driver seed, sha256 of the
   sensor files and the driver, the PIXELAV and CALOMAPS commits, host, time, totals, failed
   parts); `charge_maps.py` stores it in the charge maps.
 - A job's cluster depends only on the seed and its job id, so the result does not depend on how
-  the jobs were split into parts. Parts are the unit of parallelism: write at least as many as the
+  the jobs were split into parts. Every job set numbers its jobs from 0, so two job sets run with
+  the same seed reuse the same random streams: give each job set its own seed when several are to
+  be combined. Parts are the unit of parallelism: write at least as many as the
   cores you will use (`CALOMAPS_JOB_PARTS`).
 - One jobs file by hand, in the run directory after `ulimit -s unlimited`:
   `./ppixelav2_inject_deposits <jobs_file> <out_file> [seed] [last|all]` (seed default 1; `last`,

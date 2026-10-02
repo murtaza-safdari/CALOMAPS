@@ -10,10 +10,17 @@
 #                       wgt_pot.init and the driver); it must be the one the jobs were built for
 #   nproc               parts run at the same time (default: the number of parts, at most 8)
 #   seed                the driver's seed (default 1); a job's cluster depends on (seed, job id)
-#                       only, so the result does not depend on how the jobs were split into parts
+#                       only, so the result does not depend on how the jobs were split into parts.
+#                       Every job set numbers its jobs from 0, so two job sets run with the same
+#                       seed reuse the same random streams: give each job set its own seed when
+#                       several are to be combined.
 #
 # Each part <prefix>.partNNN.txt gives <prefix>.partNNN.out (clusters, last time slice) and
-# <prefix>.partNNN.log. Existing outputs are overwritten. Exit 1 when any part fails.
+# <prefix>.partNNN.log. Existing outputs are overwritten; a part's old .out (or .out.gz) is
+# removed before it runs. Exit 1 when any part fails. Refused before anything runs: job files
+# other than the parts <prefix>.jobs.npz names (its `parts`), and a sensor model with a magnetic
+# field (analysis/pixelav/sensor_model.py --require-zero-bfield), since the window frame of the
+# jobs is the mirror image of the sensor's. Needs python3 (CALOMAPS_PY), standard library only.
 # <prefix>.run.json records the run, also when a part fails (analysis/pixelav/charge_maps.py
 # stores it): driver seed, nproc, parts and the failed ones, the sensor title (ppixel2.init line
 # 1) and "xsize ysize thick" (line 2 of the first finished part's output), sha256 of
@@ -26,19 +33,44 @@ set -euo pipefail
 ulimit -s unlimited 2>/dev/null || ulimit -s 65520 2>/dev/null || true
 
 if [ $# -lt 2 ] || [ $# -gt 4 ]; then
-  sed -n '2,23p' "$0"; exit 1
+  sed -n '2,30p' "$0"; exit 1
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="$1"; RUN="$(cd "$2" && pwd)"; SEED="${4:-1}"
 DRIVER="$RUN/ppixelav2_inject_deposits"
+PY="${CALOMAPS_PY:-python3}"
 [ -x "$DRIVER" ] || { echo "[deposit-jobs] ERROR: no ppixelav2_inject_deposits in $RUN (run setup/setup_pixelav.sh)"; exit 1; }
+MODEL="$("$PY" "$SCRIPT_DIR/sensor_model.py" --summary "$RUN" --require-zero-bfield 2>&1)" || {
+  echo "[deposit-jobs] ERROR: the sensor model in $RUN cannot be used (unreadable, or with a magnetic field, which the jobs' mirrored window frame does not allow):"
+  printf '%s\n' "$MODEL"; exit 1; }
 
 case "$PREFIX" in /*) ;; *) PREFIX="$PWD/$PREFIX" ;; esac
+# the parts deposit_jobs.py wrote last: the int64 scalar `parts` of <prefix>.jobs.npz
+[ -f "$PREFIX.jobs.npz" ] || { echo "[deposit-jobs] ERROR: no $PREFIX.jobs.npz (deposit_jobs.py writes it with the jobs)"; exit 1; }
+NPARTS="$("$PY" - "$PREFIX.jobs.npz" <<'PY'
+import struct, sys, zipfile
+b = zipfile.ZipFile(sys.argv[1]).read("parts.npy")
+if b"'descr': '<i8'" not in b[:128] or b"'shape': ()" not in b[:128]:
+    sys.exit("parts is not an int64 scalar")
+print(struct.unpack("<q", b[-8:])[0])
+PY
+)" || { echo "[deposit-jobs] ERROR: cannot read the number of parts from $PREFIX.jobs.npz"; exit 1; }
+PARTS=()
+if [ "$NPARTS" -eq 1 ]; then
+  PARTS=("$PREFIX.jobs.txt")
+else
+  for ((i = 0; i < NPARTS; i++)); do PARTS+=("$(printf '%s.part%03d.txt' "$PREFIX" "$i")"); done
+fi
 shopt -s nullglob
-PARTS=("$PREFIX".part[0-9][0-9][0-9].txt)
+FOUND=("$PREFIX".part[0-9][0-9][0-9].txt)
 shopt -u nullglob
-[ ${#PARTS[@]} -gt 0 ] || PARTS=("$PREFIX.jobs.txt")
-[ -f "${PARTS[0]}" ] || { echo "[deposit-jobs] ERROR: no $PREFIX.partNNN.txt and no $PREFIX.jobs.txt"; exit 1; }
+[ -f "$PREFIX.jobs.txt" ] && FOUND+=("$PREFIX.jobs.txt")
+if [ "$(printf '%s\n' ${FOUND[@]+"${FOUND[@]}"} | sort)" != "$(printf '%s\n' "${PARTS[@]}" | sort)" ]; then
+  echo "[deposit-jobs] ERROR: $PREFIX.jobs.npz names $NPARTS part(s): $(printf '%s ' "${PARTS[@]##*/}")"
+  echo "[deposit-jobs]        the job files of this prefix are: $(printf '%s ' ${FOUND[@]+"${FOUND[@]##*/}"})"
+  echo "[deposit-jobs]        rerun deposit_jobs.py for this prefix, which removes the job files of an earlier run"
+  exit 1
+fi
 NPROC="${3:-$(( ${#PARTS[@]} < 8 ? ${#PARTS[@]} : 8 ))}"
 
 TITLE="$(head -1 "$RUN/ppixel2.init" || true)"
@@ -47,7 +79,7 @@ START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cd "$RUN"
 START=$SECONDS
 printf '%s\n' "${PARTS[@]}" | xargs -P "$NPROC" -I{} bash -c \
-  'p="$1"; o="${p%.txt}"; o="${o%.jobs}"; "$2" "$p" "$o.out" "$3" last > "$o.log" 2>&1 || echo "[deposit-jobs] FAILED: $p (see $o.log)"' _ {} "$DRIVER" "$SEED"
+  'p="$1"; o="${p%.txt}"; o="${o%.jobs}"; rm -f "$o.out" "$o.out.gz"; "$2" "$p" "$o.out" "$3" last > "$o.log" 2>&1 || echo "[deposit-jobs] FAILED: $p (see $o.log)"' _ {} "$DRIVER" "$SEED"
 
 FAIL=0; JOBS=0; PAIRS=0; OUTSIDE=0; FAILED=(); FIRST_OUT=""
 for p in "${PARTS[@]}"; do

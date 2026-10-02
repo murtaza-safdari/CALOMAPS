@@ -346,7 +346,8 @@ Both drivers use the same PIXELAV frame:
   collected at z = `thick`.
 
 (v, u, w) is the mirror image of the right-handed (u, v, w). A sensor model without a magnetic
-field cannot tell the two apart; `deposit_jobs.py` refuses a model with a field.
+field cannot tell the two apart; `deposit_jobs.py` and `run_deposit_jobs.sh` refuse a model with
+a field.
 
 The two routes put the pixel boundaries half a pixel apart, along both x and y:
 

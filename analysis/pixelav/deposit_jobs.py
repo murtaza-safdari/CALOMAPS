@@ -32,12 +32,14 @@ the energy by length. Steps of neutral particles (photons absorbed in the silico
 segments like any other; in 50 GeV photon showers they hold 0.01-0.04% of the deposited energy.
 
 FRAME: sensor-local u (across the stave), v (along the barrel axis) and w (outward normal) of the
-hit's cellID module and layer (sensor_crossings.tracker_hit_frame), in um. The window frame is
+hit's cellID module and layer (sensor_crossings.tracker_hit_frame), in um. The window axes are
 the stock deck's (pixelav_converter.py): PIXELAV x = v with the sensor model's first pitch
 (xsize) and the WINDOW_X side of the window, y = u with the second pitch (ysize) and the WINDOW_Y
-side, z = w - w_centre + thick/2, from 0 on the inner face to thick on the outer one. (v, u, w)
-is the mirror image of the right-handed (u, v, w), which a sensor model without a magnetic field
-cannot tell apart; a model with a field is refused.
+side, z = w - w_centre + thick/2, from 0 on the inner face to thick on the outer one. The pixel
+grid is not the deck's: the track route centres its pixels on multiples of the pitch, this one
+puts pixel boundaries there (TILES), half a pixel away along both x and y. (v, u, w) is the
+mirror image of the right-handed (u, v, w), which a sensor model without a magnetic field cannot
+tell apart; a model with a field is refused.
 
 TILES: every sensor plane has one pixel grid, pixel iv = floor(v/xsize), iu = floor(u/ysize),
 covered by tiles of TILE_X x TILE_Y pixels: the WINDOW_X x WINDOW_Y window less a GUARD-pixel band
@@ -63,6 +65,9 @@ pairs at EV_PER_PAIR (default MAX_PAIRS) is split into jobs with the same window
 per job, and it refuses a job that reaches DRIVER_PAIRS (its NEHSTORE). Job ids run from 0 in the
 order (group, tile, split).
 
+EVENTS: --events A:B takes the event ids A..B-1. The npz's num_events extracted entries are
+consecutive and hold every event id in it; a range outside them is refused, nothing written.
+
 OUTPUTS:
   <prefix>.jobs.txt, or with --parts N the files <prefix>.part000.txt ... of roughly equal energy,
       each holding whole jobs in job_id order:
@@ -70,7 +75,7 @@ OUTPUTS:
         <x1> <y1> <z1> <x2> <y2> <z2> <edep_eV>      n_seg lines, um in the window frame
   <prefix>.jobs.npz   per job (job_*): job_id, evt_id, module, layer, group_id, tile_v, tile_u,
       win_iv0, win_iu0 (the global pixel of window column 0 and row 0), n_seg, edep_keV, n_split
-      (jobs its group and tile were split into), part; per group (group_*): group_id, evt_id,
+      (the jobs made of its group and tile), part; per group (group_*): group_id, evt_id,
       module, layer, root (the root particle's index in the npz particle arrays), root_pdg,
       root_p_MeV (|p| at the root's first step in the plane), n_particles, n_steps, edep_keV,
       path_um (sum of the step lengths), w_min_um, w_max_um (extent of the clipped segments in
@@ -80,7 +85,9 @@ OUTPUTS:
       hit_mode, particles_kept, num_events and tcellID_encoding.
   <prefix>.summary.txt   the summary this script prints.
 Nothing is written unless the energy of the jobs equals that of the steps (relative 1e-9) and
-every piece lies within its window's tile, give or take half a piece.
+every piece lies within its window's tile, give or take half a piece. The job files of the same
+prefix that this run does not write (<prefix>.jobs.txt or <prefix>.partNNN.txt of an earlier run
+with another --parts) are removed once the new ones and the tables are written, and named.
 
 Sensor facts come from a PIXELAV run directory's ppixel2.init and wgt_pot.init
 (sensor_model.read_run_dir: thick, xsize, ysize), or from --pitch-x-um and --pitch-y-um with the
@@ -88,7 +95,7 @@ npz's silicon thickness (or --thick-um). A sensor thickness more than 1 um from 
 refused. --check-sensor checks the sensor facts against the silicon of a config root and exits,
 so a wrapper can stop before it simulates.
 """
-import argparse, math, os, sys
+import argparse, math, os, re, sys
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -164,8 +171,10 @@ def check_piece(piece_um, sensor):
                          f"guard band of {GUARD * min(sensor['xsize'], sensor['ysize']):g} um")
 
 
-def _event_range(spec, evt):
-    """[first, stop) of the event ids --events A:B selects (default: every event of evt)."""
+def _event_range(spec, evt, ids=None, n_events=None):
+    """[first, stop) of the event ids --events A:B selects (default: every event of evt).
+    SystemExit for a range outside the npz's n_events extracted entries, which are consecutive
+    and hold every event id in ids (None: not checked)."""
     lo, hi = (int(evt.min()), int(evt.max()) + 1) if evt.size else (0, 0)
     if spec is None:
         return lo, hi
@@ -179,6 +188,13 @@ def _event_range(spec, evt):
         raise SystemExit(f"--events {spec!r}: expected A:B, the event ids A..B-1") from None
     if not first < stop:
         raise SystemExit(f"--events {spec!r} selects no event")
+    if n_events is not None and ids is not None and ids.size:
+        # the first extracted entry s lies in s_lo..s_hi; A..B-1 must fit in s..s+n_events-1
+        s_lo, s_hi = max(0, int(ids.max()) - n_events + 1), int(ids.min())   # ids are ROOT entries, >= 0
+        if max(s_lo, stop - n_events) > min(s_hi, first):
+            held = (f"the events {s_hi}..{s_hi + n_events - 1}" if s_lo == s_hi else
+                    f"{n_events} consecutive events, among them the ids {s_hi}..{int(ids.max())}")
+            raise SystemExit(f"--events {spec!r}: the npz holds {held}; nothing written")
     return first, stop
 
 
@@ -292,6 +308,8 @@ def build_block(S, P, sensor, thick_um, si_thick_mm, piece_um, max_pairs=MAX_PAI
     if (job_e / EV_PER_PAIR + (stop - start) >= DRIVER_PAIRS).any():
         raise RuntimeError(f"a job may make {DRIVER_PAIRS} pairs, which the driver refuses")
     jt = tile_of[start]
+    # a share that holds no piece's midpoint (a large piece spans it) makes no job: count the jobs made
+    n_made = np.bincount(jt, minlength=len(tile_start))
 
     # window frame of each piece's job
     cx = (tv * TILE_X - GUARD + CENTRE_X + 0.5) * xs
@@ -303,7 +321,7 @@ def build_block(S, P, sensor, thick_um, si_thick_mm, piece_um, max_pairs=MAX_PAI
     jobs = {"evt_id": P["evt_id_particle"][root][jg], "module": G["module"][jg],
             "layer": G["layer"][jg], "group_id": jg, "tile_v": tv[start], "tile_u": tu[start],
             "win_iv0": tv[start] * TILE_X - GUARD, "win_iu0": tu[start] * TILE_Y - GUARD,
-            "n_seg": stop - start, "edep_keV": job_e / 1e3, "n_split": n_split[jt],
+            "n_seg": stop - start, "edep_keV": job_e / 1e3, "n_split": n_made[jt],
             "start": start, "stop": stop, "e_eV": job_e}
 
     # per group: totals over its steps and the extent of its clipped segments
@@ -392,9 +410,27 @@ def _load(npz, events):
         raise SystemExit(f"{npz}: tracker-hit particle links outside the particle arrays")
     if np.any(np.diff(S["evt_id_hit"]) < 0):
         raise SystemExit(f"{npz}: the step hits are not in event order")
-    first, stop = _event_range(events, S["evt_id_hit"])
+    n_events = int(d["num_events"]) if "num_events" in d else None
+    first, stop = _event_range(events, S["evt_id_hit"],
+                               np.concatenate([P["evt_id_particle"], S["evt_id_hit"]]), n_events)
     keep = [k for k in d.files if k.startswith(("sim_", "geo_")) or k in _COPIED]
     return S, P, (first, stop), {k: d[k] for k in keep}
+
+
+def job_file_names(prefix, parts):
+    """The job files of prefix with `parts` parts: <prefix>.jobs.txt, or <prefix>.part000.txt ..."""
+    return ([f"{prefix}.jobs.txt"] if parts == 1 else
+            [f"{prefix}.part{i:03d}.txt" for i in range(parts)])
+
+
+def other_job_files(prefix, names):
+    """The files named like job files of prefix (<prefix>.jobs.txt, <prefix>.partNNN.txt) that are
+    not among names, sorted."""
+    folder, base = os.path.split(os.path.abspath(prefix))
+    pattern = re.compile(re.escape(base) + r"\.(?:jobs|part[0-9]{3})\.txt\Z")
+    keep = {os.path.abspath(n) for n in names}
+    return sorted(p for p in (os.path.join(folder, f) for f in os.listdir(folder) if pattern.match(f))
+                  if p not in keep)
 
 
 def _percentiles(x):
@@ -454,8 +490,7 @@ def main(argv=None):
     e_total = float(S_all["tedep"][lo:hi].sum()) * 1e9
     if hi == lo or not e_total > 0:
         sys.exit(f"deposit_jobs: {args.npz}: no step deposits in events {first}..{stop - 1}")
-    names = ([f"{args.prefix}.jobs.txt"] if args.parts == 1 else
-             [f"{args.prefix}.part{i:03d}.txt" for i in range(args.parts)])
+    names = job_file_names(args.prefix, args.parts)
     os.makedirs(os.path.dirname(os.path.abspath(args.prefix)), exist_ok=True)
     files = [open(n + ".partial", "w") for n in names]
     J, Gr, n_pieces, e_done, e_steps, n_out, n_groups, n_jobs_done = [], [], 0, 0.0, 0.0, 0, 0, 0
@@ -523,6 +558,12 @@ def main(argv=None):
         events_first=np.int64(first), events_stop=np.int64(stop),
         source_npz=np.array(os.path.abspath(args.npz)),
         **prov)
+    # job files of an earlier run with another --parts would be run with these (run_deposit_jobs.sh)
+    stale = other_job_files(args.prefix, names)
+    for p in stale:
+        os.remove(p)
+    if stale:
+        print(f"removed the job files of an earlier run of this prefix: {', '.join(stale)}")
 
     n_steps = int(grp["n_steps"].sum())
     step_um = float(prov["geo_si_step_mm"]) * 1e3 if "geo_si_step_mm" in prov else math.nan
