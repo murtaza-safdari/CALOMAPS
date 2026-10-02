@@ -9,9 +9,9 @@ Geant4's TRACKER sensitive action instead of the calorimeter action:
 
 A tracker SD produces SimTrackerHits, which DO carry momentum[3], position[3], pathLength, EDep,
 time and a link to the producing MCParticle -- i.e. one record per charged-track crossing of a Si
-sensor, with the true Geant4 momentum at that crossing. (The hit position is the action's
-energy-weighted COMBINED position over the crossing, ~the sensor mid-plane -- not the
-entry-face point; see notebooks 06/07.) Same gun, physics and seed (CALOMAPS_SEED, default
+sensor, with the true Geant4 momentum at that crossing. (The hit position is the midpoint of
+the hit's first and last step points, which for a straight through-going track is where it
+crosses the sensor mid-plane -- not the entry-face point; see notebooks 06/07.) Same gun, physics and seed (CALOMAPS_SEED, default
 424242) as run_sim_fullcascade.py, so the shower is identical; only the Si readout differs.
 
 This is a SEPARATE run from the calorimeter one: notebook 05 (shower display) and notebook 07's
@@ -89,9 +89,10 @@ SIM.part.printEndTracking = False
 SIM.part.printStartTracking = False
 
 # ---- THE KEY LINE: read the ECal Si out as a TRACKER -> SimTrackerHits with momentum ----
-# Geant4TrackerWeightedAction combines the steps of one sensor crossing into a single hit with an
-# energy-weighted position (~mid-crossing, not the entry face) and the track momentum; one hit
-# per crossing = one crossing record.
+# Geant4TrackerWeightedAction combines the steps of one sensor crossing into a single hit whose
+# position is the midpoint of its first and last step points (the mid-plane point of a straight
+# through-going track, not the entry face) and whose momentum is the mean of the momenta there;
+# one hit per crossing = one crossing record.
 SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
 
 # ---- default output name: event count and silicon thickness from the ddsim command line ----

@@ -209,7 +209,7 @@ deck's length labels are in µm).
 | `layer_id` | – | Si layer 0–29 (0 = innermost): the `layer` field of the hit's readout `cellID` when the npz has it (`tlayer`), else the layer nearest in depth |
 | `pdg` | – | PDG code of the crossing particle |
 | `p_GeV` | GeV | \|p\| — variant **C**: true Geant4 momentum *at the crossing*; **A**/**B**: momentum at production |
-| `entry_u`, `entry_v` | mm | sensor-local impact point. Variant **C**: `Geant4TrackerWeightedAction`'s energy-weighted mid-crossing position (~mid-plane), **not** the entry face; **A**: earliest-in-time step position |
+| `entry_u`, `entry_v` | mm | sensor-local impact point. Variant **C**: the `Geant4TrackerWeightedAction` hit position, the midpoint of the hit's first and last step points, which for a straight through-going track is where it crosses the Si mid-plane; **not** the entry face; **A**: earliest-in-time step position |
 | `cot_alpha` | – | `p_u / p_w` (drives PIXELAV's 13-px/Lorentz **y** axis in our driver) |
 | `cot_beta` | – | `p_v / p_w` (drives PIXELAV's 21-px **x** axis) |
 | `flipped` | 0/1 | 1 = outward-going (`p_w ≥ 0`) → driver entry face `z = 0`; 0 → `z = thick` |
@@ -237,8 +237,9 @@ writing and counted in the converter's summary line.
    built by `setup/setup_pixelav.sh`)
    already injects the deck's truth impact (reduced mod-pitch); the collaboration still has to
    choose which mode their production runs use. Note the "entry" we carry is the
-   energy-weighted **mid-crossing** position from `Geant4TrackerWeightedAction` (~sensor
-   mid-plane), not the entry-face point — the driver back-projects it to the entry face using
+   `Geant4TrackerWeightedAction` hit position, the midpoint of the hit's first and last step
+   points — for a straight through-going track the point where it crosses the sensor
+   **mid-plane** — not the entry-face point; the driver back-projects it to the entry face using
    the track angles, exactly as stock PIXELAV does with its randomized mid-plane impact.
 3. ~~**cot axis/sign** for our sensor orientation (the public copies disagree on x↔y)~~ —
    **resolved** for the patched driver this project targets — the pairing is verified against

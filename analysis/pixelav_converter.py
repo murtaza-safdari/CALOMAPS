@@ -16,8 +16,9 @@ PIXELAV is effectively TWO stages:
     - cot(alpha)=p_u/p_w, cot(beta)=p_v/p_w   (w = sensor radial normal / depth axis)
     - momentum magnitude |p|           (sets betagamma / dE/dx regime: MIP vs soft e-)
     - particle type
-    - local impact point (u, v) -- for the tracker path this is the energy-weighted
-      mid-crossing position (~sensor mid-plane), NOT the entry face. NOTE: stock PIXELAV
+    - local impact point (u, v) -- for the tracker path this is the midpoint of the hit's
+      first and last step points, which for a straight through-going track is where it
+      crosses the sensor mid-plane, NOT the entry face. NOTE: stock PIXELAV
       randomizes the impact over the central 3x3 pixels internally, so the impact is carried
       only as a LABEL (for matching) unless the PIXELAV wrapper is patched to read it (ours
       is: analysis/pixelav/ppixelav2_list_trkpy_real_entry.c). See docs/pixelav_reference.md.
@@ -101,8 +102,9 @@ _VARIANT_TERMS = {
         slope_u="p_u/p_w, the direction slope du/dw",
         slope_v="p_v/p_w, the direction slope dv/dw",
         outward="p_w >= 0",
-        impact=("the impact point, the hit's energy-weighted mid-crossing position (about the Si "
-                "mid-plane), not the entry face"),
+        impact=("the impact point, the midpoint of the hit's first and last step points, which for "
+                "a straight through-going track is where it crosses the Si mid-plane; not the "
+                "entry face"),
         p="the total |p| at the crossing",
         time="crossing time",
         route=("# these are the tracker-route (variant C) definitions; analysis/sensor_crossings.py "

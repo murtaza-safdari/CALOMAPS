@@ -18,9 +18,10 @@ Provenance of the numbers (two independent routes, cross-checked in notebooks 06
   PRIMARY (variant C): sim/run_sim_trackermom.py reads the ECal silicon out as a Geant4
   TRACKER (Geant4TrackerWeightedAction), so each SimTrackerHit is one combined sensor
   crossing carrying the TRUE Geant4 momentum at that crossing -- no reconstruction at all.
-  NOTE: the action's hit position is the energy-weighted mid-crossing point (~sensor
-  mid-plane for a through-going track), NOT the entry face; the record keeps the
-  entry_u/entry_v field names, but read them as the mid-crossing impact.
+  NOTE: the action's hit position is the midpoint of the hit's first and last step points
+  (HitPositionCombination 2), which for a straight through-going track is the point where it
+  crosses the Si mid-plane, NOT the entry face; the record keeps the entry_u/entry_v field
+  names, but read them as that point.
   CROSS-CHECK (variant A): sim/run_sim_fullcascade.py keeps the silicon as a CALORIMETER
   with per-step truth (enableDetailedShowerMode); steps carry position + time but no
   momentum, so build_segments_A time-orders the steps of each (particle, face) into
@@ -44,12 +45,14 @@ RECORDS: one dict per crossing, fields in this order (build_segments_A/B/C via _
   layer_id           -      Si layer 0..29: the hit's cellID layer (C, when the npz has it), else
                             the layer whose mid-plane is nearest in depth
   pdg                -      PDG code of the particle
-  p_GeV              GeV/c  raw momentum magnitude |p|: at the crossing (C), the particle's
-                            production |p| (A, B). Not the betagamma-matched ppion of a PIXELAV deck
+  p_GeV              GeV/c  raw momentum magnitude |p|: at the crossing (C, the mean of the momenta at
+                            the hit's first and last step points), the particle's production |p|
+                            (A, B). Not the betagamma-matched ppion of a PIXELAV deck
   entry_u, entry_v   mm     impact point in the sensor-local frame (u across the pitch, v along the
-                            barrel axis = global z). C: the hit's energy-weighted mid-crossing
-                            position (about the Si mid-plane), not the entry face; A: the
-                            crossing's earliest step; B: the energy-weighted pixel centroid
+                            barrel axis = global z). C: the midpoint of the hit's first and last
+                            step points, which for a straight through-going track is where it
+                            crosses the Si mid-plane, not the entry face; A: the crossing's
+                            earliest step; B: the energy-weighted pixel centroid
   cot_alpha          -      du/dw of the direction: of the momentum at the crossing (C, = p_u/p_w),
                             of the entry->exit displacement (A; the production momentum when flags
                             holds dir_from_momentum), of the production momentum (B)
@@ -407,9 +410,10 @@ def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, var
     return {
         "track_id": int(mc), "layer_id": int(lay), "pdg": int(pdg), "p_GeV": float(p_mag),
         "entry_u": float(eu), "entry_v": float(ev),           # mm (sensor-local IMPACT point; for
-                                                              # variant C this is the tracker hit's
-                                                              # energy-weighted mid-crossing position
-                                                              # (~mid-plane), NOT the entry face)
+                                                              # variant C the midpoint of the tracker
+                                                              # hit's first and last step points, the
+                                                              # mid-plane point of a straight
+                                                              # through-going track, NOT the entry face)
         "cot_alpha": cot_a, "cot_beta": cot_b,                # direction slopes du/dw, dv/dw
         "flipped": int(dw >= 0),       # direction sign along the sensor normal: 1 = outward-going
         "sensor_normal_phi": float(phi_n), "depth_w_mm": float(ew),
@@ -521,9 +525,10 @@ def build_segments_C(d):
     carrying the TRUE Geant4 momentum at that crossing. So |p|, the direction slopes and the
     impact point are all real per-crossing truth -- no reconstruction, no production-momentum
     fallback, no step time-ordering needed (Geant4TrackerWeightedAction already combines the
-    crossing's steps). NOTE: the hit position is the action's energy-weighted COMBINED position
-    (~sensor mid-plane for a through-going track), not the entry-face point; the record keeps the
-    historical entry_u/entry_v field names, but treat them as the mid-crossing impact."""
+    crossing's steps). NOTE: the hit position is the midpoint of the hit's first and last step
+    points, which for a straight through-going track is where it crosses the Si mid-plane, not
+    the entry-face point; the record keeps the entry_u/entry_v field names, but treat them as
+    that point."""
     thx, thy, thz = np.asarray(d["thx"]), np.asarray(d["thy"]), np.asarray(d["thz"])
     tpx, tpy, tpz = np.asarray(d["tpx"]), np.asarray(d["tpy"]), np.asarray(d["tpz"])
     tedep, ttime, tmc = np.asarray(d["tedep"]), np.asarray(d["ttime"]), np.asarray(d["tmc"]).astype(int)
@@ -539,7 +544,7 @@ def build_segments_C(d):
             n_neutral += 1
             continue
         phi_n = float(phin[j])
-        eu, ev, ew = to_local(float(thx[j]), float(thy[j]), float(thz[j]), phi_n)   # weighted mid-crossing impact (local)
+        eu, ev, ew = to_local(float(thx[j]), float(thy[j]), float(thz[j]), phi_n)   # hit position (local)
         du, dv, dw = to_local(float(tpx[j]), float(tpy[j]), float(tpz[j]), phi_n)    # momentum -> local frame
         p_mag = float(np.sqrt(tpx[j]**2 + tpy[j]**2 + tpz[j]**2))                     # REAL |p| at the crossing
         segs.append(_record(mc, int(layer[j]), pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
