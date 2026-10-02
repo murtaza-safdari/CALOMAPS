@@ -19,7 +19,9 @@ PIXELAV transporting the charge. Section 8 lists what it does not cover; those l
   and the count estimated per reticle from binary maps by 2.5 to 2.8% (trees, small network,
   cluster count). Counting at the edge keeps most of what separates particle counting from hit
   counting.
-- Binary maps saturate. Above about 20 crossings per reticle the hit pixels merge. At the
+- Binary maps lose the count in dense reticles. Above about 20 crossings per reticle most
+  clusters of different crossings touch and merge (62% of them at 21 to 40 crossings, 82% above
+  40), and each crossing there lights fewer than 2 pixels. At the
   density of eight overlaid showers the best binary estimator is then 1.9 to 2.8 times worse
   than the small network on the full charge (1.4 to 1.5 times in single showers). With the same
   network, a 2-bit charge per pixel recovers about 80% of that gap up to 80 crossings.
@@ -247,9 +249,20 @@ Trained on the mix of K = 1, 2, 4, 8 and evaluated at each K. Rms per reticle at
 | `cnn_small_analog` | charge | 0.28 | 0.53 | 0.76 | 1.03 | 1.53 | 2.13 | 3.06 | 4.41 | 6.24 | 14.02 |
 | `analog` (charge sum) | charge | 0.69 | 1.08 | 1.89 | 2.34 | 4.28 | 3.78 | 4.35 | 5.95 | 11.21 | 13.84 |
 
-- Binary maps saturate. A crossing lights 4 pixels on average, but in single showers the
-  reticles with 21 to 40 crossings (mean 28) show 43 hit pixels and those with 41 to 80 (mean 52)
-  show 61: 1.5 and 1.2 pixels per crossing. Above 20 crossings the best binary estimator is 1.9
+- Binary maps lose the count in dense reticles. A crossing lights 4 pixels on average, but in
+  single showers the reticles with 21 to 40 crossings (mean 28) show 43 hit pixels and those
+  with 41 to 80 (mean 52) show 61: 1.5 and 1.2 pixels per crossing. The reticle is far from
+  full (273 pixels). Two things happen, measured on 20 showers without noise, counting the
+  particles that leave more than 1000 e in the reticle (section 7 of
+  `notebooks/10_reticles_one_plane.ipynb` shows this per crossing):
+  - The particles are different. Dense reticles sit in the core, where particles are fast and
+    cross the silicon nearly straight. Each alone lights 1.7 pixels at 21 to 40 per reticle and
+    1.5 above 40, against 4.3 where it is the only one.
+  - Their clusters touch. Shared pixels remove 16% of the hit pixels at 21 to 40 and 25% above
+    40. Touching removes 62% and 82% of the separate clusters (42% already at 13 to 20, 7% at
+    2 to 3).
+
+  Above 20 crossings the best binary estimator is 1.9
   (21 to 40), 2.4 (41 to 80) and 2.8 (above 80) times worse than the network on the full charge.
 - Two bits of charge per pixel, with the same network, recover 84%, 81% and 59% of that gap in
   the three bins.
@@ -352,7 +365,8 @@ at 100 e noise:
 - A higher threshold trades the sparse region against the dense one. At 2000 e the cluster
   count in sparse reticles degrades (0.43 to 0.60: clusters break up) and 0.7% of the crossings
   sit in reticles without any hit (0.2% at 1000 e). The dense reticles improve (13.1 to 10.7
-  above 40 crossings), because fewer pixels fire per crossing and the map saturates later.
+  above 40 crossings): fewer pixels fire per particle (1.0 against 1.2, no noise) and slightly
+  fewer clusters touch (79% merged against 82%).
 - At 4000 e, 12.5% of the crossings sit in reticles without any hit and the total comes out 13%
   low: in 100 um of silicon a crossing makes 10,000 e (median), shared among the pixels it
   passes. The threshold has to stay at or below about 2000 e for this thickness and pitch.
