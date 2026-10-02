@@ -204,6 +204,54 @@ def check_thickness_label(in_path, geo, home):
                      f"silicon; nothing written. The --home for this input is {match}")
 
 
+_RUN_TEXT_KEYS = {"sim_seed": "random.seed", "sim_dd4hep_version": "DD4hepVersion",
+                  "sim_geant4_version": "GEANT4Version", "sim_date_utc": "DateUTC"}
+
+
+def sim_provenance(root_file, in_path):
+    """The sim_* keys the extractors store in their npz, from the ddsim run header of the open
+    EDM4hep file root_file (uproot): its `runs` tree, GPStringKeys / GPStringValues.
+      sim_seed            random.seed, as ddsim recorded it
+      sim_n_events        numberOfEvents: the events ddsim was asked to simulate (-1 when unknown)
+      sim_gun_particle    gun.particle
+      sim_gun_energy_GeV  gun.energy, which ddsim records in MeV (NaN when unknown)
+      sim_dd4hep_version, sim_geant4_version, sim_date_utc   DD4hepVersion, GEANT4Version, DateUTC
+    The header is read only when it holds exactly one run. Without it, particle and energy come
+    from in_path's name as the steering files write it (<prefix>_<tag><E>_..., the tag spelling
+    pi+ as piplus); every other missing text field is "unknown". Returns (fields, source), source
+    saying where particle and energy came from."""
+    params = {}
+    try:
+        runs = root_file["runs"]
+        if runs.num_entries == 1:
+            keys = runs["GPStringKeys"].array(library="ak").tolist()[0]
+            values = runs["GPStringValues"].array(library="ak").tolist()[0]
+            params = {k: v[0] for k, v in zip(keys, values) if len(v) == 1}
+    except (KeyError, IndexError, TypeError, ValueError):   # no run header, or not ddsim's layout
+        params = {}
+    out = {key: np.array(params.get(name, "unknown")) for key, name in _RUN_TEXT_KEYS.items()}
+    try:
+        n_events = int(params["numberOfEvents"])
+    except (KeyError, ValueError):
+        n_events = -1
+    try:
+        energy = float(params["gun.energy"]) / 1000.0
+    except (KeyError, ValueError):
+        energy = math.nan
+    particle = params.get("gun.particle")
+    source = "ddsim run header"
+    if particle is None or not math.isfinite(energy):
+        m = re.search(r"(?:trackermom|fullcascade)_([a-z]+?)([0-9.]+)_", os.path.basename(in_path))
+        if particle is None:
+            particle = m.group(1) if m else "unknown"
+        if not math.isfinite(energy) and m:
+            energy = float(m.group(2))
+        source = "file name" if m else "unknown, no run header and no particle/energy in the file name"
+    out.update(sim_n_events=np.int64(n_events), sim_gun_particle=np.array(particle),
+               sim_gun_energy_GeV=np.float64(energy))
+    return out, source
+
+
 def default_out_prefix(npz, kind):
     """<kind>_X beside npz, X being its file name without .npz and without a leading trackermom_
     or fullcascade_: trackermom_gamma50_1evt_si100um.npz -> sensor_crossings_gamma50_1evt_si100um."""

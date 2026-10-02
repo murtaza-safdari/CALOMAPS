@@ -18,6 +18,10 @@ Defaults: in.root = $CALOMAPS_DATA_BASE/fullcascade/fullcascade_gamma50_1evt.roo
 $CALOMAPS_HOME/models/<in.root's name>.npz (this checkout's models/ without $CALOMAPS_HOME),
 event_index = 0.
 
+One event per npz: evt_id_particle holds its entry number in the file for every MCParticle, and
+the run prints how many events the file holds. The sim_* keys and meta's particle and energy come
+from the file's ddsim run header (sensor_crossings.sim_provenance), else from the file name.
+
 --home is the config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this
 repo); sim/make_pixelav_inputs.sh passes it. The npz records that geometry (geo_si_thick_mm,
 geo_si_centers_mm, geo_cell_size_mm, geo_home; see sensor_crossings.geometry_provenance), and
@@ -25,9 +29,9 @@ the extraction stops before reading the ROOT file if its Si mid-planes are not t
 crossing code assumes, or if the silicon thickness the input's name implies is not the --home
 thickness (an _si<T>um tag names T; an untagged name means this checkout's own geometry).
 """
-import argparse, os, re
+import argparse, math, os
 import numpy as np
-from sensor_crossings import REPO, geometry_provenance, check_thickness_label
+from sensor_crossings import REPO, geometry_provenance, check_thickness_label, sim_provenance
 
 
 def main(argv=None):
@@ -51,14 +55,16 @@ def main(argv=None):
     GEO = geometry_provenance(args.home)   # before any ROOT I/O
     check_thickness_label(IN, GEO, args.home)
 
-    # Stamp provenance honestly: parse particle/energy from the input filename written by the
-    # steering files (<prefix>_<tag><E>_1evt.root); fall back to 'unknown' rather than guessing.
-    _m = re.search(r"(?:trackermom|fullcascade)_([a-z]+?)([0-9.]+)_", os.path.basename(IN))
-    _meta_particle = _m.group(1) if _m else "unknown"
-    _meta_energy = (_m.group(2) + " GeV") if _m else "unknown"
-
     import uproot
-    t = uproot.open(IN)["events"]
+    f = uproot.open(IN)
+    SIM, _ = sim_provenance(f, IN)
+    _meta_particle = str(SIM["sim_gun_particle"])
+    _energy = float(SIM["sim_gun_energy_GeV"])
+    _meta_energy = f"{_energy:g} GeV" if math.isfinite(_energy) else "unknown"
+    t = f["events"]
+    n_file = t.num_entries
+    if not 0 <= EV < n_file:
+        raise SystemExit(f"{IN}: event {EV} is not in the file, which holds {n_file} events")
     br = ["MCParticles.PDG", "MCParticles.mass",
           "MCParticles.momentum.x", "MCParticles.momentum.y", "MCParticles.momentum.z",
           "MCParticles.momentumAtEndpoint.x", "MCParticles.momentumAtEndpoint.y", "MCParticles.momentumAtEndpoint.z",
@@ -118,12 +124,15 @@ def main(argv=None):
         dbeg=dbeg, dend=dend, dau=dau,
         hx=hx, hy=hy, hz=hz, he=he, cellID=cellID,
         cbeg=cbeg, cend=cend, cpdg=cpdg, cE=cE, cslen=cslen, ctime=ctime, csx=csx, csy=csy, csz=csz, cmc=cmc,
+        evt_id_particle=np.full(len(pdg), EV, dtype=np.int32), num_events=np.int64(1),
+        **SIM,
         **GEO,
         meta=np.array([_meta_particle, _meta_energy, "+y pencil beam", "keepAllParticles",
                        "userParticleHandler=off", "enableDetailedShowerMode", "EDM4hep"]),
     )
     _detailed = bool(np.any((csx != 0) | (csy != 0) | (csz != 0)))
     print(f"saved {OUT}")
+    print(f"  event: entry {EV} of the file's {n_file}" + (" (one event per npz)" if n_file > 1 else ""))
     print(f"  geometry: {GEO['geo_si_thick_mm'] * 1e3:g} um Si, config root {GEO['geo_home']}")
     print(f"  n_particles={len(pdg)}  n_hits={len(hx)}  n_contributions={len(cpdg)}")
     print(f"  particle E range (GeV): {E.min():.4f} .. {E.max():.2f}")
