@@ -65,8 +65,11 @@ RECORDS: one dict per crossing, fields in this order (build_segments_A/B/C via _
   time_ns            ns     crossing time: the hit time (C), the earliest step's (A), 0 (B)
   variant            -      "A", "B" or "C"
   flags              -      "|"-separated: tracker_hit (C), dir_from_momentum (A),
-                            pixel_centroid (B), grazing
-  evt_id             -      event of the crossing: its entry number in the simulation's ROOT file
+                            pixel_centroid (B), grazing; for C also, from tracker_hit_slab (the
+                            builders of A and B never set them): outside_si, the hit position
+                            lies outside its Si slab; starts_in_si / stops_in_si, the particle's
+                            production vertex / endpoint lies within the slab's depth range
+  evt_id            -      event of the crossing: its entry number in the simulation's ROOT file
                             (the npz's evt_id_hit (C) or evt_id_particle (A, B)); 0 for an npz
                             without event ids, which holds one event
   path_length_mm     mm     C: the hit's Geant4 path length in the silicon (pathLength, summed
@@ -112,6 +115,9 @@ FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y b
 # from the driver; validate_crossings.py tests it on every run, since a wrong face puts hits
 # outside their slab.
 MODULE0_FACE = 10
+# A tracker hit is inside its Si slab when |w - layer mid-plane| <= thickness/2 + SLAB_TOL_MM: the
+# containment test of validate_crossings.py and the outside_si flag of the records.
+SLAB_TOL_MM = 0.002
 CELLID_ENCODING_KEY = "{}__CellIDEncoding"   # metadata-tree key of a collection's cellID layout
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 # The sim wrappers append _si<T>um to every output name of a silicon-thickness variant run.
@@ -382,6 +388,34 @@ def tracker_hit_frame(d):
     return phin, w, layer
 
 
+def tracker_hit_slab(d, thick_mm):
+    """Depth tests of every tracker hit of the npz d against its own Si slab: thick_mm of silicon
+    centred on the mid-plane of the hit's layer, in the frame of tracker_hit_frame. Returns a dict
+    of per-hit arrays:
+      phin, layer  face-normal azimuth [rad] and layer index (tracker_hit_frame)
+      resid        w - the layer's mid-plane depth [mm]
+      outside      |resid| > thick_mm/2 + SLAB_TOL_MM: the hit position lies outside its slab
+      starts_in    the producing particle's vertex lies within thick_mm/2 of that mid-plane
+      stops_in     its endpoint does
+    starts_in and stops_in project the vertex and endpoint (vsx, vsy / vex, vey of particle tmc)
+    on the hit's face normal: a test of depth only, so a point at the slab's depth on another stave
+    counts as inside. Both are None when d has no vertex and endpoint arrays."""
+    phin, w, layer = tracker_hit_frame(d)
+    centre = si_layer_centers()[layer]
+    half = thick_mm / 2
+    resid = w - centre
+    out = {"phin": phin, "layer": layer, "resid": resid,
+           "outside": ~(np.abs(resid) <= half + SLAB_TOL_MM), "starts_in": None, "stops_in": None}
+    if all(k in d for k in ("vsx", "vsy", "vex", "vey")):
+        mc = np.asarray(d["tmc"]).astype(int)
+        c, s = np.cos(phin), np.sin(phin)
+        w_vtx = np.asarray(d["vsx"], float)[mc] * c + np.asarray(d["vsy"], float)[mc] * s
+        w_end = np.asarray(d["vex"], float)[mc] * c + np.asarray(d["vey"], float)[mc] * s
+        out["starts_in"] = ~(np.abs(w_vtx - centre) > half)
+        out["stops_in"] = ~(np.abs(w_end - centre) > half)
+    return out
+
+
 def to_local(x, y, z, phi_n):
     """Global (x,y,z) -> sensor-local (u across-pitch, v along-z, w radial/depth)."""
     c, s = np.cos(phi_n), np.sin(phi_n)
@@ -536,19 +570,24 @@ def build_segments_C(d):
     evt_h = _event_ids(d, "evt_id_hit")
     pdg_all = d["pdg"]
     assert tmc.size == 0 or (tmc.min() >= 0 and tmc.max() < len(pdg_all)), "trackerhit->MCParticle index out of range"
-    phin, _, layer = tracker_hit_frame(d)     # face and layer: the validator's frame
+    slab = tracker_hit_slab(d, si_thickness_mm(d))   # the frame and slab tests validate_crossings uses
+    phin, layer = slab["phin"], slab["layer"]
+    labels = [("outside_si", slab["outside"]), ("starts_in_si", slab["starts_in"]),
+              ("stops_in_si", slab["stops_in"])]
+    labels = [(name, mask) for name, mask in labels if mask is not None]
     segs, n_neutral = [], 0
     for j in range(len(thx)):
         mc = int(tmc[j]); pdg = int(pdg_all[mc])
         if not bool(is_charged(pdg)):
             n_neutral += 1
             continue
+        flags = "|".join(["tracker_hit"] + [name for name, mask in labels if mask[j]])
         phi_n = float(phin[j])
         eu, ev, ew = to_local(float(thx[j]), float(thy[j]), float(thz[j]), phi_n)   # hit position (local)
         du, dv, dw = to_local(float(tpx[j]), float(tpy[j]), float(tpz[j]), phi_n)    # momentum -> local frame
         p_mag = float(np.sqrt(tpx[j]**2 + tpy[j]**2 + tpz[j]**2))                     # REAL |p| at the crossing
         segs.append(_record(mc, int(layer[j]), pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
-                            float(tedep[j]), 1, "C", "tracker_hit", float(ttime[j]),
+                            float(tedep[j]), 1, "C", flags, float(ttime[j]),
                             0 if evt_h is None else evt_h[j], float(tpath[j])))
     segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
     return segs, {"neutral_hits_skipped": n_neutral, "n_tracker_hits": int(len(thx))}

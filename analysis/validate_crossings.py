@@ -11,7 +11,8 @@ an npz without geometry provenance. --si-thickness-um tests another value; when 
 a different geo_si_thick_mm the run says so and fails, whatever the data show. Both checks use
 the frame the crossing records use, sensor_crossings.tracker_hit_frame: face and layer from the
 hit's cellID module and layer when the npz holds them (tmodule, tlayer), and the layer centres
-of sensor_crossings:
+of sensor_crossings. Their depth tests are sensor_crossings.tracker_hit_slab, which also sets the
+crossing records' outside_si, starts_in_si and stops_in_si flags:
 
   (a) containment: the tracker hits lie in the Si slab of their layer, |w - centre| <=
       thickness/2 + 0.002 mm, w being the depth along the face normal. The hit position is the
@@ -52,7 +53,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sensor_crossings as sc   # noqa: E402
 
-DEPTH_TOL_MM = 0.002
+DEPTH_TOL_MM = sc.SLAB_TOL_MM   # the same tolerance sets the records' outside_si flag
 MAX_OUTSIDE_FRACTION = 1e-3
 P_MIN_GEV = 0.1
 COS_MIN = 0.9
@@ -73,18 +74,12 @@ def path_length_test(d, thick_mm):
     tpx, tpy, tpz = (np.asarray(d[k], float) for k in ("tpx", "tpy", "tpz"))
     tpath, tedep = np.asarray(d["tpath"], float), np.asarray(d["tedep"], float)
     mc = np.asarray(d["tmc"]).astype(int)
-    phin, _, layer = sc.tracker_hit_frame(d)
-    centers = sc.si_layer_centers()
-    half = thick_mm / 2
-    _, _, pw = sc.to_local(tpx, tpy, tpz, phin)
+    slab = sc.tracker_hit_slab(d, thick_mm)
+    _, _, pw = sc.to_local(tpx, tpy, tpz, slab["phin"])
     p = np.sqrt(tpx**2 + tpy**2 + tpz**2)
     cos = np.abs(pw) / np.where(p > 0, p, np.inf)
-    c_hit = centers[layer]
-    cphi, sphi = np.cos(phin), np.sin(phin)
-    w_vtx = np.asarray(d["vsx"], float)[mc] * cphi + np.asarray(d["vsy"], float)[mc] * sphi
-    w_end = np.asarray(d["vex"], float)[mc] * cphi + np.asarray(d["vey"], float)[mc] * sphi
-    through = (np.abs(w_vtx - c_hit) > half) & (np.abs(w_end - c_hit) > half)
-    sel = sc.is_charged(np.asarray(d["pdg"])[mc]) & (p > P_MIN_GEV) & (cos >= COS_MIN) & through
+    through = ~slab["starts_in"] & ~slab["stops_in"]
+    sel =sc.is_charged(np.asarray(d["pdg"])[mc]) & (p > P_MIN_GEV) & (cos >= COS_MIN) & through
     n_sel = int(np.count_nonzero(sel))
     out = {"ok": None, "n_sel": n_sel, "ratio": None, "path_mm": None, "chord_mm": None, "edep_kev": None}
     if n_sel:
@@ -132,9 +127,8 @@ def main(argv=None):
         return 1
 
     cellid = sc.has_cellid_frame(d)
-    _, w, layer = sc.tracker_hit_frame(d)
-    resid = w - sc.si_layer_centers()[layer]
-    outside = ~(np.abs(resid) <= half + DEPTH_TOL_MM)
+    slab = sc.tracker_hit_slab(d, thick)
+    resid, outside = slab["resid"], slab["outside"]
     n_out = int(np.count_nonzero(outside))
     ok_a = n_out <= MAX_OUTSIDE_FRACTION * thx.size
     print("  frame: face and layer from the "
