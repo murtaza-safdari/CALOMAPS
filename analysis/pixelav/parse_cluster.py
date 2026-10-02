@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Parse a PIXELAV cluster output file (pixel_clusters / *.out) and summarize each cluster.
 
-Per cluster: sums the 20 CR-RC time slices into a 13(y) x 21(x) charge map, and reports the
-charge-weighted RMS extent along x (21-px axis) and y (13-px Lorentz axis), plus the header
-momentum components. Used to confirm the cot/axis mapping (cot_alpha -> y/13px, cot_beta -> x/21px)
-and to summarize a full run.
+Reads the files of both CALOMAPS drivers: ppixelav2_list_trkpy_real_entry (one straight track
+per cluster, 20 time slices) and ppixelav2_inject_deposits (one job of energy deposits per
+cluster, the last time slice or all 20).
+
+The time slices are cumulative: slice k holds the charge collected or induced up to time k, so
+a cluster's charge is its LAST time slice, never a sum over slices. Per cluster this reports
+that charge (Qtot) and its charge-weighted RMS extent along x (21-px axis) and y (13-px Lorentz
+axis), plus the header momentum components (list driver) or job id and pair count (injection
+driver). Used to confirm the cot/axis mapping (cot_alpha -> y/13px, cot_beta -> x/21px) and to
+summarize a full run.
 
 The file is read one cluster at a time (iter_clusters), so memory does not grow with the number
 of clusters, apart from one float per cluster kept for the median charge.
@@ -18,16 +24,20 @@ from array import array
 import numpy as np
 
 TY, TX = 13, 21
+HEADER_FIELDS = (9, 10, 5)      # list driver (without / with the deck line number), injection
 
 
 def iter_clusters(path):
     """Yield (hdr, slices) for every <cluster> block of a PIXELAV output file, in file order.
 
-    hdr is the cluster's first 9-field line as a list of strings (hdr[3], hdr[4] are the
-    momentum components along x and y), or None when the block has none. slices is a float
-    array of shape (n_slices, 13, 21): the block's 21-value rows in groups of 13, a trailing
-    incomplete group dropped; n_slices is 0 for a block with fewer than 13 rows. Lines
-    starting with "<" and lines before the first <cluster> are skipped."""
+    hdr is the cluster's header line as a list of strings, or None when the block has none:
+      list driver, 9 or 10 fields: x y z px py pz neh mody pt [deck_line] (hdr[3], hdr[4] are
+        the momentum components along x and y; deck_line is the 1-based deck line);
+      injection driver, 5 fields: job_id neh n_seg edep_eV n_out.
+    slices is a float array of shape (n_slices, 13, 21): the block's 21-value rows in groups of
+    13, a trailing incomplete group dropped; n_slices is 20 or 1 (the last time slice only), 0
+    for a block with fewer than 13 rows. The slices are cumulative: slices[-1] is the charge.
+    Lines starting with "<" and lines before the first <cluster> are skipped."""
     def block(hdr, rows):
         a = np.array(rows, dtype=float).reshape(-1, TX)
         nsl = a.shape[0] // TY
@@ -45,7 +55,7 @@ def iter_clusters(path):
             if rows is None or s.startswith("<"):
                 continue
             p = s.split()
-            if hdr is None and len(p) == 9:
+            if hdr is None and len(p) in HEADER_FIELDS:
                 hdr = p
             elif len(p) == TX:
                 rows.append([float(v) for v in p])
@@ -54,9 +64,10 @@ def iter_clusters(path):
 
 
 def cluster_summary(slices):
-    """(Qtot, x21_rms, y13_rms) of one cluster's slices, or None when its total charge is not
-    positive. Qtot sums every slice; the RMS extents are charge-weighted over the 13 x 21 map."""
-    g = slices.sum(0)                                   # 13(y) x 21(x) total charge
+    """(Qtot, x21_rms, y13_rms) of one cluster, or None when its charge is not positive. Qtot is
+    the charge in the last time slice (the slices are cumulative); the RMS extents are
+    charge-weighted over that slice's 13 x 21 map."""
+    g = slices[-1]                                      # 13(y) x 21(x) charge
     tot = g.sum()
     if tot <= 0:
         return None
@@ -83,18 +94,23 @@ def main(argv=None):
         if summary is None:
             continue
         tot, xrms, yrms = summary
-        px, py = float(hdr[3]), float(hdr[4])
         qtot.append(tot)
         sum_x += xrms
         sum_y += yrms
         if not args.full and i < 12:
-            print(f"cluster {i}: px(->x/21)={px:+.4f} py(->y/13)={py:+.4f} | "
+            if hdr is not None and len(hdr) == 5:
+                label = f"job {hdr[0]} neh={hdr[1]} n_out={hdr[4]}"
+            elif hdr is not None:
+                label = f"px(->x/21)={float(hdr[3]):+.4f} py(->y/13)={float(hdr[4]):+.4f}"
+            else:
+                label = "no header"
+            print(f"cluster {i}: {label} | "
                   f"x21_rms={xrms:.2f} y13_rms={yrms:.2f} | Qtot={tot:.0f}")
 
     if len(qtot):
         q = np.frombuffer(qtot, dtype=float)
         n = len(q)
-        print(f"\n[{n} clusters parsed]  "
+        print(f"\n[{n} clusters parsed; Qtot = last time slice]  "
               f"mean Qtot={q.mean():.0f}  median Qtot={np.median(q):.0f}  "
               f"mean x21_rms={sum_x / n:.2f}  mean y13_rms={sum_y / n:.2f}")
 
