@@ -4,6 +4,7 @@
     python analysis/pixelav/reticles.py <charges.npz> [more charges.npz ...] --out <reticles.npz>
                                         [--overlay K] [--size-x 21 --size-y 13]
                                         [--offset-x 0 --offset-y 0]
+                                        [--truth crossings|particles] [--island-gap 1]
                                         [--truth-cuts 0,500,1000,2000] [--count-radii-mm 2,5,10,20]
 
 The inputs are charges.npz files of analysis/pixelav/charge_maps.py, batches of one sample: the
@@ -27,15 +28,33 @@ module, layer); its image is the sum of the charges of all groups on it. img is 
 electrons, no noise and no threshold, so the analysis applies the readout model (threshold,
 binary hit) and can scan it. Every reticle that holds a pixel row of the inputs is stored.
 
-TRUTH: one part_* row per (reticle, group) with a pixel row inside the reticle. A group is one
-independent charged particle in the plane, with the delta rays and other secondaries it made in
-the slab (deposit_jobs.py, GROUPS): a delta ray counts with its parent, a photon converting in
-the slab gives two. part_q is the group's charge inside the reticle, (part_iv, part_iu) the
-reticle pixel where it left the most, and part_pdg, part_p_MeV, part_created_in_slab those of its
-root. n_true[i, j] counts the groups whose charge inside reticle i exceeds truth_cuts[j] electrons:
-the number of particles a counter should find, for a choice of how much of a particle must lie
-inside the reticle to count. A particle crossing a reticle edge counts in each reticle where its
-share passes the cut.
+TRUTH: the objects a counter should find. A group is one independent charged particle in the
+plane, with the delta rays and other secondaries it made in the slab (deposit_jobs.py, GROUPS): a
+delta ray counts with its parent, a photon converting in the slab gives two. A group is a particle
+in a plane, not a crossing of it: an electron (or a delta ray of the group) that leaves the
+silicon and is scattered back into the same plane is one group with separate clusters, typically
+one to a few millimetres apart. --truth crossings (the default) makes each crossing a truth
+object: the pixels of a group with charge > 0 are split into islands, the connected components
+under the link |iv - iv'| <= 1 + G and |iu - iu'| <= 1 + G, G = --island-gap (default ISLAND_GAP
+= 1: one empty pixel may sit between two linked pixels, which keeps a sparse track whole). A pixel
+with charge <= 0 (the maps hold a few, a fraction of an electron below zero) joins the island of
+its nearest pixel with charge (in mm), so the islands partition the group's pixels; a group with
+no pixel with charge is one island. The islands of a group are numbered from 0 by decreasing
+charge on the plane. --truth particles makes each group one truth object. Islands are labelled
+per group on the global pixel grid, over all events of the inputs and before the overlay, so two
+particles whose footprints touch stay two truth objects.
+
+One part_* row per (reticle, truth object) with a pixel row inside the reticle. part_q is the
+object's charge inside the reticle, (part_iv, part_iu) the reticle pixel where it left the most,
+part_q_total its charge on the whole plane (for a cut on the whole crossing or particle), and
+part_pdg, part_p_MeV, part_created_in_slab those of its group's root. part_id numbers the truth
+objects over all inputs: with crossings, the islands of all groups in group order and then by
+part_island; with particles, the global group id. It is the same in every reticle an object
+reaches and under every --overlay of the same inputs (and --island-gap). n_true[i, j] counts the
+truth objects whose charge inside reticle i exceeds truth_cuts[j] electrons: the number of
+crossings (or particles) a counter should find, for a choice of how much of one must lie inside
+the reticle to count. An object crossing a reticle edge counts in each reticle where its share
+passes the cut.
 
 OVERLAY: --overlay K sums events 0..K-1 into super-event 0, K..2K-1 into 1, and so on; a remainder
 of fewer than K events is dropped. Every shower is fired from GUN_ORIGIN_MM along GUN_DIRECTION
@@ -63,26 +82,39 @@ OUTPUT <reticles.npz>, compressed:
   per reticle (sorted by super_evt, module, layer, rv, ru): img float32 [n, size_y, size_x];
       super_evt, module, layer, rv, ru (int32); r_mm (float64, mm); q_sum (float64, the sum of
       img); n_true int16 [n, n_cuts]
-  per (reticle, group), sorted by reticle and group: part_reticle (row of the reticle arrays),
-      part_group (global group id), part_q (float32, e), part_iv, part_iu (int16, reticle-local
-      pixel), part_pdg (int32), part_p_MeV (float32), part_created_in_slab (bool), part_evt (int32,
-      the global event)
+  per (reticle, truth object), sorted by reticle and part_id (so by group, then island):
+      part_reticle (row of the reticle arrays), part_id (int64, the truth object), part_group
+      (global group id), part_island (int32, the island's number in its group; 0 with
+      --truth particles), part_q (float32, e), part_q_total (float32, e, on the whole plane),
+      part_iv, part_iu (int16, reticle-local pixel), part_pdg (int32), part_p_MeV (float32),
+      part_created_in_slab (bool), part_evt (int32, the global event)
   per plane (sorted by super_evt, module, layer): plane_super_evt, plane_module, plane_layer,
       plane_q, plane_u_axis_mm, plane_v_axis_mm, plane_u_centroid_mm, plane_v_centroid_mm (NaN
       without charge), plane_n_reticles (holding charge), plane_n_within, plane_n_hit_within
       [n_planes, n_radii]
-  scalars: overlay, size_x, size_y, offset_x, offset_y, truth_cuts, count_radii_mm, n_within, n_empty_within
-      [n_radii] (summed over the planes), n_planes, n_reticles, n_parts, n_events, n_super_events,
-      n_events_dropped, axis_module, gun_origin_mm, gun_direction, total_q
+  scalars: truth ("crossings" or "particles"), island_gap (G of the islands; with particles, those
+      of the summary only), overlay, size_x, size_y, offset_x, offset_y, truth_cuts,
+      count_radii_mm, n_within, n_empty_within [n_radii] (summed over the planes), n_planes,
+      n_reticles, n_parts, n_events, n_super_events, n_events_dropped, axis_module, gun_origin_mm,
+      gun_direction, total_q
   inputs: inputs (paths), input_event_offset, input_n_events, input_group_offset, and input_<key>
       for every per-batch key (BATCH_KEYS) and every other scalar that differs between batches;
       the scalars that agree (SAME_KEYS among them) as they are.
 Nothing is written unless the sum of img equals the summed charge of the input pixel rows of the
-events used (relative 1e-6), and every reticle's part_q sum to its img (relative 1e-6 of its
-absolute charge).
+events used (relative 1e-6); every reticle's part_q sum to its img (relative 1e-6 of its
+absolute charge); every pixel row lies in one island of its own group and the islands of each
+group sum to its charge (relative 1e-9 of its absolute charge); no reticle holds two rows of one
+part_id; and no part_q exceeds its part_q_total by more than the summed magnitude of the object's
+pixels with charge < 0 plus relative 1e-6 (float32).
+
+The summary gives, for the groups of the events used, the groups with more than one island above
+ISLAND_Q electrons, the islands and the groups above ISLAND_Q, and the distance between the
+charge-weighted centroids of the two largest islands of those groups.
 """
 import argparse, os, sys
 import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
@@ -93,8 +125,13 @@ GUN_DIRECTION = (0.0, 1.0, 0.0)   # theta = phi = 90 deg: along +y
 SIZE_X, SIZE_Y = 21, 13           # default reticle, pixels along v and u: the PIXELAV window
 TRUTH_CUTS = "0,500,1000,2000"    # electrons
 COUNT_RADII_MM = "2,5,10,20"
+TRUTHS = ("crossings", "particles")
+ISLAND_GAP = 1                    # empty pixels that may sit between two linked pixels of a crossing
+ISLAND_Q = 1000.0                 # electrons: the islands and groups the summary counts
+LABEL_ROWS = 1 << 20              # pixel rows labelled at a time (whole groups)
 AXIS_CHECK_LAYERS = (5, 12)       # first and last layer of the centroid-to-axis summary
 CHECK_REL = 1e-6
+ISLAND_REL = 1e-9                 # islands vs group charge: float64 sums of the same rows
 N_LAYERS = len(sc.si_layer_centers())
 # must agree between batches of one sample
 SAME_KEYS = ("pitch_x_um", "pitch_y_um", "thick_um", "ev_per_pair", "pixelav_title",
@@ -199,6 +236,91 @@ def merge(D):
     return G, P, info
 
 
+def _label_rows(g, v, u, q, gap, pitch_x_um, pitch_y_um):
+    """(label of every row, number of labels) for pixel rows sorted by group, iv, iu and holding
+    whole groups: the islands of TRUTH. Rows with q > 0 of one group are linked when |d iv| and
+    |d iu| are both <= 1 + gap; a row with q <= 0 takes the label of the nearest row with q > 0 of
+    its group in mm (the first in iv, iu order on a tie), and the rows of a group without one share
+    a label."""
+    pos = q > 0
+    ip = np.flatnonzero(pos)
+    r = gap + 1
+    v0, u0 = int(v.min()) - r, int(u.min()) - r
+    nv, nu = int(v.max()) - v0 + r + 1, int(u.max()) - u0 + r + 1
+    if (int(g[-1] - g[0]) + 1) * nv * nu >= 2**62:
+        sys.exit("reticles: the pixel key of the island labelling overflows")
+    # one key per row with charge, ascending since the rows are sorted; a neighbour at (dv, du)
+    # has key + dv * nu + du, and the margin r keeps every neighbour inside its group's key range
+    key = ((g[ip] - g[0]) * nv + (v[ip] - v0)) * nu + (u[ip] - u0)
+    n_pos = len(key)
+    k, lab_pos = 0, np.zeros(0, np.int64)
+    if n_pos:
+        same = np.flatnonzero(key[1:] == key[:-1])
+        a, b = [same], [same + 1]
+        for dv in range(r + 1):
+            for du in range(-r, r + 1):
+                if dv == 0 and du <= 0:
+                    continue
+                t = key + (dv * nu + du)
+                j = np.minimum(np.searchsorted(key, t), n_pos - 1)
+                hit = np.flatnonzero(key[j] == t)
+                a.append(hit)
+                b.append(j[hit])
+        a, b = np.concatenate(a), np.concatenate(b)
+        graph = coo_matrix((np.ones(len(a), np.int8), (a, b)), shape=(n_pos, n_pos)).tocsr()
+        k, lab_pos = connected_components(graph, directed=False)
+    lab = np.empty(len(q), np.int64)
+    lab[ip] = lab_pos
+    rest = np.flatnonzero(~pos)
+    if len(rest):
+        lo, hi = np.searchsorted(g, g[rest], "left"), np.searchsorted(g, g[rest], "right")
+        extra = {}
+        for i, s, e in zip(rest, lo, hi):
+            c = s + np.flatnonzero(pos[s:e])
+            if len(c):
+                d2 = ((v[c] - v[i]) * pitch_x_um) ** 2 + ((u[c] - u[i]) * pitch_y_um) ** 2
+                lab[i] = lab[c[np.argmin(d2)]]
+            else:
+                lab[i] = extra.setdefault(int(g[i]), k + len(extra))
+        k += len(extra)
+    return lab, int(k)
+
+
+def islands(group, iv, iu, q, gap, pitch_x_um, pitch_y_um):
+    """The crossings of TRUTH, for pixel rows of any order: {"row": island of every row, "group":
+    group of every island, "island": index of every island within its group}. Islands are numbered
+    by group and, within a group, by decreasing charge (then by their first pixel in iv, iu order)."""
+    group, iv, iu = (np.asarray(x, np.int64) for x in (group, iv, iu))
+    n = len(group)
+    if not n:
+        return {"row": np.zeros(0, np.int64), "group": np.zeros(0, np.int64),
+                "island": np.zeros(0, np.int64)}
+    srt = np.lexsort((iu, iv, group))
+    g, v, u, qs = group[srt], iv[srt], iu[srt], np.asarray(q, np.float64)[srt]
+    starts = np.flatnonzero(np.r_[True, g[1:] != g[:-1]])
+    at = np.searchsorted(starts, np.arange(LABEL_ROWS, n, LABEL_ROWS))
+    bounds = np.unique(np.r_[0, starts[at[at < len(starts)]], n])
+    raw = np.empty(n, np.int64)
+    n_lab = 0
+    for a, b in zip(bounds[:-1], bounds[1:]):
+        lab, k = _label_rows(g[a:b], v[a:b], u[a:b], qs[a:b], gap, pitch_x_um, pitch_y_um)
+        raw[a:b] = lab + n_lab
+        n_lab += k
+    labels, first = np.unique(raw, return_index=True)
+    if not np.array_equal(labels, np.arange(n_lab)):
+        sys.exit("reticles: the island labels are not 0..n-1")
+    isl_q, isl_g = np.bincount(raw, qs, n_lab), g[first]
+    order = np.lexsort((first, -isl_q, isl_g))
+    rank = np.empty(n_lab, np.int64)
+    rank[order] = np.arange(n_lab)
+    isl_g = isl_g[order]
+    st = np.flatnonzero(np.r_[True, isl_g[1:] != isl_g[:-1]])
+    row = np.empty(n, np.int64)
+    row[srt] = rank[raw]
+    return {"row": row, "group": isl_g,
+            "island": np.arange(n_lab) - np.repeat(st, np.diff(np.r_[st, n_lab]))}
+
+
 def axis_module():
     """The cellID module whose face the shower axis points at."""
     m = np.arange(sc.N_FACES)
@@ -232,13 +354,18 @@ def count_within(u0, v0, radii, lu, lv):
 
 
 def build(G, P, info, overlay, size_x, size_y, cuts, radii, pitch_x_um, pitch_y_um,
-          offset_x=0, offset_y=0):
+          offset_x=0, offset_y=0, T=None):
     """The reticle, part and plane arrays of the module docstring, plus the input charge of the
-    events used ("q_in")."""
+    events used ("q_in") and per part row the charge of its truth object in pixels with charge < 0
+    ("part_q_neg"). T: the truth objects as islands() gives them; None for the groups."""
     n_super = info["n_events_total"] // overlay
     used_g = G["evt"] < n_super * overlay
     use = used_g[P["group"]]
     grp, iv, iu, q = P["group"][use], P["iv"][use], P["iu"][use], P["q"][use].astype(np.float64)
+    if T is None:
+        ng = info["n_groups_total"]
+        T = {"row": P["group"], "group": np.arange(ng, dtype=np.int64), "island": np.zeros(ng, np.int64)}
+    obj, n_obj = T["row"][use], len(T["group"])
     sup = G["evt"] // overlay
     pk = (sup[grp] * sc.N_FACES + G["module"][grp]) * N_LAYERS + G["layer"][grp]
     rv, ru = np.floor_divide(iv - offset_x, size_x), np.floor_divide(iu - offset_y, size_y)
@@ -268,18 +395,22 @@ def build(G, P, info, overlay, size_x, size_y, cuts, radii, pitch_x_um, pitch_y_
     u_ax, v_ax = axis_point(R["module"], R["layer"])
     r_mm = np.hypot(ou + (R["ru"] + 0.5) * lu - u_ax, ov + (R["rv"] + 0.5) * lv - v_ax)
 
-    # truth: one row per (reticle, group); the group's largest pixel inside the reticle
-    ng = info["n_groups_total"]
-    ukey2, inv2 = np.unique(rinv * ng + grp, return_inverse=True)
+    # truth: one row per (reticle, truth object); the object's largest pixel inside the reticle
+    if n * n_obj >= 2**62:
+        sys.exit("reticles: the (reticle, truth object) key overflows")
+    ukey2, inv2 = np.unique(rinv * n_obj + obj, return_inverse=True)
     inv2 = inv2.ravel()
     part_q = np.bincount(inv2, q, len(ukey2))
     order = np.lexsort((-q, inv2))
     first = order[np.flatnonzero(np.r_[True, np.diff(inv2[order]) != 0])] if len(q) else order
-    part_ret, part_grp = ukey2 // ng, ukey2 % ng
+    part_ret, part_id = ukey2 // n_obj, ukey2 % n_obj
+    part_grp = T["group"][part_id]
+    obj_q = np.bincount(obj, q, n_obj)
+    obj_neg = np.bincount(obj, np.maximum(-q, 0.0), n_obj)
     n_true = np.stack([np.bincount(part_ret[part_q > c], minlength=n) for c in cuts], axis=1) \
         if len(cuts) else np.zeros((n, 0), np.int64)
     if n_true.size and n_true.max() > np.iinfo(np.int16).max:
-        sys.exit("reticles: more groups in a reticle than int16 holds")
+        sys.exit("reticles: more truth objects in a reticle than int16 holds")
 
     # planes: those holding charge, and every layer of the axis module in every super-event
     am = axis_module()
@@ -309,7 +440,9 @@ def build(G, P, info, overlay, size_x, size_y, cuts, radii, pitch_x_um, pitch_y_
 
     ret = {"img": img, **{k: v.astype(np.int32) for k, v in R.items()},
            "r_mm": r_mm, "q_sum": img.sum(axis=(1, 2), dtype=np.float64), "n_true": n_true.astype(np.int16)}
-    part = {"part_reticle": part_ret, "part_group": part_grp, "part_q": part_q.astype(np.float32),
+    part = {"part_reticle": part_ret, "part_id": part_id, "part_group": part_grp,
+            "part_island": T["island"][part_id].astype(np.int32), "part_q": part_q.astype(np.float32),
+            "part_q_total": obj_q[part_id].astype(np.float32),
             "part_iv": lx[first].astype(np.int16), "part_iu": ly[first].astype(np.int16),
             "part_pdg": G["pdg"][part_grp], "part_p_MeV": G["p_MeV"][part_grp],
             "part_created_in_slab": G["created"][part_grp],
@@ -320,7 +453,8 @@ def build(G, P, info, overlay, size_x, size_y, cuts, radii, pitch_x_um, pitch_y_
              "plane_u_centroid_mm": pu, "plane_v_centroid_mm": pv,
              "plane_n_reticles": np.bincount(p_of_ret, minlength=npl),
              "plane_n_within": n_within, "plane_n_hit_within": n_hit_within}
-    return ret, part, plane, {"q_in": float(q.sum()), "n_super": n_super, "n_rows": len(q)}
+    return ret, part, plane, {"q_in": float(q.sum()), "n_super": n_super, "n_rows": len(q),
+                              "part_q_neg": obj_neg[part_id], "used_g": used_g}
 
 
 def check(ret, part, q_in):
@@ -339,6 +473,59 @@ def check(ret, part, q_in):
         rel = np.where(scale > 0, np.abs(s_part - s_img) / scale, np.abs(s_part - s_img))
     worst = int(np.argmax(rel)) if n else -1
     return d_total, (float(rel[worst]) if n else 0.0), worst
+
+
+def check_truth(P, I, part, part_q_neg):
+    """The hard checks of the islands I (of all pixel rows P) and of the part rows: a list of the
+    failures, empty when they pass."""
+    bad = []
+    grp, q = P["group"], P["q"].astype(np.float64)
+    n_isl, ng = len(I["group"]), int(grp.max(initial=-1)) + 1
+    row = I["row"]
+    if len(row) != len(grp) or (len(row) and (row.min() < 0 or row.max() >= n_isl)):
+        bad.append("a pixel row has no island")
+    elif not np.array_equal(I["group"][row], grp):
+        bad.append(f"{np.count_nonzero(I['group'][row] != grp)} pixel rows lie in an island of another group")
+    else:
+        s_isl = np.bincount(I["group"], np.bincount(row, q, n_isl), ng)
+        s_grp, a_grp = np.bincount(grp, q, ng), np.bincount(grp, np.abs(q), ng)
+        off = np.flatnonzero(np.abs(s_isl - s_grp) > ISLAND_REL * a_grp)
+        if len(off):
+            bad.append(f"the islands of {len(off)} groups do not sum to the group's charge (group "
+                       f"{off[0]}: {s_isl[off[0]]:.9g} e vs {s_grp[off[0]]:.9g} e)")
+    r, i = part["part_reticle"], part["part_id"]
+    if np.any((np.diff(r) < 0) | ((np.diff(r) == 0) & (np.diff(i) <= 0))):
+        bad.append("the part rows are not sorted by reticle and part_id, or a reticle holds two rows "
+                   "of one part_id")
+    pq, pt = part["part_q"].astype(np.float64), part["part_q_total"].astype(np.float64)
+    over = np.flatnonzero(pq > pt + part_q_neg + CHECK_REL * np.abs(pt))
+    if len(over):
+        bad.append(f"{len(over)} part rows have part_q above part_q_total (row {over[0]}: "
+                   f"{pq[over[0]]:.9g} e vs {pt[over[0]]:.9g} e)")
+    return bad
+
+
+def island_summary(P, I, used_g, pitch_x_um, pitch_y_um):
+    """For the groups of the events used (used_g): (groups holding pixel rows, groups above ISLAND_Q,
+    islands above ISLAND_Q, groups with more than one island above ISLAND_Q, distance [mm] between
+    the charge-weighted centroids of the two largest islands of each of the latter)."""
+    use = used_g[P["group"]]
+    obj, q = I["row"][use], P["q"][use].astype(np.float64)
+    n_isl, ng = len(I["group"]), len(used_g)
+    oq = np.bincount(obj, q, n_isl)
+    has = np.bincount(obj, minlength=n_isl) > 0
+    g_has = np.bincount(I["group"][has], minlength=ng) > 0
+    g_q = np.bincount(I["group"], oq, ng)
+    above = has & (oq > ISLAND_Q)
+    multi = np.bincount(I["group"][above], minlength=ng) > 1
+    u = (P["iu"][use] + 0.5) * pitch_y_um * 1e-3
+    v = (P["iv"][use] + 0.5) * pitch_x_um * 1e-3
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cu, cv = np.bincount(obj, q * u, n_isl) / oq, np.bincount(obj, q * v, n_isl) / oq
+    i0 = np.flatnonzero((I["island"] == 0) & multi[I["group"]])   # islands 0 and 1: the largest
+    dist = np.hypot(cu[i0 + 1] - cu[i0], cv[i0 + 1] - cv[i0])
+    return (int(np.count_nonzero(g_has)), int(np.count_nonzero(g_has & (g_q > ISLAND_Q))),
+            int(np.count_nonzero(above)), int(np.count_nonzero(multi)), dist)
 
 
 def _dist(x):
@@ -364,8 +551,15 @@ def main(argv=None):
     ap.add_argument("--offset-y", type=int, default=0, metavar="OY",
                     help="shift of the reticle grid along u, in pixels (default 0; 6 centres a "
                     "13-pixel reticle on the axis)")
+    ap.add_argument("--truth", choices=TRUTHS, default=TRUTHS[0],
+                    help="the truth objects: crossings, the islands of each group's pixels (default), "
+                    "or particles, the groups")
+    ap.add_argument("--island-gap", type=int, default=ISLAND_GAP, metavar="G",
+                    help="empty pixels that may sit between two linked pixels of an island, along iv "
+                    f"and along iu (default {ISLAND_GAP})")
     ap.add_argument("--truth-cuts", default=TRUTH_CUTS, metavar="Q,...",
-                    help=f"charge [e] a group must leave in a reticle to count in n_true (default {TRUTH_CUTS})")
+                    help=f"charge [e] a truth object must leave in a reticle to count in n_true "
+                    f"(default {TRUTH_CUTS})")
     ap.add_argument("--count-radii-mm", default=COUNT_RADII_MM, metavar="R,...",
                     help=f"radii around the axis within which reticles are counted (default {COUNT_RADII_MM})")
     args = ap.parse_args(argv)
@@ -373,6 +567,8 @@ def main(argv=None):
         ap.error(f"--overlay must be at least 1, got {args.overlay}")
     if args.size_x < 1 or args.size_y < 1:
         ap.error("--size-x and --size-y must be positive")
+    if args.island_gap < 0:
+        ap.error(f"--island-gap must be at least 0, got {args.island_gap}")
     cuts = _floats(args.truth_cuts, "--truth-cuts")
     radii = _floats(args.count_radii_mm, "--count-radii-mm")
     if not radii[0] > 0:
@@ -383,13 +579,18 @@ def main(argv=None):
     px, py = float(D[0]["pitch_x_um"]), float(D[0]["pitch_y_um"])
     if info["n_events_total"] // args.overlay == 0:
         sys.exit(f"reticles: {info['n_events_total']} events make no super-event of {args.overlay}")
+    I = islands(P["group"], P["iv"], P["iu"], P["q"], args.island_gap, px, py)
     ret, part, plane, tot = build(G, P, info, args.overlay, args.size_x, args.size_y, cuts, radii,
-                                  px, py, args.offset_x, args.offset_y)
+                                  px, py, args.offset_x, args.offset_y,
+                                  T=I if args.truth == "crossings" else None)
     d_total, d_ret, worst = check(ret, part, tot["q_in"])
     if not (abs(d_total) <= CHECK_REL and d_ret <= CHECK_REL):
         sys.exit(f"reticles: the reticles hold {d_total:+.3e} relative more charge than the input "
                  f"pixel rows of the events used ({tot['q_in']:.6g} e), and the part_q of reticle "
                  f"{worst} differ from its img by {d_ret:.3e} of its charge; nothing written")
+    bad = check_truth(P, I, part, tot["part_q_neg"])
+    if bad:
+        sys.exit("reticles: " + "; ".join(bad) + "; nothing written")
 
     # inputs: per-batch keys and differing scalars per input, the rest as it is
     scalars, per_input = {}, {}
@@ -407,6 +608,7 @@ def main(argv=None):
     n_dropped = info["n_events_total"] - tot["n_super"] * args.overlay
     arrays = dict(
         **ret, **part, **plane,
+        truth=np.array(args.truth), island_gap=np.int64(args.island_gap),
         overlay=np.int64(args.overlay), size_x=np.int64(args.size_x), size_y=np.int64(args.size_y),
         offset_x=np.int64(args.offset_x), offset_y=np.int64(args.offset_y),
         truth_cuts=cuts, count_radii_mm=radii, n_within=n_within, n_empty_within=n_within - n_hit_within,
@@ -443,6 +645,9 @@ def main(argv=None):
         return (f"mean {x.mean():+.3f} (rms {x.std():.3f}), median {np.median(x):+.3f}, "
                 f"charge-weighted {np.average(x, weights=wq):+.3f}")
     n_charged = int(np.count_nonzero(plane["plane_q"] != 0))
+    n_g, n_g_above, n_i_above, n_multi, dist = island_summary(P, I, tot["used_g"], px, py)
+    what = (f"crossings, the islands of each group (gap {args.island_gap})" if args.truth == "crossings"
+            else "particles, the groups")
     lines = [
         f"reticles: {len(args.charges)} input(s), {info['n_events_total']} events; overlay "
         f"{args.overlay}: {tot['n_super']} super-events, {n_dropped} events dropped",
@@ -450,9 +655,16 @@ def main(argv=None):
         f"{args.size_y * py * 1e-3:g} mm, v x u), grid offset ({args.offset_x}, {args.offset_y}) "
         f"pixels; axis module {axis_module()}",
         f"  planes: {len(plane['plane_q'])}, {n_charged} holding charge; reticles holding charge: "
-        f"{len(ret['img'])}; (reticle, group) rows: {len(part['part_q'])}; pixel rows used: {tot['n_rows']}",
+        f"{len(ret['img'])}; (reticle, truth object) rows: {len(part['part_q'])}; pixel rows used: "
+        f"{tot['n_rows']}",
         f"  charge: img {tot['q_in'] * (1 + d_total):.6g} e, input {tot['q_in']:.6g} e, "
         f"relative difference {d_total:+.2e}; worst reticle part_q vs img {d_ret:.2e}",
+        f"  truth: {what}; {len(np.unique(part['part_id']))} truth objects in the reticles",
+        f"  islands (gap {args.island_gap}) of the {n_g} groups of the events used: {n_i_above} islands "
+        f"above {ISLAND_Q:g} e, {n_g_above} groups above {ISLAND_Q:g} e; {n_multi} groups "
+        f"({n_multi / max(n_g_above, 1):.1%} of those) with more than one island above {ISLAND_Q:g} e, "
+        f"centroid distance of their two largest [mm]: "
+        + (f"median {np.median(dist):.2f}, p90 {np.percentile(dist, 90):.2f}" if len(dist) else "none"),
         f"  plane centroid - axis point [mm], axis-module planes with charge in layers {lo}..{hi} "
         f"({len(du)}): u {offset(du)}; v {offset(dv)}",
         "  n_true over the reticles holding charge:",
