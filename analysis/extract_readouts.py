@@ -24,10 +24,12 @@ The barrel envelope is assumed unchanged: the wedge cut uses the baseline
 NSIDES/RMIN/RMAX constants below, so if you edit ECalBarrel_rmin/rmax/symmetry,
 update those constants to match. The MIP scale cannot come from geometry (it is
 a measured Landau MPV, 85 keV for 320 um silicon): when the --home silicon thickness
-is not this checkout's, the run stops before reading any data unless --mip-energy is
-given. A startup probe cross-checks the first file's hit lattice and layer depths
-against --home and aborts on a mismatch. The output also records the --home silicon
-thickness (geo_si_thick_mm) and the MIP scale used (mip_energy_GeV).
+is not this checkout's, or differs between layers, the run stops before reading any
+data unless --mip-energy is given; that one scale then applies to every layer. A
+startup probe cross-checks the first file's hit lattice and layer depths against
+--home and aborts on a mismatch. The output also records the --home silicon thickness
+(geo_si_thick_mm, NaN when the layers differ; geo_si_thick_layers_mm per layer) and
+the MIP scale used (mip_energy_GeV).
 
 Silicon-thickness variants: with CALOMAPS_SI_THICKNESS_UM=T the sim wrappers simulate the
 copy sim/make_geometry_variant.py writes at $CALOMAPS_DATA_BASE/geometry_si<T>um_<hash> (the
@@ -38,7 +40,8 @@ run prints its compact) and tag their outputs _si<T>um, e.g. for T=100:
 import os, glob, argparse, math
 import numpy as np, uproot
 # _UNITS_MM and _pv are unused here but stay importable from this module
-from decal_geometry import UNITS_MM as _UNITS_MM, _pv, layer_radii, cell_size_mm, si_thickness_mm
+from decal_geometry import (UNITS_MM as _UNITS_MM, _pv, layer_radii, cell_size_mm, si_thickness_mm,
+                            si_layer_thicknesses_mm)
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # ---- readout constants (baseline defaults; match notebooks/02_data_extraction.ipynb).
@@ -213,13 +216,20 @@ def main():
 
     try:
         radii = layer_radii(args.home)
-        thick_mm = si_thickness_mm(args.home)
+        layer_mm = si_layer_thicknesses_mm(args.home)
     except FileNotFoundError:
         raise SystemExit(f"--home {args.home!r} has no geometry/SiD_TestBeam.xml + "
                          f"my_custom_ecal.xml -- point it at the repo/config root")
     except ValueError as e:
         raise SystemExit(f"cannot read the geometry under --home {args.home!r}: {e}")
     base_mm = si_thickness_mm(REPO)
+    found_mm = sorted(set(layer_mm.tolist()))
+    thick_mm = found_mm[0] if len(found_mm) == 1 else math.nan    # one common thickness, else NaN
+    si_desc = "/".join(f"{t * 1e3:g}" for t in found_mm) + " um"
+    if args.mip_energy is None and len(found_mm) != 1:
+        raise SystemExit(f"--home {args.home} has silicon layers of different thicknesses ({si_desc}), "
+                         f"but the default MIP scale ({MIP_ENERGY * 1e6:g} keV) is the Landau MPV for "
+                         f"{base_mm * 1e3:g} um. Pass --mip-energy (GeV); it applies to every layer.")
     if args.mip_energy is None and not math.isclose(thick_mm, base_mm, rel_tol=1e-5):
         raise SystemExit(f"--home {args.home} has {thick_mm * 1e3:g} um silicon, but the default MIP "
                          f"scale ({MIP_ENERGY * 1e6:g} keV) is the Landau MPV for {base_mm * 1e3:g} um. "
@@ -230,7 +240,7 @@ def main():
     if not files:
         raise SystemExit(f"no files match {os.path.join(args.datadir, args.glob)}")
     print(f"E={args.energy} GeV: {len(files)} files, {args.workers} workers  "
-          f"[pitch {CELL_SIZE*1e3:g} um, Si {thick_mm*1e3:g} um from --home geometry, "
+          f"[pitch {CELL_SIZE*1e3:g} um, Si {si_desc} from --home geometry, "
           f"MIP {MIP_ENERGY*1e6:g} keV]")
     _probe_geometry(files, radii)      # abort early on a data/geometry mismatch
 
@@ -258,6 +268,7 @@ def main():
                         all_cluster=np.array(C, np.int64),
                         E_nominal=np.float64(args.energy),
                         geo_si_thick_mm=np.float64(thick_mm),
+                        geo_si_thick_layers_mm=np.asarray(layer_mm, np.float64),
                         mip_energy_GeV=np.float64(MIP_ENERGY))
     print(f"  {all_truth.size} events -> {args.out}  "
           f"(truth mean={all_truth.mean():.2f} std={all_truth.std():.3f} GeV)")

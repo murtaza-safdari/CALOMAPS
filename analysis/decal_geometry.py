@@ -9,7 +9,8 @@ and refuse a geometry where the two disagree.
 
     layer_radii(home)      per-layer Si mid-plane apothems [mm] (ECalBarrel_rmin + in-layer offset)
     layer_stack(home)      per-layer [(material, thickness_mm), ...], repeats expanded
-    si_thickness_mm(home)  the sensor silicon thickness [mm]
+    si_layer_thicknesses_mm(home)  per-layer sensor silicon thickness [mm]
+    si_thickness_mm(home)  the sensor silicon thickness [mm], common to all layers
     compact_si_thickness_mm(compact)  the same, for the config root of a compact file
     cell_size_mm(home)     the pixel pitch [mm] (ECal_cell_size)
     geometry_hash(home)    content hash of home/geometry/
@@ -114,16 +115,23 @@ def layer_stack(calomaps_home):
     return [list(sl) for rep, sl in blocks for _ in range(rep)]
 
 
-def si_thickness_mm(calomaps_home):
-    """Sensor silicon thickness [mm]. Raises ValueError unless every layer holds exactly one
-    Silicon slice and all of them have the same thickness (the crossing code assumes one)."""
+def si_layer_thicknesses_mm(calomaps_home):
+    """Per-layer sensor silicon thickness [mm], repeats expanded. Raises ValueError unless every
+    layer holds exactly one Silicon slice."""
     _, blocks = _layer_blocks(calomaps_home)
-    found = set()
-    for i, (_, sl) in enumerate(blocks):
+    out = []
+    for i, (rep, sl) in enumerate(blocks):
         si = [t for material, t in sl if material == "Silicon"]
         if len(si) != 1:
             raise ValueError(f"layer block {i} has {len(si)} Silicon slices (expected 1)")
-        found.add(si[0])
+        out += si * rep
+    return np.array(out)
+
+
+def si_thickness_mm(calomaps_home):
+    """Sensor silicon thickness [mm]. Raises ValueError unless every layer holds exactly one
+    Silicon slice and all of them have the same thickness (the crossing code assumes one)."""
+    found = set(si_layer_thicknesses_mm(calomaps_home).tolist())
     if len(found) != 1:
         raise ValueError(f"layer blocks have different Silicon thicknesses: {sorted(found)} mm")
     return found.pop()
