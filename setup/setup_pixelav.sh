@@ -42,7 +42,8 @@
 #   pixelav/                                   upstream PIXELAV at $PIXELAV_COMMIT
 #   pixelav/ppixelav2_list_trkpy_n_2f          baseline 7-col list driver (bundled BPix model)
 #   pixelav/ppixelav2_list_trkpy_real_entry    our patched driver (real entry injection)
-#   pixelav/decal_run/ or pixelav/bpix100_50x25_run/   ready-to-run sensor dir
+#   pixelav/ppixelav2_inject_deposits          drift + readout of given energy deposits (jobs file)
+#   pixelav/decal_run/ or pixelav/bpix100_50x25_run/   ready-to-run sensor dir (both our drivers)
 # ============================================================================
 set -euo pipefail
 # NEHSTORE=1,000,000 arrays (some on propag()'s stack) overflow the 8 MB default stack;
@@ -123,17 +124,19 @@ if ! git -C "$SRC" diff --quiet HEAD -- ppixelav2.c ppixelav2_prototypes.h \
 fi
 cd "$SRC"
 
-# 2) Build the baseline driver and our real-entry driver (single-file compile). x86-64 uses
-#    <xmmintrin.h> with -msse; ARM includes sse2neon.h and takes upstream's linkarm_gcc flags.
+# 2) Build the baseline driver, our real-entry driver and our deposit-injection driver
+#    (single-file compiles). x86-64 uses <xmmintrin.h> with -msse; ARM includes sse2neon.h and
+#    takes upstream's linkarm_gcc flags.
 case "$(uname -m)" in
   x86_64|amd64)  ARCH_FLAGS=(-msse) ;;
   arm64|aarch64) ARCH_FLAGS=(-march=armv8-a+fp+simd+crypto+crc) ;;
   *) echo "[setup] ERROR: no PIXELAV build flags for $(uname -m)"; exit 1 ;;
 esac
-echo "[setup] building baseline + patched drivers ..."
+echo "[setup] building baseline + patched + injection drivers ..."
 gcc -O2 ppixelav2_list_trkpy_n_2f.c "${ARCH_FLAGS[@]}" -lm -o ppixelav2_list_trkpy_n_2f
-cp "$PXDIR/ppixelav2_list_trkpy_real_entry.c" .
+cp "$PXDIR/ppixelav2_list_trkpy_real_entry.c" "$PXDIR/ppixelav2_inject_deposits.c" .
 gcc -O2 ppixelav2_list_trkpy_real_entry.c "${ARCH_FLAGS[@]}" -lm -o ppixelav2_list_trkpy_real_entry
+gcc -O2 ppixelav2_inject_deposits.c "${ARCH_FLAGS[@]}" -lm -o ppixelav2_inject_deposits
 
 # 3) Fix the bundled weighting potential: upstream wgt_pot.init holds only the PATH
 #    "./weighting_BPix_50x13x100.init", but pixinit() reads the weighting GRID from
@@ -146,12 +149,12 @@ if [ "$SENSOR" = decal320 ]; then
   echo "[setup] generating DECAL Stage-A (ppixel2.decal.init + wgt_pot.decal.init) ..."
   "${PYRUN[@]}" "$PXDIR/make_decal_stagea.py" .
   RUN="$SRC/decal_run"; mkdir -p "$RUN"
-  cp SIRUTH.SPR ppixelav2_list_trkpy_real_entry ppixel2.decal.init wgt_pot.decal.init "$RUN"/
+  cp SIRUTH.SPR ppixelav2_list_trkpy_real_entry ppixelav2_inject_deposits ppixel2.decal.init wgt_pot.decal.init "$RUN"/
   cp "$RUN/ppixel2.decal.init" "$RUN/ppixel2.init"
   cp "$RUN/wgt_pot.decal.init" "$RUN/wgt_pot.init"
 else
   RUN="$SRC/${SENSOR}_run"; mkdir -p "$RUN"
-  cp SIRUTH.SPR ppixelav2_list_trkpy_real_entry "$RUN"/
+  cp SIRUTH.SPR ppixelav2_list_trkpy_real_entry ppixelav2_inject_deposits "$RUN"/
   cp "$SDIR/ppixel2.init" "$SDIR/wgt_pot.init" "$RUN"/
 fi
 
@@ -175,6 +178,16 @@ if grep -q "<cluster>" _s.out 2>/dev/null; then
 else
   echo "[setup] $SENSOR smoke FAIL — check $RUN"; exit 1
 fi
+# One job: 3680 eV on a full-depth segment at the window centre -> 1000 pairs, none outside.
+THICK="$(awk 'NR==4 {print $1}' ppixel2.init)"
+printf "J 0 1\n0 0 0 0 0 %s 3680\n" "$THICK" > _smoke.jobs; rm -f _si.out
+./ppixelav2_inject_deposits _smoke.jobs _si.out >/dev/null 2>&1 || true
+if [ "$(sed -n 4p _si.out 2>/dev/null)" = "0 1000 1 3680.000 0" ]; then
+  echo "[setup] $SENSOR injection smoke PASS"
+  rm -f _smoke.jobs _si.out
+else
+  echo "[setup] $SENSOR injection smoke FAIL — check $RUN"; exit 1
+fi
 
 DECK="${CALOMAPS_HOME:-$REPO_DIR}/models/pixelav_segments_gamma50_1evt${DECK_TAG}.pixelav.txt"
 echo "[setup] DONE."
@@ -184,4 +197,6 @@ echo "        sensor model, then copy and run it:"
 echo "        ${PIXELAV_PY:-python3} $PXDIR/sensor_model.py --check-deck $DECK $RUN"
 echo "        cp $DECK $RUN/track_list.txt"
 echo "        cd $RUN && ulimit -s unlimited && ./ppixelav2_list_trkpy_real_entry 1 track_list.txt clusters.out seedfile.txt"
+echo "[setup] Energy deposits instead of straight tracks (format in analysis/pixelav/ppixelav2_inject_deposits.c):"
+echo "        cd $RUN && ulimit -s unlimited && ./ppixelav2_inject_deposits <jobs_file> <out_file> [seed] [last|all]"
 echo "[setup] (baseline BPix sensor instead: use ppixel2.init/wgt_pot.init in $SRC + ppixelav2_list_trkpy_n_2f)"
