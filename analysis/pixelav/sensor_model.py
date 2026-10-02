@@ -28,7 +28,13 @@ the two files disagree; with --require-zero-bfield it also refuses a non-zero B 
 --check-deck compares the model thickness with the "# sensor: <T> um silicon" line that
 analysis/pixelav_converter.py writes into <deck>.columns.txt, and exits non-zero on a mismatch,
 on a legend without that line (unless --assume-deck-thickness-um gives it), or when the two model
-files disagree.
+files disagree. It then prints, without changing the exit status, how the driver beside this
+script (ppixelav2_list_trkpy_real_entry.c, which reads the badeaa3 layout) pairs the deck with
+the model: x has the model's first pitch (xsize) and TXSIZE pixels and is v, steered by cot_beta;
+y has the second pitch (ysize) and TYSIZE pixels and is u, steered by cot_alpha. And it counts
+the deck lines whose track inside the silicon, thick*|cot_beta| in x or thick*|cot_alpha| in y,
+is longer than TXSIZE-1 or TYSIZE-1 pixels: the driver puts a track's mid-plane point anywhere in
+the window's central pixel, so the window may not hold such a track.
 
 Standard library only, so it runs under any python3.
 """
@@ -43,6 +49,11 @@ TITLE_MAX = 79
 _EF_PARAMS = ("thick", "xsize", "ysize", "temp", "flux_e", "flux_h", "rhe", "rhh",
               "peaktim", "samptim")
 _SENSOR_LINE = re.compile(r"^#\s*sensor:\s*([0-9.eE+-]+)\s*um silicon")
+_LAYOUT_LINE = re.compile(r"^#\s*PIXELAV track list, layout (\S+)")
+# The output window of the driver is pixel[TXSIZE][TYSIZE]; the sizes are read from its source.
+DRIVER_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "ppixelav2_list_trkpy_real_entry.c")
+_WINDOW_DEFINE = re.compile(r"^#define\s+(TXSIZE|TYSIZE)\s+(\d+)\s*$", re.M)
 
 
 def _f32(x):
@@ -200,6 +211,69 @@ def deck_thickness_um(deck):
     return None
 
 
+def driver_window(path=None):
+    """(TXSIZE, TYSIZE): the pixels of the driver's output window along x and y, from the
+    #defines of its source file (default DRIVER_SOURCE)."""
+    path = path or DRIVER_SOURCE
+    with open(path) as f:
+        sizes = {name: int(n) for name, n in _WINDOW_DEFINE.findall(f.read())}
+    if set(sizes) != {"TXSIZE", "TYSIZE"}:
+        raise ValueError(f"{path}: no '#define TXSIZE <n>' and '#define TYSIZE <n>' lines")
+    return sizes["TXSIZE"], sizes["TYSIZE"]
+
+
+def deck_layout(deck):
+    """The deck layout its legend names (badeaa3, smartpix), or None without a legend line."""
+    legend = deck + ".columns.txt"
+    if not os.path.exists(legend):
+        return None
+    with open(legend) as f:
+        for line in f:
+            m = _LAYOUT_LINE.match(line)
+            if m:
+                return m.group(1)
+    return None
+
+
+def _window(deck, ef):
+    """Print the driver's pairing of the deck with the model ef, and count the deck lines whose
+    track is too long for the output window. Informational; returns nothing."""
+    layout = deck_layout(deck)
+    if layout not in (None, "badeaa3"):
+        print(f"axes:  not checked; layout {layout} is not the badeaa3 layout "
+              f"{os.path.basename(DRIVER_SOURCE)} reads")
+        return
+    try:
+        nx, ny = driver_window()
+    except (OSError, ValueError) as e:
+        print(f"axes:  not checked ({e})")
+        return
+    t, px, py = ef["thick"], ef["xsize"], ef["ysize"]
+    print(f"axes:  x: {px:g} um pitch, {nx} pixels = {nx * px:g} um, along v (cot_beta, modx); "
+          f"y: {py:g} um pitch, {ny} pixels = {ny * py:g} um, along u (cot_alpha, mody) "
+          f"({os.path.basename(DRIVER_SOURCE)})")
+    n = n_x = n_y = n_any = 0
+    with open(deck) as f:
+        for k, line in enumerate(f, 1):
+            tok = line.split()
+            if not tok:
+                continue
+            try:
+                cot_a, cot_b = float(tok[0]), float(tok[1])
+            except (IndexError, ValueError):
+                print(f"window: not checked; deck line {k} does not start with cot_alpha cot_beta")
+                return
+            over_x = t * abs(cot_b) > (nx - 1) * px
+            over_y = t * abs(cot_a) > (ny - 1) * py
+            n += 1
+            n_x += over_x
+            n_y += over_y
+            n_any += over_x or over_y
+    print(f"window: {n_any} of {n} deck lines are longer inside the {t:g} um silicon than {nx - 1} "
+          f"pixels in x ({(nx - 1) * px:g} um; {n_x} lines) or {ny - 1} in y ({(ny - 1) * py:g} um; "
+          f"{n_y} lines); the window may not hold such a track")
+
+
 def _summary(path, require_zero_b):
     if os.path.isdir(path):
         ef, wp, problems = read_run_dir(path)
@@ -236,6 +310,7 @@ def _check_deck(deck, run_dir, assumed_um):
           f"({'legend' if legend_um is not None else '--assume-deck-thickness-um'})")
     if abs(deck_um - ef["thick"]) > 1e-3:
         problems.append(f"deck is {deck_um:g} um silicon, the sensor model is {ef['thick']:g} um thick")
+    _window(deck, ef)
     return problems
 
 
