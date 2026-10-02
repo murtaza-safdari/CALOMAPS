@@ -31,6 +31,8 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <stddef.h>
 #ifdef __POWERPC__
@@ -151,6 +153,7 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
     struct tm *nows;
     int sec, min, hour, yday, j, k;
     static int fileind, filebase, fileoff, runsize, irun, ievent, frun, nskip, procid, new_drde, ehole;
+    static int nread, nskip_cot, nskip_neh, resume;
     static float rvec[4], pimom, xoffset, yoffset, lenxmin, lenxmax, deltaxlen, lenymin, lenymax, deltaylen, locdir[3], cotalpha, cotbeta;
     static float clusxlen, clusylen;
     static float wthick, wxsize, wysize;
@@ -190,6 +193,40 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
       printf("Track list file: %s \n", track_list);
     }
     
+    /* A seed file left by an earlier run makes this run resume after that run's last event
+       (the "irun ievent" at its end), so a rerun of a finished deck would write nothing. Refuse
+       such a seed file, and an existing output file, unless PIXELAV_RESUME=1 asks to continue. */
+
+    resume = getenv("PIXELAV_RESUME") != NULL && strcmp(getenv("PIXELAV_RESUME"), "1") == 0;
+    isfp = fopen(seedfile, "r");
+    if(isfp != NULL) {
+      int sivec[25], sirun, sievent;
+      nread = fscanf(isfp,
+	     "%x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %d %d",
+	     &sivec[0], &sivec[1], &sivec[2], &sivec[3], &sivec[4], &sivec[5], &sivec[6], &sivec[7],
+	     &sivec[8], &sivec[9], &sivec[10], &sivec[11], &sivec[12], &sivec[13], &sivec[14], &sivec[15],
+	     &sivec[16], &sivec[17], &sivec[18], &sivec[19], &sivec[20], &sivec[21], &sivec[22], &sivec[23],
+	     &sivec[24], &sirun, &sievent);
+      fclose(isfp);
+      if(nread != 27) {
+        printf("ERROR: seed file %s is not 25 hex words followed by 'irun ievent' \n", seedfile);
+        return 1;
+      }
+      if(sievent != 0 && !resume) {
+        printf("ERROR: seed file %s is at run %d event %d of an earlier run, and this run would resume there: "
+               "remove it, or set PIXELAV_RESUME=1 to continue that run \n", seedfile, sirun, sievent);
+        return 1;
+      }
+    }
+    ofp = fopen(outfile, "r");
+    if(ofp != NULL) {
+      fclose(ofp);
+      if(!resume) {
+        printf("ERROR: output file %s exists: remove it, or set PIXELAV_RESUME=1 to continue a run \n", outfile);
+        return 1;
+      }
+    }
+
     /* /\* If two arguments, second could be a number of runs or a fork instruction *\/ */
 	
     /* if(argc == 3) { */
@@ -278,10 +315,18 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
     /* Now read-in track angles and momenta to process */
 	
     ntrack = 0;
-    while(fscanf(icfp,"%f %f %f %d %f %f %f", &cotatrack[ntrack], &cotbtrack[ntrack], &ppiontrack[ntrack], &flipped[ntrack], &modxtrack[ntrack], &modytrack[ntrack], &pttrack[ntrack]) != EOF) {
+    while(ntrack < runsize && ntrack < NMUON) {
+      nread = fscanf(icfp,"%f %f %f %d %f %f %f", &cotatrack[ntrack], &cotbtrack[ntrack], &ppiontrack[ntrack], &flipped[ntrack], &modxtrack[ntrack], &modytrack[ntrack], &pttrack[ntrack]);
+      if(nread == EOF) break;
+      if(nread != 7) {
+        printf("ERROR: deck line %d of %s is not 7 numbers \n", nskip+ntrack+1, track_list);
+        return 1;
+      }
       ++ntrack;
-      if(ntrack == NMUON) break;
-      if(ntrack >= runsize) break;
+    }
+    if(ntrack == runsize && fscanf(icfp, "%f", &r__1) == 1) {
+      printf("NOTE: %s has more than %d lines: this run (first argument %d) takes lines %d to %d, "
+             "first argument %d takes the next %d \n", track_list, runsize, frun, nskip+1, nskip+runsize, frun+1, runsize);
     }
     fclose(icfp);
     printf("number of tracks = %d \n", ntrack);
@@ -354,9 +399,17 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
       
       ranlux_(rvec,&c__4);
       cotbeta = cotbtrack[ievent];	
-      if(fabsf(cotbeta) > 10.) goto incr;
+      if(fabsf(cotbeta) > 10.) {
+	printf("SKIPPED deck line %d: |cot_beta| = %f > 10 \n", nskip+ievent+1, fabsf(cotbeta));
+	++nskip_cot;
+	goto incr;
+      }
       cotalpha = cotatrack[ievent];
-      if(fabsf(cotalpha) > 10.) goto incr;
+      if(fabsf(cotalpha) > 10.) {
+	printf("SKIPPED deck line %d: |cot_alpha| = %f > 10 \n", nskip+ievent+1, fabsf(cotalpha));
+	++nskip_cot;
+	goto incr;
+      }
       locdir[2] = 1./sqrt((double)(1.+cotbeta*cotbeta+cotalpha*cotalpha));
 	/* track travels in the E-field direction in the unflipped coordinate system */
       if(flipped[ievent] == 0) locdir[2] = -locdir[2];
@@ -415,8 +468,8 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
 	ofp = fopen(outfile, "a");
 	fprintf(ofp,"<cluster>\n");
 	fprintf(ofp,
-		"%f %f %f %f %f %f %d %f %f \n", 
-		vect[0], vect[1], vect[2], vect[3], vect[4], vect[5], neh, modytrack[ievent], pttrack[ievent]);
+		"%f %f %f %f %f %f %d %f %f %d \n",
+		vect[0], vect[1], vect[2], vect[3], vect[4], vect[5], neh, modytrack[ievent], pttrack[ievent], nskip+ievent+1);
 	for(k = 1; k<=NCRRC; ++k) {
 	  fprintf(ofp,"<time slice %f ps>\n", k*stimstp);
 	  for (j = 0; j < TYSIZE; ++j) {
@@ -430,7 +483,10 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
 	  }
 	}    
 	fclose(ofp);      
-      } 
+      } else {
+	printf("SKIPPED deck line %d: %d e-h pairs reach NEHSTORE = %d \n", nskip+ievent+1, neh, NEHSTORE);
+	++nskip_neh;
+      }
       
     incr: ievent += 1;
       
@@ -461,6 +517,9 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
     
     irun += 1;
     ievent = 0;
+    
+    printf("skipped in this run: %d deck lines with |cot_alpha| or |cot_beta| > 10, %d with neh >= NEHSTORE \n",
+           nskip_cot, nskip_neh);
     
     /*  Determine current time */
     
