@@ -124,7 +124,9 @@ CALOMAPS/
 │   ├── 05_shower_4vectors.ipynb       ← full-cascade MCParticle 4-vectors
 │   ├── 06_sensor_crossings_tracker.ipynb  ← per-sensor crossings: tracker route (primary)
 │   ├── 07_sensor_crossings_calo.ipynb     ← per-sensor crossings: calorimeter route (cross-check)
-│   └── 08_pixelav_deck_inspection.ipynb  ← [this branch] validate a PIXELAV deck before sending it
+│   ├── 08_pixelav_deck_inspection.ipynb  ← [this branch] validate a PIXELAV deck before sending it
+│   └── 10_reticles_one_plane.ipynb       ← [this branch] one sensor plane as the detector sees it:
+│                                           charge, hit map, reticles, crossings per reticle
 └── models/                            ← (gitignored) extracted data + trained checkpoints
     ├── decal_extracted_data*.npz  /  mono_gamma/*.npz
     ├── saved_cbnet_gpu_*/             ← CB-density ensembles (trained on the A100)
