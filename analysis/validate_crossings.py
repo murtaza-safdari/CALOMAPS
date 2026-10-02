@@ -13,14 +13,20 @@ the frame the crossing records use, sensor_crossings.tracker_hit_frame: face and
 hit's cellID module and layer when the npz holds them (tmodule, tlayer), and the layer centres
 of sensor_crossings:
 
-  (a) containment: every tracker hit lies in the Si slab of its layer, |w - centre| <=
-      thickness/2 + 0.002 mm, w being its depth along its face normal. The hit position is the
+  (a) containment: the tracker hits lie in the Si slab of their layer, |w - centre| <=
+      thickness/2 + 0.002 mm, w being the depth along the face normal. The hit position is the
       midpoint of the hit's first and last step points (the run header's action.tracker
-      HitPositionCombination 2), inside the slab when both points are. An npz without
-      tmodule/tlayer takes the face the hit's azimuth points at and the layer nearest in depth;
-      the barrel's staves overlap past the 30-degree sector boundaries, so a hit in an overlap
-      region gets the neighbouring face, can land outside every slab and fail this check:
-      re-extract such an npz with extract_trackermom.py.
+      HitPositionCombination 2), inside the slab when both points are. Passes when at most
+      0.1% of the hits are outside (a thickness below the true one puts ~20% outside). The
+      allowance is for merged hits: the tracker action closes a hit when the track leaves the
+      Si volume, but the 1 keV step filter can hide the exit step, and the 12 staves are
+      placements of one volume, so a later deposit of the same track in the same layer of
+      another stave joins the open hit and the midpoint falls between the two. Seen for
+      neutrons, 1 hit in 90,438 of a 20-event 50 GeV photon run, 434 mm from its slab.
+      An npz without tmodule/tlayer takes the face the hit's azimuth points at and the layer
+      nearest in depth; the barrel's staves overlap past the 30-degree sector boundaries, so a
+      hit in an overlap region gets the neighbouring face and lands outside its slab (about 2
+      hits in 10,000): re-extract such an npz with extract_trackermom.py.
   (b) path length (path_length_test, which extract_trackermom.py also applies before it writes
       an npz): for clean through-going crossings the Geant4 pathLength is the straight chord
       thickness/|cos(theta)|, theta being the inclination to the sensor normal. Clean means: a
@@ -35,9 +41,10 @@ of sensor_crossings:
 Every thickness variant has the baseline's Si mid-planes, so only (b), and (a) for a thickness
 below the true one, can tell a mislabelled npz from a correct one.
 
-Prints the hit count, the depth-residual range, the selected crossings' median path length and
-their median deposited energy in keV. Exit status 0 when both checks pass; 3 when (a) passes but
-fewer than 10 clean crossings leave the thickness untested by (b); 1 otherwise.
+Prints the hit count, the depth-residual range, the hits outside their slab, the selected
+crossings' median path length and their median deposited energy in keV. Exit status 0 when both
+checks pass; 3 when (a) passes but fewer than 10 clean crossings leave the thickness untested by
+(b); 1 otherwise.
 """
 import argparse, math, os, sys
 import numpy as np
@@ -46,6 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sensor_crossings as sc   # noqa: E402
 
 DEPTH_TOL_MM = 0.002
+MAX_OUTSIDE_FRACTION = 1e-3
 P_MIN_GEV = 0.1
 COS_MIN = 0.9
 PATH_TOL = 0.01
@@ -126,14 +134,19 @@ def main(argv=None):
     cellid = sc.has_cellid_frame(d)
     _, w, layer = sc.tracker_hit_frame(d)
     resid = w - sc.si_layer_centers()[layer]
-    n_out = int(np.count_nonzero(~(np.abs(resid) <= half + DEPTH_TOL_MM)))
-    ok_a = n_out == 0
+    outside = ~(np.abs(resid) <= half + DEPTH_TOL_MM)
+    n_out = int(np.count_nonzero(outside))
+    ok_a = n_out <= MAX_OUTSIDE_FRACTION * thx.size
     print("  frame: face and layer from the "
           + ("hit cellIDs (tmodule, tlayer)" if cellid else
              "hit azimuth and depth (the npz has no tmodule/tlayer)"))
     print(f"  (a) containment: {thx.size} hits; depth residual w - centre in "
           f"[{resid.min():+.4f}, {resid.max():+.4f}] mm; allowed |.| <= {half + DEPTH_TOL_MM:.4f} mm; "
-          f"{n_out} outside -> {'PASS' if ok_a else 'FAIL'}")
+          f"{n_out} outside (at most {MAX_OUTSIDE_FRACTION:.1%} allowed) -> {'PASS' if ok_a else 'FAIL'}")
+    if n_out:
+        charged = sc.is_charged(np.asarray(d["pdg"])[np.asarray(d["tmc"]).astype(int)])
+        print(f"      outside: {int(np.count_nonzero(outside & charged))} of charged particles, "
+              f"{int(np.count_nonzero(outside & ~charged))} of neutral ones (neutral hits make no crossings)")
     if n_out and not cellid:
         print("      this npz has no cellID module/layer: hits where neighbouring staves overlap "
               "get the face their azimuth points at, the wrong one. Re-extract it with "
