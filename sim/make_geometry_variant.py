@@ -3,21 +3,24 @@
 
     python sim/make_geometry_variant.py --si-thickness-um 100 --out $CALOMAPS_DATA_BASE/geometry_si100um
 
-OUT/geometry/ is byte-for-byte the repo's geometry/ except for the value of the
-ECal_Si_thickness constant (geometry/SiD_TestBeam.xml). The air pads either side of the
-silicon (ECal_Si_air_in/out) are defined from that constant, so every layer keeps its depth
-and its Si mid-plane; only the sensor thickness changes. The variant compact path,
-OUT/geometry/SiD_TestBeam.xml, is the only thing printed on stdout.
+OUT/geometry/ is byte-for-byte the repo's geometry/ except for the values of three constants
+in geometry/SiD_TestBeam.xml: ECal_Si_thickness, and the air pads either side of the silicon,
+ECal_Si_air_in/out. The thickness change is split equally between the two pads, so every layer
+keeps its depth and its Si mid-plane; only the sensor thickness changes. The constants stay
+plain values, which every reader of the compact (including the notebooks' own parsers) can
+evaluate. The variant compact path, OUT/geometry/SiD_TestBeam.xml, is the only thing printed
+on stdout.
 
 OUT is a config root: pass it as --home to analysis/extract_readouts.py,
 extract_trackermom.py and extract_cascade.py. sim/geometry_variant.sh calls this script when
 CALOMAPS_SI_THICKNESS_UM is set, so the sim wrappers rarely need it directly.
 
 Refused: a thickness <= 0, one that leaves either air pad without positive thickness, a source
-tree without exactly one ECal_Si_thickness constant, an OUT/geometry holding files the repo's
-geometry/ does not have, and a variant whose Si mid-planes or layer depths differ from the
-repo's. Re-running with the same arguments rewrites nothing; a changed file is replaced
-atomically, so a ddsim already reading the variant never sees a partial file.
+tree without exactly one definition of each of the three constants (in SiD_TestBeam.xml), an
+OUT/geometry holding files the repo's geometry/ does not have, and a variant whose Si
+mid-planes or layer depths differ from the repo's. Re-running with the same arguments rewrites
+nothing; a changed file is replaced atomically, so a ddsim already reading the variant never
+sees a partial file.
 """
 import argparse, math, os, re, shutil, sys, tempfile
 
@@ -25,10 +28,9 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.insert(0, os.path.join(REPO, "analysis"))
 import decal_geometry as dg   # noqa: E402
 
-CONSTANT = "ECal_Si_thickness"
+SI, AIR_IN, AIR_OUT = "ECal_Si_thickness", "ECal_Si_air_in", "ECal_Si_air_out"
 # Thinner than this is round-off of a zero pad, which Geant4 cannot build as a solid.
 MIN_PAD_MM = 1e-6
-_ELEMENT = re.compile(r'<constant\b[^>]*?\bname\s*=\s*"' + CONSTANT + r'"[^>]*>')
 _VALUE = re.compile(r'(\bvalue\s*=\s*")([^"]*)(")')
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 
@@ -46,27 +48,27 @@ def _source_files(src):
     return out
 
 
-def _rewrite(text, value):
-    """text with the one live ECal_Si_thickness constant's value replaced, and the match count."""
+def _definitions(text, name):
+    """The <constant name="name" ...> elements of text that are not inside an XML comment."""
     comments = [m.span() for m in _COMMENT.finditer(text)]
-    live = [m for m in _ELEMENT.finditer(text)
-            if not any(a <= m.start() < b for a, b in comments)]
-    if len(live) != 1:
-        return text, len(live)
-    m = live[0]
+    element = re.compile(r'<constant\b[^>]*?\bname\s*=\s*"' + re.escape(name) + r'"[^>]*>')
+    return [m for m in element.finditer(text) if not any(a <= m.start() < b for a, b in comments)]
+
+
+def _set_value(text, name, value):
+    """text with the value of its one definition of `name` replaced."""
+    m, = _definitions(text, name)
     element, n = _VALUE.subn(lambda v: v.group(1) + value + v.group(3), m.group(0), count=1)
     if n != 1:
-        return text, 0
-    return text[:m.start()] + element + text[m.end():], 1
+        _fail(f"the {name} constant has no value attribute")
+    return text[:m.start()] + element + text[m.end():]
 
 
 def _validate(home, t_um):
     """Fail unless the tree at `home` has the requested Si thickness, positive air pads, and the
     repo's Si mid-planes and layer depths."""
     consts = dg.compact_constants(home)
-    for pad in ("ECal_Si_air_in", "ECal_Si_air_out"):
-        if pad not in consts:
-            _fail(f"SiD_TestBeam.xml has no {pad} constant to absorb the thickness change")
+    for pad in (AIR_IN, AIR_OUT):
         mm = dg._pv(consts[pad], consts)
         if mm < MIN_PAD_MM:
             _fail(f"{t_um:g} um silicon leaves {pad} = {mm:.6g} mm; a slice needs a positive "
@@ -74,7 +76,7 @@ def _validate(home, t_um):
     t_mm = dg.si_thickness_mm(home)
     if abs(t_mm - t_um / 1000.0) > 1e-12:
         _fail(f"variant Si thickness is {t_mm} mm, expected {t_um / 1000.0} mm -- the layer "
-              f"slices do not use {CONSTANT}")
+              f"slices do not use {SI}")
     r_src, r_var = dg.layer_radii(REPO), dg.layer_radii(home)
     d_src = [sum(t for _, t in sl) for sl in dg.layer_stack(REPO)]
     d_var = [sum(t for _, t in sl) for sl in dg.layer_stack(home)]
@@ -103,21 +105,25 @@ def main():
         _fail(f"--out {args.out!r} would write into the repo's own geometry/")
 
     files = _source_files(src)
-    value = "%.12g*mm" % (t_um / 1000.0)
-    contents, n_found = {}, 0
+    contents = {}
     for rel in files:
         with open(os.path.join(src, rel), "rb") as f:
-            data = f.read()
-        if rel.endswith(".xml"):
-            text, n = _rewrite(data.decode("utf-8"), value)
-            if n > 1:
-                _fail(f"{rel} defines {CONSTANT} {n} times")
-            if n == 1:
-                n_found += 1
-                data = text.encode("utf-8")
-        contents[rel] = data
-    if n_found != 1:
-        _fail(f"found {n_found} {CONSTANT} constants under {src} (expected exactly 1)")
+            contents[rel] = f.read()
+    xml = {rel: contents[rel].decode("utf-8") for rel in files if rel.endswith(".xml")}
+    for name in (SI, AIR_IN, AIR_OUT):
+        where = [rel for rel, text in xml.items() for _ in _definitions(text, name)]
+        if where != ["SiD_TestBeam.xml"]:
+            _fail(f"found {len(where)} definitions of {name} under {src} "
+                  f"({', '.join(where) or 'none'}); expected exactly one, in SiD_TestBeam.xml")
+
+    consts = dg.compact_constants(REPO)
+    si_src, in_src, out_src = (dg._pv(consts[n], consts) for n in (SI, AIR_IN, AIR_OUT))
+    si = t_um / 1000.0
+    text = xml["SiD_TestBeam.xml"]
+    pad_shift = (si_src - si) / 2
+    for name, mm in ((SI, si), (AIR_IN, in_src + pad_shift), (AIR_OUT, out_src + pad_shift)):
+        text = _set_value(text, name, "%.12g*mm" % mm)
+    contents["SiD_TestBeam.xml"] = text.encode("utf-8")
 
     if os.path.isdir(dst):
         extra = sorted(set(_source_files(dst)) - set(files))

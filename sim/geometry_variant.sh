@@ -4,9 +4,9 @@
 #   CALOMAPS_SI_THICKNESS_UM   sensor thickness in um; unset or 320 = the repo geometry, unchanged
 #
 # Any other value simulates the copy sim/make_geometry_variant.py (re)writes at
-# ${CALOMAPS_DATA_BASE:-~/CALOMAPS-data}/geometry_si<T>um/, in which only ECal_Si_thickness
-# differs (layer depths and Si mid-planes are the baseline's), and tags every output name of the
-# run with _si<T>um so it cannot overwrite or pass for baseline output.
+# ${CALOMAPS_DATA_BASE:-~/CALOMAPS-data}/geometry_si<T>um/, in which only the ECal_Si_thickness
+# and air-pad constants differ (layer depths and Si mid-planes are the baseline's), and tags
+# every output name of the run with _si<T>um so it cannot overwrite or pass for baseline output.
 #
 # Needs REPO_DIR. Sets:
 #   COMPACT    the compact file for ddsim

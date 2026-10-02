@@ -83,9 +83,10 @@ def si_layer_centers():
     each sensor mid-plane (the apothem, built from ECAL_RMIN_MM); compared against the local depth w.
 
     The slices below are the 320 um baseline stack. The mid-planes they give hold for any
-    ECal_Si_thickness, because the compact's air pads (ECal_Si_air_in/out) take up the thickness
-    change symmetrically. Other changes to the layer stack generally move them; the extractors
-    refuse a geometry whose mid-planes differ (geometry_provenance), so update the slices here first.
+    ECal_Si_thickness, because sim/make_geometry_variant.py moves the thickness change into the
+    air pads ECal_Si_air_in/out, half on each side. Other changes to the layer stack generally
+    move them; the extractors refuse a geometry whose mid-planes differ (geometry_provenance),
+    so update the slices here first.
     The stack starts at rmin + ECAL_STACK_OFFSET_MM (driver placement tolerance, see above); the
     offset is uniform so it does not affect nearest-centre layer ASSIGNMENT, only absolute depths."""
     r, centers = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM, []
@@ -132,8 +133,8 @@ def geometry_provenance(home):
         k = int(np.argmax(dev))
         raise SystemExit(f"Si mid-planes in {home}/geometry differ from the ones the crossing code "
                          f"assumes (sensor_crossings.si_layer_centers): layer {k} at {centers[k]:.6f} mm "
-                         f"vs {expected[k]:.6f} mm. Only ECal_Si_thickness may change without updating "
-                         f"si_layer_centers().")
+                         f"vs {expected[k]:.6f} mm. Only the Si thickness, changed with "
+                         f"sim/make_geometry_variant.py, may differ without updating si_layer_centers().")
     return {"geo_si_thick_mm": np.float64(thick), "geo_si_centers_mm": centers,
             "geo_cell_size_mm": np.float64(cell), "geo_home": np.array(os.path.abspath(home))}
 
