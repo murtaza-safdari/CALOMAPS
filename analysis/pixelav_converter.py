@@ -20,8 +20,7 @@ PIXELAV is effectively TWO stages:
       mid-crossing position (~sensor mid-plane), NOT the entry face. NOTE: stock PIXELAV
       randomizes the impact over the central 3x3 pixels internally, so the impact is carried
       only as a LABEL (for matching) unless the PIXELAV wrapper is patched to read it (ours
-      is: analysis/pixelav/ppixelav2_list_trkpy_real_entry.c on the pixelav-integration
-      branch). See docs/pixelav_reference.md.
+      is: analysis/pixelav/ppixelav2_list_trkpy_real_entry.c). See docs/pixelav_reference.md.
 
 One record per charged-track sensor crossing. PRIMARY = Variant C (auto-selected):
 run_sim_trackermom.py reads the Si out as a Geant4 tracker, so each SimTrackerHit is one crossing
@@ -39,15 +38,20 @@ direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-
 per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
 
 DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'badeaa3' = the 7-column
-ppixelav2_list_trkpy_n_2f.c format (our driver lineage; the driver itself lives on the
-pixelav-integration branch: analysis/pixelav/ + setup/setup_pixelav.sh); 'smartpix' = the 9-column ppixelav2_custom.c
-format. ppion is the betagamma-matched pion momentum p*(m_pi/m_particle) so PIXELAV's pion dE/dx
-reproduces the real particle's ionisation. Lengths in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000).
+ppixelav2_list_trkpy_n_2f.c format (our driver lineage; the driver is analysis/pixelav/, built by
+setup/setup_pixelav.sh); 'smartpix' = the 9-column ppixelav2_custom.c format. ppion is the
+betagamma-matched pion momentum p*(m_pi/m_particle) so PIXELAV's pion dE/dx reproduces the real
+particle's ionisation. Lengths in MICRONS (PIXELAV's unit; LENGTH_UNIT_MM=1000). The
+<deck>.columns.txt legend defines every column.
+
+Outputs: <out_prefix>.json + .csv (the sensor_crossings records), <out_prefix>.pixelav.txt (the
+deck) and its .columns.txt. The default prefix sits beside the input npz:
+trackermom_X.npz -> pixelav_segments_X.
 
 Usage:
     python pixelav_converter.py [cascade.npz] [out_prefix] [--variant C|A|B|auto] [--layout smartpix|badeaa3]
 """
-import os, sys
+import argparse, os, sys
 import numpy as np
 
 # sensor_crossings.py holds the one definition of the geometry and the crossing builders, so the
@@ -56,7 +60,7 @@ import numpy as np
 from sensor_crossings import (
     ECAL_RMIN_MM, ECAL_STACK_OFFSET_MM, ECAL_RMAX_MM, SI_THICK_MM, N_FACES, FACE_PHI0_DEG,
     _NEUTRAL_PDGS, load_cascade, si_layer_centers, si_thickness_mm, face_phi, to_local, is_charged,
-    _record,
+    _record, default_npz, default_out_prefix,
     build_segments_A, build_segments_B, build_segments_C, write_intermediate,
 )
 
@@ -74,7 +78,7 @@ def pid_to_pixelav(pdg):
     return _PIXELAV_PID.get(int(pdg), 211)   # default to pion (mass-rescale approximation)
 
 
-# Rest masses (GeV) for the betagamma-matched pion momentum below.
+# Rest masses (GeV) for the betagamma-matched pion momentum below; _deck_legend names the species.
 _MASS_GEV = {11: 0.000510999, 13: 0.105658, 211: 0.139570, 321: 0.493677, 2212: 0.938272}  # e, mu, pi, K, p
 M_PION_GEV = 0.139570
 
@@ -89,12 +93,64 @@ def ppion_betagamma_matched(p_gev, pdg):
     return p_gev * (M_PION_GEV / m)
 
 
+def _deck_legend(layout, si_thick_mm=None):
+    """Text of <deck>.columns.txt: one line per deck column with its unit and definition."""
+    frame = ("# frame: sensor-local; u = across the pitch (tangential, in the global x-y plane), "
+             "v = along the barrel axis (global z), w = outward normal of the sensor face")
+    impact = ("the impact point, the hit's energy-weighted mid-crossing position (about the Si "
+              "mid-plane), not the entry face")
+    common = [
+        "# col 1 cot_alpha          = p_u/p_w, the direction slope du/dw [dimensionless]",
+        "# col 2 cot_beta           = p_v/p_w, the direction slope dv/dw [dimensionless]",
+        "# col 3 ppion [GeV/c]      = |p| * m_pi/m, the pion momentum with the particle's betagamma "
+        "(masses known for e, mu, pi, K and p and their antiparticles; any other species is "
+        "treated as a pion, ppion = |p|)",
+        "# col 4 flipped            = 1 when moving outward along the sensor normal (p_w >= 0), 0 inward",
+    ]
+    if layout == "smartpix":
+        names = "cot_alpha cot_beta ppion flipped ylocal zglobal pT hittime PID"
+        cols = common + [
+            f"# col 5 ylocal [um]        = v of {impact}; labelled ylocal, it holds the coordinate "
+            f"along the barrel axis (equal to global z)",
+            "# col 6 zglobal [um]       = u of the same point; labelled zglobal, it holds the local "
+            "across-pitch coordinate, not a global one",
+            "# col 7 pT [GeV/c]         = named pT by the driver, but holds the total |p| at the crossing",
+            "# col 8 hittime [ps]       = crossing time",
+            "# col 9 PID                = 11 for e+-, 13 for mu+-, 211 for every other species",
+        ]
+        driver = "ppixelav2_custom.c"
+        reader = ("# stock PIXELAV randomizes the impact; the position columns are labels for matching "
+                  "(docs/pixelav_reference.md)")
+    else:
+        names = "cot_alpha cot_beta ppion flipped modx mody pT"
+        cols = common + [
+            f"# col 5 modx [um]          = v of {impact}",
+            "# col 6 mody [um]          = u of the same point",
+            "# col 7 pT [GeV/c]         = named pT by the driver, but holds the total |p| at the crossing",
+        ]
+        driver = "ppixelav2_list_trkpy_n_2f.c"
+        reader = ("# stock PIXELAV randomizes the impact and ignores the position columns; the patched "
+                  "analysis/pixelav/ppixelav2_list_trkpy_real_entry.c reads them (docs/pixelav_reference.md)")
+    out = [f"# PIXELAV track list, layout {layout} ({driver} format): one track per line, "
+           f"whitespace-separated; PIXELAV does not read this legend",
+           names, frame] + cols + [
+           "# these are the tracker-route (variant C) definitions; for the calorimeter route "
+           "(variants A/B) direction, |p|, impact point and time come from Geant4 steps and production "
+           "momenta, as analysis/sensor_crossings.py describes",
+           reader,
+           "# crossings with a non-finite slope or |cot_alpha| or |cot_beta| > 10 are left out, so "
+           "deck line k is not record k of the .json/.csv"]
+    if si_thick_mm is not None:
+        out.append(f"# sensor: {si_thick_mm * 1e3:g} um silicon; the PIXELAV Stage-A model must "
+                   f"have this thickness")
+    return "\n".join(out) + "\n"
+
+
 def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
     layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (read by our patched
-        real-entry driver, analysis/pixelav/ppixelav2_list_trkpy_real_entry.c on the
-        pixelav-integration branch)
+        real-entry driver, analysis/pixelav/ppixelav2_list_trkpy_real_entry.c)
         cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
     layout='smartpix': the 9-column ppixelav2_custom.c format (the Smart Pixels lineage)
         cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
@@ -104,10 +160,13 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
     survives into the PIXELAV output for matching -- but NOTE stock PIXELAV randomizes the impact
     over the central 3x3 pixels and does NOT consume them unless the wrapper is patched (see
     docs/pixelav_reference.md). hittime is written in ps. Grazing tracks (non-finite or |cot|>10)
-    are skipped, as PIXELAV itself skips them. Also writes <out_path>.columns.txt (a legend; NOT
-    read by PIXELAV's fscanf), which records si_thick_mm when given: the deck carries no thickness,
-    so the PIXELAV Stage-A sensor model has to be built for it.
+    are skipped, as PIXELAV itself skips them, so deck line k is not record k. Also writes
+    <out_path>.columns.txt (_deck_legend; NOT read by PIXELAV's fscanf), which records si_thick_mm
+    when given: the deck carries no thickness, so the PIXELAV Stage-A sensor model has to be built
+    for it.
     """
+    if layout not in ("badeaa3", "smartpix"):
+        raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
     U = LENGTH_UNIT_MM
     lines, n_skip = [], 0
     for s in segs:
@@ -121,10 +180,9 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f %.4f %d" %
                          (ca, cb, ppion, s["flipped"], ev_um, eu_um, p, s["time_ns"] * 1000.0,
                           pid_to_pixelav(s["pdg"])))
-        elif layout == "badeaa3":
+        else:
             # 7-col format read by ppixelav2_list_trkpy_n_2f.c / our patched real-entry driver
-            # (pixelav-integration branch: analysis/pixelav/, built by setup/setup_pixelav.sh).
-            # Axis map checked against the
+            # (analysis/pixelav/, built by setup/setup_pixelav.sh). Axis map checked against the
             # driver source: col1 cot_alpha pairs with y(13-px, Lorentz) = our u and col6 mody;
             # col2 cot_beta pairs with x(21-px) = our v and col5 modx. Impact is written
             # full-truth in um; the patched driver reduces it mod-pitch to the sub-pixel impact.
@@ -133,43 +191,28 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
             # flipped = 0 -> entry face z = thick.
             lines.append("%.6f %.6f %.6f %d %.4f %.4f %.6f" %
                          (ca, cb, ppion, s["flipped"], ev_um, eu_um, p))
-        else:
-            raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
     with open(out_path, "w") as f:
         f.write("\n".join(lines) + ("\n" if lines else ""))
-    legend = {"smartpix": "cot_alpha cot_beta ppion flipped ylocal[um] zglobal[um] pT hittime[ps] PID",
-              "badeaa3":  "cot_alpha cot_beta ppion flipped modx[um]=v_entry mody[um]=u_entry pT"}[layout]
     with open(out_path + ".columns.txt", "w") as f:
-        f.write(f"# PIXELAV track-list ({layout}); lengths in microns; modx/mody carry the truth "
-                f"mid-plane impact as a LABEL (stock PIXELAV randomizes the impact; our patched "
-                f"real-entry driver consumes it -- see docs/pixelav_reference.md)\n{legend}\n")
-        if si_thick_mm is not None:
-            f.write(f"# sensor: {si_thick_mm * 1e3:g} um silicon; the PIXELAV Stage-A model must "
-                    f"have this thickness\n")
+        f.write(_deck_legend(layout, si_thick_mm))
     return out_path, len(lines), n_skip
 
 
-def main():
-    home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    argv = sys.argv[1:]
-    variant, layout, pos = "auto", "badeaa3", []
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a.startswith("--variant"):
-            variant = a.split("=", 1)[1] if "=" in a else (argv[i + 1] if i + 1 < len(argv) else variant)
-            i += 0 if "=" in a else 1
-        elif a.startswith("--layout"):
-            layout = a.split("=", 1)[1] if "=" in a else (argv[i + 1] if i + 1 < len(argv) else layout)
-            i += 0 if "=" in a else 1
-        else:
-            pos.append(a)
-        i += 1
-    default_npz = os.path.join(home, "models", "trackermom_gamma50_1evt.npz")   # prefer real-momentum source
-    if not os.path.exists(default_npz):
-        default_npz = os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
-    npz = pos[0] if len(pos) > 0 else default_npz
-    out_prefix = pos[1] if len(pos) > 1 else os.path.join(home, "models", "pixelav_segments_gamma50_1evt")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Crossing records (.json + .csv) and a PIXELAV deck "
+                                             "from an extracted npz.")
+    ap.add_argument("npz", nargs="?", help="extract_trackermom.py or extract_cascade.py output "
+                    "(default: $CALOMAPS_HOME/models/trackermom_gamma50_1evt.npz, else fullcascade_...)")
+    ap.add_argument("out_prefix", nargs="?", help="output prefix (default: pixelav_segments_X beside "
+                    "the input trackermom_X.npz / fullcascade_X.npz)")
+    ap.add_argument("--variant", default="auto", choices=("C", "A", "B", "auto"),
+                    help="C tracker hits, A calorimeter steps, B pixel centroids (default: auto)")
+    ap.add_argument("--layout", default="badeaa3", choices=("badeaa3", "smartpix"),
+                    help="deck layout (default: badeaa3)")
+    args = ap.parse_intermixed_args(argv)
+    variant, layout = args.variant, args.layout
+    npz = args.npz or default_npz()
+    out_prefix = args.out_prefix or default_out_prefix(npz, "pixelav_segments")
     d = load_cascade(npz)
 
     has_tracker = ("thx" in d) and len(np.atleast_1d(d["thx"])) > 0
