@@ -1,12 +1,14 @@
 # geometry_variant.sh -- sourced by the sim wrappers (make_pixelav_inputs.sh, generate_batched.sh,
 # generate_dataset.sh) to resolve the ECal silicon-thickness knob:
 #
-#   CALOMAPS_SI_THICKNESS_UM   sensor thickness in um; unset or 320 = the repo geometry, unchanged
+#   CALOMAPS_SI_THICKNESS_UM   sensor thickness in um; unset, or the repo geometry's own
+#                              thickness (320), simulates the repo geometry unchanged
 #
-# Any other value simulates the copy sim/make_geometry_variant.py (re)writes at
-# ${CALOMAPS_DATA_BASE:-~/CALOMAPS-data}/geometry_si<T>um/, in which only the ECal_Si_thickness
-# and air-pad constants differ (layer depths and Si mid-planes are the baseline's), and tags
-# every output name of the run with _si<T>um so it cannot overwrite or pass for baseline output.
+# Any other value simulates the copy sim/make_geometry_variant.py writes, or finds already
+# written, at ${CALOMAPS_DATA_BASE:-~/CALOMAPS-data}/geometry_si<T>um_<hash>/ (<hash>: the repo's
+# geometry/ content; the generator prints the path), in which only the ECal_Si_thickness and
+# air-pad constants differ (layer depths and Si mid-planes are the baseline's), and tags every
+# output name of the run with _si<T>um so it cannot overwrite or pass for baseline output.
 #
 # Needs REPO_DIR. Sets:
 #   COMPACT    the compact file for ddsim
@@ -33,11 +35,12 @@ if [ -n "${CALOMAPS_SI_THICKNESS_UM:-}" ]; then
         return 1
     fi
     _si_um="$(LC_ALL=C printf '%g' "$CALOMAPS_SI_THICKNESS_UM")"
-    if [ "$_si_um" != "320" ]; then
+    # The generator prints the repo's own compact when _si_um is the repo thickness.
+    COMPACT="$("${CALOMAPS_PY:-python3}" "$REPO_DIR/sim/make_geometry_variant.py" \
+                 --si-thickness-um "$_si_um")" || return 1
+    if [ "$COMPACT" != "$REPO_DIR/geometry/SiD_TestBeam.xml" ]; then
         SI_TAG="_si${_si_um}um"
-        GEO_HOME="${CALOMAPS_DATA_BASE:-$HOME/CALOMAPS-data}/geometry_si${_si_um}um"
-        COMPACT="$("${CALOMAPS_PY:-python3}" "$REPO_DIR/sim/make_geometry_variant.py" \
-                     --si-thickness-um "$_si_um" --out "$GEO_HOME")" || return 1
+        GEO_HOME="$(dirname "$(dirname "$COMPACT")")"
         echo "Si thickness ${_si_um} um: geometry variant $COMPACT (outputs tagged $SI_TAG)"
     fi
     unset _si_um

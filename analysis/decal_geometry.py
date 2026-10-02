@@ -1,51 +1,76 @@
 """DECAL barrel geometry read from a config root's compact XML (stdlib + numpy only).
 
 A config root is a directory holding geometry/SiD_TestBeam.xml and geometry/my_custom_ecal.xml:
-the repo itself, or a copy written by sim/make_geometry_variant.py. Every reader of the layer
-stack (extract_readouts.py, the crossing extractors, the variant generator) parses it here.
+the repo itself, or a copy written by sim/make_geometry_variant.py. extract_readouts.py, the
+crossing extractors and the variant generator read the layer stack through this module.
+sensor_crossings.si_layer_centers() keeps its own numeric copy of the baseline Si mid-planes;
+the crossing extractors compare it with layer_radii() (sensor_crossings.geometry_provenance)
+and refuse a geometry where the two disagree.
 
     layer_radii(home)      per-layer Si mid-plane apothems [mm] (ECalBarrel_rmin + in-layer offset)
     layer_stack(home)      per-layer [(material, thickness_mm), ...], repeats expanded
     si_thickness_mm(home)  the sensor silicon thickness [mm]
     cell_size_mm(home)     the pixel pitch [mm] (ECal_cell_size)
+    geometry_hash(home)    content hash of home/geometry/
+    variant_home(T, home)  where sim/make_geometry_variant.py puts the T-micron variant of home
 
 The radii are the compact's own numbers. The ECalBarrel_o2_v03 driver places the whole stack a
 further env_safety (0.1 mm) out; sensor_crossings.ECAL_STACK_OFFSET_MM carries that offset.
 """
-import os, re, xml.etree.ElementTree as ET
+import ast, hashlib, math, operator, os, xml.etree.ElementTree as ET
 import numpy as np
 
 UNITS_MM = {'m': 1000.0, 'cm': 10.0, 'mm': 1.0, 'um': 1e-3, 'micron': 1e-3, 'nm': 1e-6}
-_NAME = re.compile(r'\b[A-Za-z_]\w*')
+_BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+           ast.Div: operator.truediv, ast.Pow: operator.pow}
+_UNARYOPS = {ast.USub: operator.neg, ast.UAdd: operator.pos}
 
 
 def _pv(v, c, _resolving=()):
-    """Evaluate a compact value in mm (lengths) or as a plain number. Constant names from `c`
-    are resolved wherever they appear, including inside expressions; unit names are whole-word
-    ('50*um' parses, '50um' does not, as ddsim also rejects it). An unknown name or unit raises
-    ValueError instead of yielding 0."""
+    """Evaluate a compact value in mm (lengths) or as a plain number.
+
+    Allowed: numbers, + - * /, power (^ as in DD4hep's evaluator, or **), unary signs,
+    parentheses, unit names and the names of constants in `c`, which are resolved wherever they
+    appear. Unit names are whole words ('50*um' parses, '50um' does not, as ddsim also rejects
+    it). Anything else -- an unknown name or unit, a constant defined in terms of itself, a
+    function call, a non-finite result -- raises ValueError instead of yielding a number."""
     if not v: return 0.0
-    unknown = []
 
-    def sub(m):
-        name = m.group(0)
-        if name in UNITS_MM:
-            return repr(UNITS_MM[name])
-        if name in c:
-            if name in _resolving:
-                raise ValueError(f"constant {name!r} is defined in terms of itself")
-            return "(" + repr(_pv(c[name], c, _resolving + (name,))) + ")"
-        unknown.append(name)
-        return name
+    def fail(why):
+        return ValueError(f"cannot parse geometry value {v!r} ({why}; "
+                          f"units understood: {', '.join(sorted(UNITS_MM))})")
 
-    s = _NAME.sub(sub, v)
-    try: return float(eval(s, {"__builtins__": None}, {}))
-    except Exception:
-        try: return float(v)
-        except Exception:
-            names = f"unknown name(s) {', '.join(map(repr, unknown))}; " if unknown else ""
-            raise ValueError(f"cannot parse geometry value {v!r} "
-                             f"({names}units understood: {', '.join(sorted(UNITS_MM))})")
+    try:
+        tree = ast.parse(v.strip().replace("^", "**"), mode="eval")
+    except SyntaxError:
+        raise fail("not an arithmetic expression") from None
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    unknown = sorted(names - set(UNITS_MM) - set(c))
+    if unknown:
+        raise fail(f"unknown name(s) {', '.join(map(repr, unknown))}")
+
+    def ev(n):
+        if isinstance(n, ast.Constant) and type(n.value) in (int, float):
+            return float(n.value)
+        if isinstance(n, ast.BinOp) and type(n.op) in _BINOPS:
+            return _BINOPS[type(n.op)](ev(n.left), ev(n.right))
+        if isinstance(n, ast.UnaryOp) and type(n.op) in _UNARYOPS:
+            return _UNARYOPS[type(n.op)](ev(n.operand))
+        if isinstance(n, ast.Name):
+            if n.id in UNITS_MM:
+                return UNITS_MM[n.id]
+            if n.id in _resolving:
+                raise ValueError(f"constant {n.id!r} is defined in terms of itself")
+            return _pv(c[n.id], c, _resolving + (n.id,))
+        raise fail(f"{type(n).__name__} is not allowed")
+
+    try:
+        x = ev(tree.body)
+    except (ArithmeticError, TypeError) as e:
+        raise fail(f"{type(e).__name__}: {e}") from None
+    if not (isinstance(x, float) and math.isfinite(x)):
+        raise fail(f"evaluates to {x!r}")
+    return x
 
 
 def compact_constants(calomaps_home):
@@ -133,3 +158,33 @@ def pop_home_arg(argv, default):
             rest.append(a)
         i += 1
     return home, rest
+
+
+def geometry_files(calomaps_home):
+    """Relative paths of the files under <home>/geometry, sorted, skipping hidden entries
+    (.DS_Store, ._*, .nfs*)."""
+    src, out = os.path.join(calomaps_home, "geometry"), []
+    for root, dirs, files in os.walk(src):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        out += [os.path.relpath(os.path.join(root, f), src) for f in sorted(files) if not f.startswith(".")]
+    return out
+
+
+def geometry_hash(calomaps_home):
+    """sha256 hex digest of <home>/geometry: every file's relative path and bytes."""
+    h, src = hashlib.sha256(), os.path.join(calomaps_home, "geometry")
+    for rel in geometry_files(calomaps_home):
+        with open(os.path.join(src, rel), "rb") as f:
+            data = f.read()
+        h.update(f"{rel}\0{len(data)}\0".encode())
+        h.update(data)
+    return h.hexdigest()
+
+
+def variant_home(si_thickness_um, source_home, data_base=None):
+    """The config root sim/make_geometry_variant.py writes, by default, for the si_thickness_um
+    variant of source_home's geometry: <data_base>/geometry_si<T>um_<hash>, where <hash> is the
+    first 10 hex digits of geometry_hash(source_home) and data_base defaults to
+    $CALOMAPS_DATA_BASE, else ~/CALOMAPS-data. A changed source geometry gets its own directory."""
+    base = data_base or os.environ.get("CALOMAPS_DATA_BASE") or os.path.expanduser("~/CALOMAPS-data")
+    return os.path.join(base, "geometry_si%gum_%s" % (si_thickness_um, geometry_hash(source_home)[:10]))
