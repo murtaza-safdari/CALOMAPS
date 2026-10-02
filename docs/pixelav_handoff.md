@@ -68,7 +68,8 @@ to its MCParticle.
 > the silicon is within 5% (`CALOMAPS_PATH_TOLERANCE=0.05`) of that straight line; soft
 > electrons that start, stop, scatter or curl in the sensor are left out, and so are tracks
 > steeper than |cot| = 10, which PIXELAV skips. In 50 GeV photon showers that keeps 65% of the
-> crossings, carrying 44% of the silicon energy, at 100 µm, and 54% carrying 41% at 320 µm.
+> crossings, carrying 44% of the silicon energy, at 100 µm, and 54% carrying 41% at 320 µm (the shares
+> move by a few percent from one shower to the next).
 > `CALOMAPS_DECK_SELECT=all` writes every crossing PIXELAV processes. The legend lists the counts
 > per reason; the `.json`/`.csv` records keep every crossing (`deck_line`, `deck_drop`).
 > A deck is for per-crossing clusters. Its clusters do not add up to the charge the shower leaves
@@ -272,7 +273,7 @@ one-job smoke test.
 | `PIXELAV_SENSOR` | `decal320` | the sensor model: `decal320` or `bpix100_50x25` |
 | `PIXELAV_SENSOR_DIR` | none | directory with the `bpix100_50x25` model's `ppixel2.init` and `wgt_pot.init` (required for it) |
 | `PIXELAV_ALLOW_BFIELD` | `0` | `1` accepts a model with a non-zero B field (the CALOMAPS simulation has none) |
-| `PIXELAV_PY` | `python3` on `PATH` | interpreter for the `decal320` generator, run with `PYTHONPATH` cleared (e.g. `/opt/conda/bin/python3` from a Key4hep-sourced shell) |
+| `PIXELAV_PY` | `python3` on `PATH` | interpreter for the `decal320` generator, run with `PYTHONPATH` cleared (e.g. the JupyterLab image's own `python3`, by its full path, from a Key4hep-sourced shell) |
 | `PIXELAV_UPSTREAM` | `https://github.com/badeaa3/pixelav.git` | where to clone from (a local clone works); the pinned commit is checked out either way |
 
 The two sensor models:
@@ -356,6 +357,10 @@ Measured with the 100 µm, 50 × 25 µm model: the pairs made equal deposit / 3.
 charge collected equals the pairs made (ratio 1.0000). A 50 GeV photon event at 100 µm holds
 about 157k steps and 65 million pairs; the driver takes about 15 µs of CPU per pair, so 20 events
 take about 15 minutes on 30 cores.
+
+From the charge maps, `analysis/pixelav/reticles.py` cuts fixed blocks of pixels with the
+crossings in them and `analysis/pixelav/mip_counting.py` estimates the number of crossings per
+block from its hit map: [`reticle_mip_counting.md`](reticle_mip_counting.md).
 
 ---
 

@@ -10,7 +10,9 @@
 > [`setup/setup_pixelav.sh`](setup/setup_pixelav.sh) (build PIXELAV and a sensor model),
 > [`docs/pixelav_handoff.md`](docs/pixelav_handoff.md) +
 > [`docs/pixelav_reference.md`](docs/pixelav_reference.md) (the recipe and the format /
-> conventions reference), and notebook
+> conventions reference),
+> [`docs/reticle_mip_counting.md`](docs/reticle_mip_counting.md) (reticles of the charge maps and
+> the number of particles in each from its hit map), and notebook
 > [`08_pixelav_deck_inspection.ipynb`](notebooks/08_pixelav_deck_inspection.ipynb) (validate a
 > deck before sending it).
 
@@ -83,6 +85,7 @@ CALOMAPS/
 │   ├── pixelav_handoff.md             ← [this branch] PIXELAV recipe: inputs, build, runs, hand-off
 │   ├── pixelav_reference.md           ← [this branch] PIXELAV formats, frames + conventions
 │   ├── pixelav_journey_log.md         ← [this branch] dated log of the PIXELAV build + checks
+│   ├── reticle_mip_counting.md        ← [this branch] counting particles per reticle from the hit map
 │   └── figures/                       ← (generated output; the notebooks render inline)
 ├── setup/
 │   ├── setup_calomaps.sh              ← source from JupyterLab terminal to bootstrap env

@@ -32,7 +32,7 @@
 #   PIXELAV_ALLOW_BFIELD=1  accept a sensor model whose B field is not zero (refused by
 #                        default: the CALOMAPS simulation has no magnetic field)
 #   PIXELAV_PY           python3 with numpy for the decal320 generator, run with PYTHONPATH
-#                        cleared (e.g. /opt/conda/bin/python3 from a Key4hep-sourced shell, whose
+#                        cleared (e.g. the JupyterLab image's own python3 from a Key4hep-sourced shell, whose
 #                        python-3.13 PYTHONPATH breaks other interpreters). Default: python3 on
 #                        PATH, in the current environment.
 #   PIXELAV_UPSTREAM     where to clone PIXELAV from (default the public mirror below; a local

@@ -413,7 +413,8 @@ constant momentum, so a crossing is left out when it is
 `--select all` only the grazing and steep ones. Records without a path length (variants A and B)
 pass the path tests and are counted as `path_unknown`. The deck legend carries the counts and the
 share of the deposited energy per reason. In 50 GeV photon showers `through` keeps 65% of the
-crossings, carrying 44% of the silicon energy, at 100 µm, and 54% carrying 41% at 320 µm. Most
+crossings, carrying 44% of the silicon energy, at 100 µm, and 54% carrying 41% at 320 µm (the shares move
+by a few percent from one shower to the next). Most
 crossings below 3 MeV/c are left out, and almost none above 30 MeV/c.
 
 ### Deposit-job tables (`<prefix>.jobs.npz`, from `deposit_jobs.py`)
