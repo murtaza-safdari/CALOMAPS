@@ -93,19 +93,57 @@ def ppion_betagamma_matched(p_gev, pdg):
     return p_gev * (M_PION_GEV / m)
 
 
-def _deck_legend(layout, si_thick_mm=None):
-    """Text of <deck>.columns.txt: one line per deck column with its unit and definition."""
+# What the records of each variant hold (sensor_crossings.build_segments_A/B/C), as the deck
+# legend states it: the direction behind cot_alpha/cot_beta/flipped, the impact point, |p|, time.
+_VARIANT_TERMS = {
+    "C": dict(
+        slope_u="p_u/p_w, the direction slope du/dw",
+        slope_v="p_v/p_w, the direction slope dv/dw",
+        outward="p_w >= 0",
+        impact=("the impact point, the hit's energy-weighted mid-crossing position (about the Si "
+                "mid-plane), not the entry face"),
+        p="the total |p| at the crossing",
+        time="crossing time",
+        route=("# these are the tracker-route (variant C) definitions; analysis/sensor_crossings.py "
+               "also describes the calorimeter-route variants A and B")),
+    "A": dict(
+        slope_u=("du/dw, the direction slope of the displacement from the crossing's earliest to its "
+                 "latest Geant4 step (of the production momentum when those are within 0.02 mm)"),
+        slope_v="dv/dw, the direction slope from the same displacement or momentum",
+        outward="dw >= 0",
+        impact="the impact point, the position of the crossing's earliest Geant4 step",
+        p="the particle's total |p| at production, not at the crossing",
+        time="time of the crossing's earliest Geant4 step",
+        route=("# these are the calorimeter-route variant A definitions (time-ordered Geant4 steps, "
+               "which carry no momentum); analysis/sensor_crossings.py also describes variants B and C")),
+    "B": dict(
+        slope_u="p_u/p_w of the particle's production momentum, the direction slope du/dw",
+        slope_v="p_v/p_w of the production momentum, the direction slope dv/dw",
+        outward="p_w >= 0",
+        impact=("the impact point, the energy-weighted centroid of the pixel hits holding the "
+                "particle's deposits in the layer, not a point on the track"),
+        p="the particle's total |p| at production, not at the crossing",
+        time="0, variant B has no crossing time",
+        route=("# these are the calorimeter-route variant B definitions (pixel hits and production "
+               "momenta, the coarsest route); analysis/sensor_crossings.py also describes variants A and C")),
+}
+
+
+def _deck_legend(layout, si_thick_mm=None, variant="C"):
+    """Text of <deck>.columns.txt: one line per deck column with its unit and definition, as the
+    records of `variant` (A, B or C) define them."""
+    v = _VARIANT_TERMS[variant]
     frame = ("# frame: sensor-local; u = across the pitch (tangential, in the global x-y plane), "
              "v = along the barrel axis (global z), w = outward normal of the sensor face")
-    impact = ("the impact point, the hit's energy-weighted mid-crossing position (about the Si "
-              "mid-plane), not the entry face")
+    impact = v["impact"]
     common = [
-        "# col 1 cot_alpha          = p_u/p_w, the direction slope du/dw [dimensionless]",
-        "# col 2 cot_beta           = p_v/p_w, the direction slope dv/dw [dimensionless]",
+        f"# col 1 cot_alpha          = {v['slope_u']} [dimensionless]",
+        f"# col 2 cot_beta           = {v['slope_v']} [dimensionless]",
         "# col 3 ppion [GeV/c]      = |p| * m_pi/m, the pion momentum with the particle's betagamma "
         "(masses known for e, mu, pi, K and p and their antiparticles; any other species is "
         "treated as a pion, ppion = |p|)",
-        "# col 4 flipped            = 1 when moving outward along the sensor normal (p_w >= 0), 0 inward",
+        f"# col 4 flipped            = 1 when moving outward along the sensor normal ({v['outward']}), "
+        f"0 inward",
     ]
     if layout == "smartpix":
         names = "cot_alpha cot_beta ppion flipped ylocal zglobal pT hittime PID"
@@ -114,8 +152,8 @@ def _deck_legend(layout, si_thick_mm=None):
             f"along the barrel axis (equal to global z)",
             "# col 6 zglobal [um]       = u of the same point; labelled zglobal, it holds the local "
             "across-pitch coordinate, not a global one",
-            "# col 7 pT [GeV/c]         = named pT by the driver, but holds the total |p| at the crossing",
-            "# col 8 hittime [ps]       = crossing time",
+            f"# col 7 pT [GeV/c]         = named pT by the driver, but holds {v['p']}",
+            f"# col 8 hittime [ps]       = {v['time']}",
             "# col 9 PID                = 11 for e+-, 13 for mu+-, 211 for every other species",
         ]
         driver = "ppixelav2_custom.c"
@@ -126,7 +164,7 @@ def _deck_legend(layout, si_thick_mm=None):
         cols = common + [
             f"# col 5 modx [um]          = v of {impact}",
             "# col 6 mody [um]          = u of the same point",
-            "# col 7 pT [GeV/c]         = named pT by the driver, but holds the total |p| at the crossing",
+            f"# col 7 pT [GeV/c]         = named pT by the driver, but holds {v['p']}",
         ]
         driver = "ppixelav2_list_trkpy_n_2f.c"
         reader = ("# stock PIXELAV randomizes the impact and ignores the position columns; the patched "
@@ -134,9 +172,7 @@ def _deck_legend(layout, si_thick_mm=None):
     out = [f"# PIXELAV track list, layout {layout} ({driver} format): one track per line, "
            f"whitespace-separated; PIXELAV does not read this legend",
            names, frame] + cols + [
-           "# these are the tracker-route (variant C) definitions; for the calorimeter route "
-           "(variants A/B) direction, |p|, impact point and time come from Geant4 steps and production "
-           "momenta, as analysis/sensor_crossings.py describes",
+           v["route"],
            reader,
            "# crossings with a non-finite slope or |cot_alpha| or |cot_beta| > 10 are left out, so "
            "deck line k is not record k of the .json/.csv"]
@@ -146,7 +182,7 @@ def _deck_legend(layout, si_thick_mm=None):
     return "\n".join(out) + "\n"
 
 
-def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
+def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None, variant=None):
     """Emit a PIXELAV Stage-B per-track 'track list' (one whitespace-separated track per line).
 
     layout='badeaa3' (default): the 7-column ppixelav2_list_trkpy_n_2f.c format (read by our patched
@@ -156,17 +192,24 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
         cot_alpha  cot_beta  ppion  flipped  ylocal  zglobal  pT  hittime  PID
 
     Driving fields = cot_alpha, cot_beta, ppion (GeV/c), flipped, PID. The length-label columns
-    (ylocal/zglobal or modx/mody) carry the per-crossing truth entry point in MICRONS so it
-    survives into the PIXELAV output for matching -- but NOTE stock PIXELAV randomizes the impact
+    (ylocal/zglobal or modx/mody) carry the record's impact point (entry_u/entry_v; what it is
+    depends on the variant, see the legend) in MICRONS so it survives into the PIXELAV output for
+    matching -- but NOTE stock PIXELAV randomizes the impact
     over the central 3x3 pixels and does NOT consume them unless the wrapper is patched (see
     docs/pixelav_reference.md). hittime is written in ps. Grazing tracks (non-finite or |cot|>10)
     are skipped, as PIXELAV itself skips them, so deck line k is not record k. Also writes
     <out_path>.columns.txt (_deck_legend; NOT read by PIXELAV's fscanf), which records si_thick_mm
     when given: the deck carries no thickness, so the PIXELAV Stage-A sensor model has to be built
-    for it.
+    for it. The legend defines the columns as the records' variant (A, B or C) fills them;
+    variant=None takes it from the records' own "variant" field.
     """
     if layout not in ("badeaa3", "smartpix"):
         raise ValueError(f"unknown layout {layout!r} (use 'smartpix' or 'badeaa3')")
+    if variant is None:
+        found = {s["variant"] for s in segs}
+        if len(found) > 1:
+            raise ValueError(f"records of variants {sorted(found)}: one deck legend describes one variant")
+        variant = found.pop() if found else "C"
     U = LENGTH_UNIT_MM
     lines, n_skip = [], 0
     for s in segs:
@@ -194,7 +237,7 @@ def write_pixelav_deck(segs, out_path, layout="badeaa3", si_thick_mm=None):
     with open(out_path, "w") as f:
         f.write("\n".join(lines) + ("\n" if lines else ""))
     with open(out_path + ".columns.txt", "w") as f:
-        f.write(_deck_legend(layout, si_thick_mm))
+        f.write(_deck_legend(layout, si_thick_mm, variant))
     return out_path, len(lines), n_skip
 
 
@@ -239,7 +282,7 @@ def main(argv=None):
     # at SI_THICK_MM.
     thick = si_thickness_mm(d) if "geo_si_thick_mm" in d else None
     deck, n_deck, n_skip = write_pixelav_deck(segs, out_prefix + ".pixelav.txt", layout=layout,
-                                              si_thick_mm=thick)
+                                              si_thick_mm=thick, variant=variant)
 
     n_charged = int(is_charged(d["pdg"]).sum())
     n_src = len(np.atleast_1d(d["thx"])) if ("thx" in d) else (len(d["cpdg"]) if "cpdg" in d else 0)
