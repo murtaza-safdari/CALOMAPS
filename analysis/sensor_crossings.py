@@ -4,8 +4,9 @@ Every charged particle in a shower that traverses one of the 30 silicon layers i
 "crossing". This module reduces the simulation output to one record per crossing, holding
 exactly what a detailed sensor-level simulation needs to re-simulate that traversal:
 
-  - WHERE:  the impact point on the sensor, in global coordinates and in the sensor's
-            local frame (u across-pitch, v along the barrel axis, w through the thickness)
+  - WHERE:  the impact point in the sensor's local frame (u across-pitch, v along the barrel
+            axis, w through the thickness) and the azimuth of the face it is on. Records hold
+            no global coordinates; x = w cos(phi) - u sin(phi), y = w sin(phi) + u cos(phi), z = v
   - WHICH WAY: the direction of traversal, as local direction slopes du/dw and dv/dw
             (the cotangents of the track's inclination to the sensor plane -- the standard
             pixel-sensor convention) plus the sign along the sensor normal
@@ -33,14 +34,43 @@ perpendicular distance from the barrel axis to the flat face -- so the local dep
 is the per-face outward normal, u is tangential (in the x-y plane) and v is the cylinder
 z. The per-face normal azimuth is derived from each hit's position, never hardcoded.
 
-The records are written as .json + .csv next to the input .npz. Downstream consumers
-format them further -- e.g. the `pixelav-inputs` branch converts them into input decks
-for PIXELAV, the silicon-pixel charge-transport simulation our collaborators run.
+RECORDS: one dict per crossing, fields in this order (build_segments_A/B/C via _record):
+  field              unit   meaning
+  track_id           -      index of the producing particle in the npz MCParticle arrays (pdg, px...)
+  layer_id           -      Si layer 0..29 whose mid-plane is nearest in depth
+  pdg                -      PDG code of the particle
+  p_GeV              GeV/c  raw momentum magnitude |p|: at the crossing (C), the particle's
+                            production |p| (A, B). Not the betagamma-matched ppion of a PIXELAV deck
+  entry_u, entry_v   mm     impact point in the sensor-local frame (u across the pitch, v along the
+                            barrel axis = global z). C: the hit's energy-weighted mid-crossing
+                            position (about the Si mid-plane), not the entry face; A: the
+                            crossing's earliest step; B: the energy-weighted pixel centroid
+  cot_alpha          -      du/dw of the direction: of the momentum at the crossing (C, = p_u/p_w),
+                            of the entry->exit displacement (A; the production momentum when flags
+                            holds dir_from_momentum), of the production momentum (B)
+  cot_beta           -      dv/dw, from the same direction
+  flipped            -      1 = moving outward along the face normal (dw >= 0), 0 = inward
+  sensor_normal_phi  rad    azimuth of the face's outward normal in the global x-y plane
+  depth_w_mm         mm     w of the impact point: distance from the barrel axis along that normal
+  energy_dep_GeV     GeV    energy the crossing deposited in the Si (a label)
+  n_steps            -      Geant4 steps combined into the crossing (1 for C)
+  time_ns            ns     crossing time: the hit time (C), the earliest step's (A), 0 (B)
+  variant            -      "A", "B" or "C"
+  flags              -      "|"-separated: tracker_hit (C), dir_from_momentum (A),
+                            pixel_centroid (B), grazing
+A grazing crossing (direction parallel to the sensor plane, |dw| <= 1e-9) has cot_alpha =
+cot_beta = inf, written as Infinity in the .json and inf in the .csv, and the flag grazing.
+
+The records are written as <out_prefix>.json + .csv; by default beside the input npz
+(trackermom_X.npz -> sensor_crossings_X). analysis/pixelav_converter.py builds the PIXELAV deck
+(PIXELAV: the silicon-pixel charge-transport simulation our collaborators run) from the same
+records. Build decks with it rather than by hand: it converts to microns, swaps |p| for the
+betagamma-matched pion momentum and leaves out the grazing crossings.
 
 Usage:
     python sensor_crossings.py [crossings.npz] [out_prefix] [--variant C|A|B|auto]
 """
-import os, sys, json
+import argparse, json, math, os, re, sys
 import numpy as np
 
 import decal_geometry
@@ -50,8 +80,8 @@ ECAL_RMIN_MM = 1264.0
 # mod_y_off = inner_r + ry + trd_z + tolerance (k4geo ECalBarrel_o2_v03_geo.cpp), where
 # tolerance = ecal_barrel_tolerance = env_safety = 0.1 mm (SiD_TestBeam.xml) and ry = 0 (no
 # support rails). So every layer sits 0.1 mm beyond the naive rmin-based depth. Verified
-# empirically: tracker-hit depths cluster at +0.100 mm from the naive mid-planes and span
-# exactly +/-0.16 mm (the Si half-thickness) around the corrected ones.
+# empirically on the 320 um baseline: tracker-hit depths cluster at +0.100 mm from the naive
+# mid-planes and span exactly +/-0.16 mm (half of 320 um) around the corrected ones.
 ECAL_STACK_OFFSET_MM = 0.1
 # Outer apothem = inner apothem + stack offset + total radial stack depth (20 x 3.75 mm +
 # 10 x 6.25 mm layers; pitches match si_layer_centers() / geometry/my_custom_ecal.xml).
@@ -59,6 +89,9 @@ ECAL_RMAX_MM = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM + 20 * 3.75 + 10 * 6.25   # =
 SI_THICK_MM = 0.32   # baseline sensor thickness (320 um); si_thickness_mm(d) prefers the npz's own
 N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# The sim wrappers append _si<T>um to every output name of a silicon-thickness variant run.
+_SI_TAG = re.compile(r"_si([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
 
 # Species that leave no reconstructable track in silicon: neutrals (no primary ionization)
 # and nuclei (slow recoils, not minimum-ionizing tracks; PDG |code| > 1e9), which is why the
@@ -128,15 +161,59 @@ def geometry_provenance(home):
     if centers.shape != expected.shape:
         raise SystemExit(f"{home}/geometry has {centers.size} Si layers; the crossing code "
                          f"(sensor_crossings.si_layer_centers) assumes {expected.size}")
-    dev = np.abs(centers - expected)
-    if dev.max() > 1e-6:
-        k = int(np.argmax(dev))
+    off = ~(np.abs(centers - expected) <= 1e-6)
+    if off.any():
+        k = int(np.argmax(off))
         raise SystemExit(f"Si mid-planes in {home}/geometry differ from the ones the crossing code "
                          f"assumes (sensor_crossings.si_layer_centers): layer {k} at {centers[k]:.6f} mm "
                          f"vs {expected[k]:.6f} mm. Only the Si thickness, changed with "
                          f"sim/make_geometry_variant.py, may differ without updating si_layer_centers().")
     return {"geo_si_thick_mm": np.float64(thick), "geo_si_centers_mm": centers,
             "geo_cell_size_mm": np.float64(cell), "geo_home": np.array(os.path.abspath(home))}
+
+
+def thickness_tag_um(path):
+    """The silicon thickness [um] an _si<T>um tag in path's file name names, or None."""
+    tags = {float(t) for t in _SI_TAG.findall(os.path.basename(path))}
+    if len(tags) > 1:
+        raise SystemExit(f"{os.path.basename(path)}: more than one _si<T>um thickness tag")
+    return tags.pop() if tags else None
+
+
+def check_thickness_label(in_path, geo, home):
+    """Exit unless the silicon thickness in_path's name implies equals the thickness of the --home
+    geometry `home` (geo = geometry_provenance(home)). An _si<T>um tag names T; an untagged name
+    means this checkout's own geometry (REPO). Every thickness variant has the baseline's Si
+    mid-planes, so the hit positions cannot tell the two apart."""
+    base_um = decal_geometry.si_thickness_mm(REPO) * 1e3
+    tag_um = thickness_tag_um(in_path)
+    named_um = base_um if tag_um is None else tag_um
+    home_um = float(geo["geo_si_thick_mm"]) * 1e3
+    if math.isclose(named_um, home_um, rel_tol=1e-5):
+        return
+    if tag_um is None:
+        named = f"has no _si<T>um tag, which means this checkout's {base_um:g} um geometry"
+    else:
+        named = f"is tagged _si{tag_um:g}um"
+    if math.isclose(named_um, base_um, rel_tol=1e-5):
+        match = REPO
+    else:
+        match = (f"{decal_geometry.variant_home(named_um, REPO)} (the {named_um:g} um variant "
+                 f"`python {REPO}/sim/make_geometry_variant.py --si-thickness-um {named_um:g}` writes)")
+    raise SystemExit(f"{os.path.basename(in_path)} {named}, but --home {home} has {home_um:g} um "
+                     f"silicon; nothing written. The --home for this input is {match}")
+
+
+def default_out_prefix(npz, kind):
+    """<kind>_X beside npz, X being its file name without .npz and without a leading trackermom_
+    or fullcascade_: trackermom_gamma50_1evt_si100um.npz -> sensor_crossings_gamma50_1evt_si100um."""
+    stem = os.path.basename(npz)
+    stem = stem[:-4] if stem.endswith(".npz") else stem
+    for lead in ("trackermom_", "fullcascade_"):
+        if stem.startswith(lead):
+            stem = stem[len(lead):]
+            break
+    return os.path.join(os.path.dirname(npz), f"{kind}_{stem}")
 
 
 def face_phi(x, y):
@@ -316,24 +393,27 @@ def write_intermediate(segs, out_prefix):
     return out_prefix + ".json", out_prefix + ".csv"
 
 
-def main():
-    home = os.environ.get("CALOMAPS_HOME", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    argv = sys.argv[1:]
-    variant, pos = "auto", []
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a.startswith("--variant"):
-            variant = a.split("=", 1)[1] if "=" in a else (argv[i + 1] if i + 1 < len(argv) else variant)
-            i += 0 if "=" in a else 1
-        else:
-            pos.append(a)
-        i += 1
-    default_npz = os.path.join(home, "models", "trackermom_gamma50_1evt.npz")   # prefer real-momentum source
-    if not os.path.exists(default_npz):
-        default_npz = os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
-    npz = pos[0] if len(pos) > 0 else default_npz
-    out_prefix = pos[1] if len(pos) > 1 else os.path.join(home, "models", "sensor_crossings_gamma50_1evt")
+def default_npz():
+    """$CALOMAPS_HOME/models (else this checkout's models/): the tracker-route gamma 50 GeV npz,
+    else the calorimeter-route one."""
+    home = os.environ.get("CALOMAPS_HOME", REPO)
+    npz = os.path.join(home, "models", "trackermom_gamma50_1evt.npz")   # prefer real-momentum source
+    return npz if os.path.exists(npz) else os.path.join(home, "models", "fullcascade_gamma50_1evt.npz")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Per-sensor charged-track crossing records (.json + .csv) "
+                                             "from an extracted npz.")
+    ap.add_argument("npz", nargs="?", help="extract_trackermom.py or extract_cascade.py output "
+                    "(default: $CALOMAPS_HOME/models/trackermom_gamma50_1evt.npz, else fullcascade_...)")
+    ap.add_argument("out_prefix", nargs="?", help="output prefix (default: sensor_crossings_X beside "
+                    "the input trackermom_X.npz / fullcascade_X.npz)")
+    ap.add_argument("--variant", default="auto", choices=("C", "A", "B", "auto"),
+                    help="C tracker hits, A calorimeter steps, B pixel centroids (default: auto)")
+    args = ap.parse_intermixed_args(argv)
+    variant = args.variant
+    npz = args.npz or default_npz()
+    out_prefix = args.out_prefix or default_out_prefix(npz, "sensor_crossings")
     d = load_cascade(npz)
 
     has_tracker = ("thx" in d) and len(np.atleast_1d(d["thx"])) > 0

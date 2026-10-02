@@ -141,25 +141,6 @@ def cell_size_mm(calomaps_home):
     return v
 
 
-def pop_home_arg(argv, default):
-    """Split `--home DIR` (or `--home=DIR`) out of a script's argument list.
-    Returns (home, remaining arguments in their original order)."""
-    home, rest, i = default, [], 0
-    while i < len(argv):
-        a = argv[i]
-        if a == "--home":
-            if i + 1 >= len(argv):
-                raise SystemExit("--home needs a directory (the config root that was simulated)")
-            home, i = argv[i + 1], i + 2
-            continue
-        if a.startswith("--home="):
-            home = a.split("=", 1)[1]
-        else:
-            rest.append(a)
-        i += 1
-    return home, rest
-
-
 def geometry_files(calomaps_home):
     """Relative paths of the files under <home>/geometry, sorted, skipping hidden entries
     (.DS_Store, ._*, .nfs*)."""
