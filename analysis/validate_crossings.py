@@ -11,9 +11,12 @@ an npz without geometry provenance. --si-thickness-um tests another value; when 
 a different geo_si_thick_mm the run says so and fails, whatever the data show. Both checks use
 sensor_crossings' own local frame, face assignment and layer centres:
 
-  (a) containment: every tracker hit lies in the Si slab of its nearest layer,
-      |w - centre| <= thickness/2 + 0.002 mm. A hit position is an energy-weighted point of
-      the crossing's steps, all of which are inside the sensitive slab.
+  (a) containment: every tracker hit of a charged particle (the hits that become crossings)
+      lies in the Si slab of its nearest layer, |w - centre| <= thickness/2 + 0.002 mm. The
+      hit position is the midpoint of the hit's first and last step points (the run header's
+      action.tracker HitPositionCombination 2), inside the slab when both points are. Hits of
+      neutral particles are counted, not tested: a neutron hit of a 3-event 50 GeV photon run
+      sat 2.0 mm outside every slab.
   (b) path length (path_length_test, which extract_trackermom.py also applies before it writes
       an npz): for clean through-going crossings the Geant4 pathLength is the straight chord
       thickness/|cos(theta)|, theta being the inclination to the sensor normal. Clean means: a
@@ -127,11 +130,19 @@ def main(argv=None):
 
     _, w, layer, centers = _layers(d)
     resid = w - centers[layer]
-    n_out = int(np.count_nonzero(~(np.abs(resid) <= half + DEPTH_TOL_MM)))
+    charged = sc.is_charged(np.asarray(d["pdg"])[np.asarray(d["tmc"]).astype(int)])
+    outside = ~(np.abs(resid) <= half + DEPTH_TOL_MM)
+    n_out = int(np.count_nonzero(outside & charged))
+    n_out_neutral = int(np.count_nonzero(outside & ~charged))
     ok_a = n_out == 0
-    print(f"  (a) containment: {thx.size} hits; depth residual w - centre in "
-          f"[{resid.min():+.4f}, {resid.max():+.4f}] mm; allowed |.| <= {half + DEPTH_TOL_MM:.4f} mm; "
+    span = (f"[{resid[charged].min():+.4f}, {resid[charged].max():+.4f}] mm" if charged.any()
+            else "(no charged hits)")
+    print(f"  (a) containment: {int(charged.sum())} hits of charged particles (of {thx.size}); depth "
+          f"residual w - centre in {span}; allowed |.| <= {half + DEPTH_TOL_MM:.4f} mm; "
           f"{n_out} outside -> {'PASS' if ok_a else 'FAIL'}")
+    if n_out_neutral:
+        print(f"      {n_out_neutral} hit(s) of neutral particles outside their slab; not tested, "
+              f"neutral hits make no crossings")
 
     b = path_length_test(d, thick)
     print(f"  (b) path length: {b['n_sel']} clean crossings (charged, |p| > {P_MIN_GEV:g} GeV, "
