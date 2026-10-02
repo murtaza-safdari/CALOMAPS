@@ -72,7 +72,7 @@ import numpy as np
 from sensor_crossings import (
     ECAL_RMIN_MM, ECAL_STACK_OFFSET_MM, ECAL_RMAX_MM, SI_THICK_MM, N_FACES, FACE_PHI0_DEG,
     _NEUTRAL_PDGS, load_cascade, si_layer_centers, si_thickness_mm, face_phi, to_local, is_charged,
-    _record, default_npz, default_out_prefix,
+    _record, default_npz, default_out_prefix, hit_mode, step_npz_refusal,
     build_segments_A, build_segments_B, build_segments_C, write_intermediate,
 )
 
@@ -390,6 +390,8 @@ def main(argv=None):
     npz = args.npz or default_npz()
     out_prefix = args.out_prefix or default_out_prefix(npz, "pixelav_segments")
     d = load_cascade(npz)
+    if hit_mode(d) == "step":
+        sys.exit(f"ERROR: {npz}: {step_npz_refusal('pixelav_converter.py')}")
 
     has_tracker = ("thx" in d) and len(np.atleast_1d(d["thx"])) > 0
     has_calo = ("cmc" in d) and ("cbeg" in d)   # calo-contribution arrays (extract_cascade.py)

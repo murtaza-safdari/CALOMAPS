@@ -12,7 +12,7 @@ This reads that ROOT with uproot and writes a compact .npz holding both the MCPa
 Units: momentum in GeV, positions/pathLength in mm, time in ns, energy in GeV.
 
 Usage: python extract_trackermom.py [in.root] [out.npz] [event_index] [--events A:B]
-                                    [--particles all|hit] [--home CONFIG_ROOT]
+                                    [--particles all|hit] [--home CONFIG_ROOT] [--hits crossing|step]
 
 Defaults: in.root = $CALOMAPS_DATA_BASE/trackermom/trackermom_gamma50_1evt.root, out.npz =
 $CALOMAPS_HOME/models/<in.root's name>.npz (this checkout's models/ without $CALOMAPS_HOME).
@@ -30,7 +30,21 @@ preceding events, dbeg/dend by their daughter links (negative values are left un
 PARTICLES (--particles): all (default) keeps every MCParticle; hit keeps only those with at least
 one tracker hit (about 1 in 40 in a 50 GeV photon shower), tmc pointing into the kept ones. A hit
 npz has no dbeg/dend/dau: the daughters of a kept particle are mostly not kept, so a reader of
-the decay tree fails on the missing key. The mode is stored as particles_kept.
+the decay tree fails on the missing key. The mode is stored as particles_kept. Every npz holds,
+per kept particle, its charge and its (first) parent, which a hit npz may not keep:
+  parent           the parent's index in the kept particle arrays, -1 for a primary or a parent
+                   that is not kept
+  parent_pdg       the parent's PDG code (0 for a primary)
+  parent_charged   the parent's charge is not zero (False for a primary)
+and vsx, vsy, vsz are the particle's creation vertex.
+
+HITS: ECalBarrelHits holds one hit per sensor crossing (crossing, the steering default) or one
+per Geant4 step (step: CALOMAPS_TRACKER_HITS=step, the tracker action's CollectSingleDeposits).
+The mode is read from the run header's action.mapActions entry for ECalBarrel
+(sensor_crossings.header_hit_mode) and stored as hit_mode; --hits names the mode the caller
+expects, and the run stops when the two disagree. A file whose header does not record the
+action needs --hits. Per-crossing readers (sensor_crossings.build_segments_C, the converter)
+refuse a step npz.
 
 FRAME: tmodule and tlayer (int32, per tracker hit) are the `module` (the stave, i.e. the barrel
 face) and `layer` (Si layer 0..29) fields of the hit's cellID, decoded with the layout the file
@@ -53,13 +67,19 @@ Nothing is written when the data and --home disagree:
     (an _si<T>um tag names T; an untagged name means this checkout's own geometry);
   - after the hits are read: the path-length test of validate_crossings.py must pass for the
     --home thickness. When too few clean crossings exist to decide, the npz is written and the
-    run says the data could not confirm the thickness.
+    run says the data could not confirm the thickness. Step hits take validate_crossings.py's
+    step_depth_test instead: every step midpoint inside its slab, and the midpoints reaching both
+    faces (undecided below 1000 steps).
+The _cut<C>um and _stepmax<S>um tags of the input's name, or their absence, must likewise match the
+production cut and the step limit of the --home silicon (geo_si_cut_mm, geo_si_step_mm).
 """
 import argparse, math, os
 import numpy as np
-from sensor_crossings import (REPO, geometry_provenance, check_thickness_label, sim_provenance,
-                              cellid_encoding, decode_cellid, face_phi, module_face_phi, N_FACES)
-from validate_crossings import MIN_SELECTED, PATH_TOL, path_length_test
+from sensor_crossings import (REPO, HIT_MODES, geometry_provenance, check_thickness_label,
+                              sim_provenance, run_header, header_hit_mode, cellid_encoding,
+                              decode_cellid, face_phi, module_face_phi, N_FACES)
+from validate_crossings import (MIN_SELECTED, MIN_STEPS, PATH_TOL, REACH_TOL, path_length_test,
+                                step_depth_test)
 
 CHUNK_EVENTS = 10   # events per read: a 50 GeV photon event holds ~78k MCParticles
 
@@ -72,7 +92,9 @@ _PARTICLE_BRANCHES = {   # npz key -> MCParticles branch
     "vex": "MCParticles.endpoint.x", "vey": "MCParticles.endpoint.y", "vez": "MCParticles.endpoint.z",
     "gstat": "MCParticles.generatorStatus", "status": "MCParticles.simulatorStatus",
     "dbeg": "MCParticles.daughters_begin", "dend": "MCParticles.daughters_end",
+    "charge": "MCParticles.charge",
 }
+_PARENT_BRANCHES = ("MCParticles.parents_begin", "MCParticles.parents_end", "_MCParticles_parents.index")
 _HIT_BRANCHES = {        # SimTrackerHit ECalBarrelHits: one combined hit per Si crossing, WITH momentum
     "thx": "ECalBarrelHits.position.x", "thy": "ECalBarrelHits.position.y",
     "thz": "ECalBarrelHits.position.z",
@@ -86,7 +108,8 @@ _HIT_BRANCHES = {        # SimTrackerHit ECalBarrelHits: one combined hit per Si
 }
 _DAUGHTER_BRANCH = "_MCParticles_daughters.index"
 _DTYPES = {"pdg": np.int32, "gstat": np.int32, "status": np.int32, "dbeg": np.int64,
-           "dend": np.int64, "dau": np.int64, "tcellID": np.uint64, "tmc": np.int64}
+           "dend": np.int64, "dau": np.int64, "tcellID": np.uint64, "tmc": np.int64,
+           "parent": np.int64, "parent_pdg": np.int32, "parent_charged": bool}
 
 
 def _event_range(spec, index, n_file):
@@ -149,6 +172,26 @@ def _read_chunk(a, first_entry, keep_hit_only, n_part_before, n_dau_before):
                             np.repeat(n_part_before + first_part, n_dau))
     out["pid"] = (keep - first_part[evt_of_part[keep]]).astype(np.int64)
     out["evt_id_particle"] = evt[evt_of_part[keep]]
+
+    # parent: the first of the particle's parent links, which index its own event's particles
+    pb, pe = (flat(b).astype(np.int64) for b in _PARENT_BRANCHES[:2])
+    links = flat(_PARENT_BRANCHES[2]).astype(np.int64)
+    n_links = ak.to_numpy(ak.num(a[_PARENT_BRANCHES[2]], axis=1)).astype(np.int64)
+    has = pe > pb
+    at = pb + np.repeat(np.cumsum(n_links) - n_links, n_part)
+    parent = np.full(len(pb), -1, np.int64)                 # within the chunk
+    parent[has] = links[at[has]] + first_part[evt_of_part[has]]
+    par = parent[keep]
+    known = par >= 0
+    pdg_all, charge_all = flat(_PARTICLE_BRANCHES["pdg"]), flat(_PARTICLE_BRANCHES["charge"])
+    out["parent_pdg"] = np.where(known, pdg_all[np.maximum(par, 0)], 0)
+    out["parent_charged"] = known & (charge_all[np.maximum(par, 0)] != 0)
+    if keep_hit_only:
+        pos = np.searchsorted(keep, par)
+        kept = known & (pos < len(keep)) & (keep[np.minimum(pos, len(keep) - 1)] == par)
+    else:
+        pos, kept = par, known
+    out["parent"] = np.where(kept, pos + n_part_before, -1)
     return out, n_hit
 
 
@@ -171,6 +214,10 @@ def main(argv=None):
                          "daughter links (default: all)")
     ap.add_argument("--home", default=home, metavar="CONFIG_ROOT",
                     help="config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this repo)")
+    ap.add_argument("--hits", choices=HIT_MODES,
+                    help="the tracker hits the file must hold, one per sensor crossing or one per "
+                         "Geant4 step (default: what the run header records; needed when it records "
+                         "nothing)")
     args = ap.parse_intermixed_args(argv)
     IN = args.in_root
     OUT = args.out_npz or os.path.join(home, "models", os.path.splitext(os.path.basename(IN))[0] + ".npz")
@@ -182,6 +229,15 @@ def main(argv=None):
     import uproot
     f = uproot.open(IN)
     SIM, sim_source = sim_provenance(f, IN)
+    header_mode, setting = header_hit_mode(run_header(f))
+    if header_mode is None and args.hits is None:
+        raise SystemExit(f"{IN}: the tracker hits are per crossing or per step, and the run header "
+                         f"does not say which ({setting}); give --hits crossing or --hits step")
+    if header_mode is not None and args.hits is not None and header_mode != args.hits:
+        raise SystemExit(f"{IN}: --hits {args.hits}, but the run header records {header_mode} hits "
+                         f"({setting}); nothing written")
+    mode = header_mode or args.hits
+    mode_source = f"run header, {setting}" if header_mode else "--hits; the run header does not record it"
     encoding = cellid_encoding(f, "ECalBarrelHits")
     t = f["events"]
     n_file = t.num_entries
@@ -189,7 +245,8 @@ def main(argv=None):
         raise SystemExit(f"{IN}: the file holds no events")
     start, stop = _event_range(args.events, args.event_index, n_file)
 
-    branches = list(_PARTICLE_BRANCHES.values()) + list(_HIT_BRANCHES.values()) + [_DAUGHTER_BRANCH]
+    branches = (list(_PARTICLE_BRANCHES.values()) + list(_HIT_BRANCHES.values()) + [_DAUGHTER_BRANCH]
+                + list(_PARENT_BRANCHES))
     parts, hits_per_event, n_part, n_dau, entry = [], [], 0, 0, start
     for a in t.iterate(branches, entry_start=start, entry_stop=stop, step_size=CHUNK_EVENTS,
                        library="ak"):
@@ -223,19 +280,31 @@ def main(argv=None):
             frame_note = (f"cellID module and layer (tmodule, tlayer); {n_other} hit(s) on a stave "
                           f"other than the one their azimuth points at")
 
-    b = path_length_test(D, thick_mm)
-    if b["ok"] is False:
-        raise SystemExit(
-            f"{IN}: the tracker-hit path lengths do not fit the {thick_mm * 1e3:g} um silicon of "
-            f"--home {args.home}: median pathLength*|cos|/thickness = {b['ratio']:.4f} over "
-            f"{b['n_sel']} clean crossings (allowed {1 - PATH_TOL:.2f}-{1 + PATH_TOL:.2f}), which "
-            f"points to about {b['ratio'] * thick_mm * 1e3:.0f} um. --home is not the geometry this "
-            f"file was simulated with; nothing written.")
+    if mode == "step":
+        b = step_depth_test(D, thick_mm)
+        if not b["contained"] or b["ok"] is False:
+            raise SystemExit(
+                f"{IN}: the step hits do not fit the {thick_mm * 1e3:g} um silicon of --home "
+                f"{args.home}: {b['n_out']} of {b['n']} step midpoints lie outside their slab, and "
+                f"they reach {b['reach_in']:.4f} and {b['reach_out']:.4f} of the half-thickness "
+                f"inward and outward (all inside and both at least {1 - REACH_TOL:.2f} needed), "
+                f"which points to about {max(b['reach_in'], b['reach_out']) * thick_mm * 1e3:.0f} "
+                f"um. --home is not the geometry this file was simulated with; nothing written.")
+    else:
+        b = path_length_test(D, thick_mm)
+        if b["ok"] is False:
+            raise SystemExit(
+                f"{IN}: the tracker-hit path lengths do not fit the {thick_mm * 1e3:g} um silicon of "
+                f"--home {args.home}: median pathLength*|cos|/thickness = {b['ratio']:.4f} over "
+                f"{b['n_sel']} clean crossings (allowed {1 - PATH_TOL:.2f}-{1 + PATH_TOL:.2f}), which "
+                f"points to about {b['ratio'] * thick_mm * 1e3:.0f} um. --home is not the geometry this "
+                f"file was simulated with; nothing written.")
 
     particle, energy, seed = (str(SIM["sim_gun_particle"]), float(SIM["sim_gun_energy_GeV"]),
                               str(SIM["sim_seed"]))
     order = ["pdg", "mass", "px", "py", "pz", "E", "pex", "pey", "pez",
              "vsx", "vsy", "vsz", "vex", "vey", "vez", "pid", "status", "gstat", "dbeg", "dend", "dau",
+             "charge", "parent", "parent_pdg", "parent_charged",
              "thx", "thy", "thz", "tpx", "tpy", "tpz", "tpath", "ttime", "tedep", "tcellID",
              "tmodule", "tlayer", "tmc",
              "evt_id_particle", "evt_id_hit"]
@@ -244,6 +313,7 @@ def main(argv=None):
         OUT,
         **{k: D[k] for k in order if k in D},
         num_events=np.int64(stop - start), particles_kept=np.array(args.particles),
+        hit_mode=np.array(mode),
         **FRAME,
         **SIM,
         **GEO,
@@ -262,12 +332,24 @@ def main(argv=None):
     if n_sim >= 0 and n_sim != n_file:
         print(f"  WARNING: the file holds {n_file} events; its ddsim run header says {n_sim} were simulated")
     print(f"  events: {stop - start} extracted, entries {start}..{stop - 1} of the file's {n_file}")
-    print(f"  geometry: {GEO['geo_si_thick_mm'] * 1e3:g} um Si, config root {GEO['geo_home']}")
+    cut, step = float(GEO["geo_si_cut_mm"]) * 1e3, float(GEO["geo_si_step_mm"]) * 1e3
+    own = ([] if math.isnan(cut) else [f"a {cut:g} um production cut"]) + \
+          ([] if math.isnan(step) else [f"a {step:g} um step limit"])
+    print(f"  geometry: {GEO['geo_si_thick_mm'] * 1e3:g} um Si"
+          + (" with " + " and ".join(own) if own else "")
+          + f", config root {GEO['geo_home']}")
+    print(f"  hits: one per {'Geant4 step' if mode == 'step' else 'sensor crossing'} ({mode_source})")
     print(f"  face and layer per hit: {frame_note}")
     if not FRAME:
         print("    readers take the face from the hit azimuth and the layer from its depth, which puts "
               "hits where neighbouring staves overlap on the wrong face")
-    if b["ok"]:
+    if mode == "step" and b["ok"]:
+        print(f"  thickness confirmed by {b['n']} step hits: all inside their slab, reaching "
+              f"{b['reach_in']:.4f} and {b['reach_out']:.4f} of the half-thickness")
+    elif mode == "step":
+        print(f"  thickness NOT confirmed: {b['n']} step hits, all inside their slab, fewer than the "
+              f"{MIN_STEPS} the reach test needs; the data could not confirm {thick_mm * 1e3:g} um silicon")
+    elif b["ok"]:
         print(f"  thickness confirmed by {b['n_sel']} clean crossings: median "
               f"pathLength*|cos|/thickness = {b['ratio']:.4f}")
     else:

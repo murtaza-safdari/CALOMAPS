@@ -12,6 +12,12 @@ and refuse a geometry where the two disagree.
     si_layer_thicknesses_mm(home)  per-layer sensor silicon thickness [mm]
     si_thickness_mm(home)  the sensor silicon thickness [mm], common to all layers
     compact_si_thickness_mm(compact)  the same, for the config root of a compact file
+    si_production_cut_mm(home)  the Geant4 production cut of the sensor silicon's region [mm], or
+                           None when the silicon has no region of its own
+    compact_si_cut_mm(compact)  the same, for the config root of a compact file
+    si_step_limit_mm(home) the Geant4 maximum step length of the sensor silicon's own limitset
+                           [mm], or None when the silicon shares the calorimeter's limits
+    compact_si_step_mm(compact)  the same, for the config root of a compact file
     cell_size_mm(home)     the pixel pitch [mm] (ECal_cell_size)
     geometry_hash(home)    content hash of home/geometry/
     variant_home(T, home)  where sim/make_geometry_variant.py puts the T-micron variant of home
@@ -22,6 +28,7 @@ further env_safety (0.1 mm) out; sensor_crossings.ECAL_STACK_OFFSET_MM carries t
 import ast, hashlib, math, operator, os, xml.etree.ElementTree as ET
 import numpy as np
 
+SI_STEP_LIMITSET = "si_step_limits"   # the silicon's own limitset in a step-limit variant
 UNITS_MM = {'m': 1000.0, 'cm': 10.0, 'mm': 1.0, 'um': 1e-3, 'micron': 1e-3, 'nm': 1e-6}
 _BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
            ast.Div: operator.truediv, ast.Pow: operator.pow}
@@ -137,16 +144,100 @@ def si_thickness_mm(calomaps_home):
     return found.pop()
 
 
+def _compact_home(compact):
+    """The config root of the compact file `compact`, which must be
+    <config root>/geometry/SiD_TestBeam.xml; ValueError for any other path."""
+    compact = os.path.abspath(compact)
+    g = os.path.dirname(compact)
+    if os.path.basename(compact) != "SiD_TestBeam.xml" or os.path.basename(g) != "geometry":
+        raise ValueError(f"{compact} is not <config root>/geometry/SiD_TestBeam.xml")
+    return os.path.dirname(g)
+
+
 def compact_si_thickness_mm(compact):
     """si_thickness_mm of the config root whose compact is the file `compact` (ddsim's
     --compactFile), which must be <config root>/geometry/SiD_TestBeam.xml, as the repo's and every
     variant's compact is. Raises ValueError for any other path, whose layer stack is not the one
     this module reads."""
-    compact = os.path.abspath(compact)
-    g = os.path.dirname(compact)
-    if os.path.basename(compact) != "SiD_TestBeam.xml" or os.path.basename(g) != "geometry":
-        raise ValueError(f"{compact} is not <config root>/geometry/SiD_TestBeam.xml")
-    return si_thickness_mm(os.path.dirname(g))
+    return si_thickness_mm(_compact_home(compact))
+
+
+def si_production_cut_mm(calomaps_home):
+    """Geant4 production cut [mm] of the region the barrel ECal's Silicon slices are placed in
+    (their region="..." attribute, and the <region> of that name under <regions> in
+    SiD_TestBeam.xml or my_custom_ecal.xml: cut times lunit), or None when no Silicon slice names
+    a region, so the silicon takes the world's cut. Raises ValueError when only some Silicon
+    slices name a region, when they name different ones, when the region is missing, defined
+    more than once, or has no cut or no lunit."""
+    names = {s.get("region") for layer in _ecal_barrel(calomaps_home).findall("layer")
+             for s in layer.findall("slice") if s.get("material") == "Silicon"}
+    if names == {None}:
+        return None
+    if None in names or len(names) != 1:
+        raise ValueError(f"the ECal Silicon slices name the regions {sorted(map(str, names))}; "
+                         f"expected one region on every Silicon slice, or none")
+    name, = names
+    g = os.path.join(calomaps_home, "geometry")
+    found = [r for f in ("SiD_TestBeam.xml", "my_custom_ecal.xml")
+             for r in ET.parse(os.path.join(g, f)).getroot().findall("regions/region")
+             if r.get("name") == name]
+    if len(found) != 1:
+        raise ValueError(f"{len(found)} definitions of region {name!r} under {g}; expected one")
+    r, = found
+    if r.get("cut") is None or r.get("lunit") not in UNITS_MM:
+        raise ValueError(f"region {name!r} needs a cut and an lunit ({', '.join(sorted(UNITS_MM))}); "
+                         f"found cut={r.get('cut')!r} lunit={r.get('lunit')!r}")
+    cut = _pv(r.get("cut"), compact_constants(calomaps_home)) * UNITS_MM[r.get("lunit")]
+    if not cut > 0:
+        raise ValueError(f"region {name!r} has a production cut of {cut:g} mm")
+    return cut
+
+
+def compact_si_cut_mm(compact):
+    """si_production_cut_mm of the config root whose compact is the file `compact` (see
+    compact_si_thickness_mm)."""
+    return si_production_cut_mm(_compact_home(compact))
+
+
+def si_step_limit_mm(calomaps_home):
+    """Geant4 maximum step length [mm] of the barrel ECal's Silicon slices when they have a
+    limitset of their own: the step_length_max of the limitset SI_STEP_LIMITSET (which
+    sim/make_geometry_variant.py writes) that their limits="..." attribute names, value times
+    unit. None when they name another limitset or none, so the silicon shares the calorimeter's
+    limits (cal_limits, 5 mm in the repo geometry). Raises ValueError when only some Silicon
+    slices name SI_STEP_LIMITSET, when it is missing or defined more than once, or when it has
+    no single step_length_max for every particle (particles="*") with a known unit and a
+    positive value."""
+    names = {s.get("limits") for layer in _ecal_barrel(calomaps_home).findall("layer")
+             for s in layer.findall("slice") if s.get("material") == "Silicon"}
+    own = {n == SI_STEP_LIMITSET for n in names}
+    if own == {False}:
+        return None
+    if own != {True}:
+        raise ValueError(f"the ECal Silicon slices name the limitsets {sorted(map(str, names))}; "
+                         f"expected {SI_STEP_LIMITSET!r} on every Silicon slice, or on none")
+    g = os.path.join(calomaps_home, "geometry")
+    found = [ls for f in ("SiD_TestBeam.xml", "my_custom_ecal.xml")
+             for ls in ET.parse(os.path.join(g, f)).getroot().findall("limits/limitset")
+             if ls.get("name") == SI_STEP_LIMITSET]
+    if len(found) != 1:
+        raise ValueError(f"{len(found)} definitions of limitset {SI_STEP_LIMITSET!r} under {g}; "
+                         f"expected one")
+    limits = [x for x in found[0].findall("limit") if x.get("name") == "step_length_max"]
+    if len(limits) != 1 or limits[0].get("particles") != "*" or limits[0].get("unit") not in UNITS_MM:
+        raise ValueError(f"limitset {SI_STEP_LIMITSET!r} needs one step_length_max with "
+                         f"particles=\"*\" and a unit ({', '.join(sorted(UNITS_MM))})")
+    x, = limits
+    step = _pv(x.get("value"), compact_constants(calomaps_home)) * UNITS_MM[x.get("unit")]
+    if not step > 0:
+        raise ValueError(f"limitset {SI_STEP_LIMITSET!r} has a step_length_max of {step:g} mm")
+    return step
+
+
+def compact_si_step_mm(compact):
+    """si_step_limit_mm of the config root whose compact is the file `compact` (see
+    compact_si_thickness_mm)."""
+    return si_step_limit_mm(_compact_home(compact))
 
 
 def cell_size_mm(calomaps_home):
@@ -183,10 +274,15 @@ def geometry_hash(calomaps_home):
     return h.hexdigest()
 
 
-def variant_home(si_thickness_um, source_home, data_base=None):
+def variant_home(si_thickness_um, source_home, data_base=None, si_cut_um=None, si_step_um=None):
     """The config root sim/make_geometry_variant.py writes, by default, for the si_thickness_um
     variant of source_home's geometry: <data_base>/geometry_si<T>um_<hash>, where <hash> is the
     first 10 hex digits of geometry_hash(source_home) and data_base defaults to
-    $CALOMAPS_DATA_BASE, else ~/CALOMAPS-data. A changed source geometry gets its own directory."""
+    $CALOMAPS_DATA_BASE, else ~/CALOMAPS-data. A changed source geometry gets its own directory.
+    With si_cut_um, the variant whose silicon also has that production cut, and with si_step_um,
+    that maximum step length: <data_base>/geometry_si<T>um[_cut<C>um][_stepmax<S>um]_<hash>."""
     base = data_base or os.environ.get("CALOMAPS_DATA_BASE") or os.path.expanduser("~/CALOMAPS-data")
-    return os.path.join(base, "geometry_si%gum_%s" % (si_thickness_um, geometry_hash(source_home)[:10]))
+    cut = "" if si_cut_um is None else "_cut%gum" % si_cut_um
+    step = "" if si_step_um is None else "_stepmax%gum" % si_step_um
+    return os.path.join(base, "geometry_si%gum%s%s_%s" % (si_thickness_um, cut, step,
+                                                         geometry_hash(source_home)[:10]))

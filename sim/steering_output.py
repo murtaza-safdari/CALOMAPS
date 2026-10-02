@@ -9,14 +9,18 @@ event count, with a WARNING. events_tag() does not raise.
 
 si_output_tag(): run_sim.py, run_sim_trackermom.py and run_sim_fullcascade.py name their default
 output after the geometry ddsim simulates. It finds the compact on the command line, reads its
-ECal silicon thickness with analysis/decal_geometry.py and returns "" for this checkout's own
-thickness (320 um), else "_si<T>um", the tag sim/geometry_variant.sh gives the same geometry.
+ECal silicon thickness, the production cut of the silicon's own region and the maximum step
+length of the silicon's own limitset with analysis/decal_geometry.py, and returns "_si<T>um" for a
+thickness other than this checkout's own (320 um) followed by "_cut<C>um" when the silicon has a
+production cut of its own and "_stepmax<S>um" when it has a step limit of its own: "" for the
+repo geometry, and in every case the tag sim/geometry_variant.sh gives the same geometry.
 
-CALOMAPS_SI_THICKNESS_UM selects a variant compact only in the sim/*.sh wrappers. Here it is
-compared with the compact, and a WARNING is printed when the two disagree. When the compact's
-thickness cannot be read (no --compactFile on the command line, an unreadable file, a compact
-that is not <config root>/geometry/SiD_TestBeam.xml), the name stays untagged, with a WARNING if
-the knob names a thickness other than the checkout's. si_output_tag() does not raise.
+CALOMAPS_SI_THICKNESS_UM, CALOMAPS_SI_CUT_UM and CALOMAPS_SI_STEP_UM select a variant compact only
+in the sim/*.sh wrappers. Here they are compared with the compact, and a WARNING is printed when a
+knob and the compact disagree. When the compact cannot be read (no --compactFile on the command
+line, an unreadable file, a compact that is not <config root>/geometry/SiD_TestBeam.xml), the name
+stays untagged, with a WARNING if the thickness knob names a thickness other than the checkout's
+or the cut or step knob is set. si_output_tag() does not raise.
 """
 import os, sys
 
@@ -25,6 +29,11 @@ sys.path.insert(0, os.path.join(_REPO, "analysis"))
 import decal_geometry as dg   # noqa: E402
 
 KNOB = "CALOMAPS_SI_THICKNESS_UM"
+CUT_KNOB = "CALOMAPS_SI_CUT_UM"
+STEP_KNOB = "CALOMAPS_SI_STEP_UM"
+# the silicon's own settings, in tag order: (knob, reader of a compact, tag, what it is)
+_SETTINGS = ((CUT_KNOB, dg.compact_si_cut_mm, "cut", "production cut"),
+             (STEP_KNOB, dg.compact_si_step_mm, "stepmax", "step limit"))
 
 
 def compact_files(argv):
@@ -87,17 +96,27 @@ def _um(mm):
     return "%g" % (mm * 1e3)
 
 
-def si_output_tag(argv=None, environ=None):
-    """"" or "_si<T>um" for the default output name of the ddsim run whose command line is argv
-    (default sys.argv), T being the silicon thickness of its compact. Prints a WARNING when the
-    knob in environ (default os.environ) disagrees with that thickness, or when it names a
-    thickness other than the checkout's and the compact's cannot be read."""
-    argv = sys.argv if argv is None else argv
-    knob = (os.environ if environ is None else environ).get(KNOB, "").strip()
+def _knob_um(environ, name):
+    """(raw value, "%g" of its number) of the knob `name` in environ; the raw value twice when it
+    is unset or not a number."""
+    knob = environ.get(name, "").strip()
     try:
-        knob_um = "%g" % float(knob)
+        return knob, "%g" % float(knob)
     except ValueError:
-        knob_um = knob                  # unset or not a number: equal to no thickness
+        return knob, knob
+
+
+def si_output_tag(argv=None, environ=None):
+    """"[_si<T>um][_cut<C>um][_stepmax<S>um]" for the default output name of the ddsim run whose
+    command line is argv (default sys.argv): T the silicon thickness of its compact when it is not
+    the checkout's, C the production cut of the silicon's own region and S the maximum step length
+    of its own limitset, when it has them. Prints a WARNING when a knob in environ (default
+    os.environ) disagrees with the compact, or, when the compact cannot be read, when the
+    thickness knob names a thickness other than the checkout's or the cut or step knob is set."""
+    argv = sys.argv if argv is None else argv
+    environ = os.environ if environ is None else environ
+    knob, knob_um = _knob_um(environ, KNOB)
+    knobs = [_knob_um(environ, name) for name, _, _, _ in _SETTINGS]
     base_um = None
     try:
         base_um = _um(dg.si_thickness_mm(_REPO))
@@ -106,17 +125,34 @@ def si_output_tag(argv=None, environ=None):
             raise ValueError("more than one file given to --compactFile" if files
                              else "no --compactFile on the ddsim command line")
         si_um = _um(dg.compact_si_thickness_mm(files[0]))
+        values = [read(files[0]) for _, read, _, _ in _SETTINGS]
     except Exception as e:
         if knob and knob_um != base_um:
             print("WARNING: %s=%s, but the silicon thickness of the simulated geometry could not be "
                   "confirmed from its compact (%s). The default output name is untagged; pass the "
                   "variant compact that sim/make_geometry_variant.py prints as --compactFile, or "
                   "name the output with --outputFile." % (KNOB, knob, e))
+        for (name, _, _, what), (raw, _) in zip(_SETTINGS, knobs):
+            if raw:
+                print("WARNING: %s=%s, but the %s of the simulated silicon could not be "
+                      "confirmed from its compact (%s). The default output name is untagged; pass "
+                      "the variant compact that sim/make_geometry_variant.py prints as "
+                      "--compactFile, or name the output with --outputFile." % (name, raw, what, e))
         return ""
-    tag = "" if si_um == base_um else "_si%sum" % si_um
+    ums = [None if mm is None else _um(mm) for mm in values]
+    tag = ("" if si_um == base_um else "_si%sum" % si_um) + "".join(
+        "" if um is None else "_%s%sum" % (prefix, um) for (_, _, prefix, _), um in zip(_SETTINGS, ums))
     if knob and knob_um != si_um:
         print("WARNING: the geometry simulated is the --compactFile's, %s um silicon (%s); %s=%s "
               "does not change it, the sim/*.sh wrappers pass the matching variant compact. The "
               "default output name is tagged by the compact: %s."
               % (si_um, files[0], KNOB, knob, tag or "no tag"))
+    for (name, _, _, what), (raw, raw_um), um in zip(_SETTINGS, knobs, ums):
+        if raw and raw_um != um:
+            print("WARNING: the geometry simulated is the --compactFile's, %s (%s); %s=%s does not "
+                  "change it, the sim/*.sh wrappers pass the matching variant compact. The default "
+                  "output name is tagged by the compact: %s."
+                  % ("no %s of its own in the silicon" % what if um is None
+                     else "a %s um %s in the silicon" % (um, what),
+                     files[0], name, raw, tag or "no tag"))
     return tag

@@ -42,10 +42,20 @@ crossing records' outside_si, starts_in_si and stops_in_si flags:
 Every thickness variant has the baseline's Si mid-planes, so only (b), and (a) for a thickness
 below the true one, can tell a mislabelled npz from a correct one.
 
+An npz of step hits (hit_mode step: sim/run_sim_trackermom.py with CALOMAPS_TRACKER_HITS=step,
+one hit per Geant4 step) has no crossings, so (b) does not apply and is skipped; step_depth_test,
+which extract_trackermom.py also applies to such an npz, takes the place of both checks:
+  (a) containment: as above, but no hit may lie outside its slab. A step lies inside one volume,
+      so its midpoint lies inside the slab whenever both its points do.
+  (b) reach: the depth residuals reach both faces, the largest outward and inward |w - centre|
+      within 1% of thickness/2, over at least 1000 hits. Short steps start or end on the faces
+      (the 50 GeV photon showers at 100 um come within 0.003 um of them), so a thickness above
+      the true one leaves a gap; (a) catches one below it.
+
 Prints the hit count, the depth-residual range, the hits outside their slab, the selected
-crossings' median path length and their median deposited energy in keV. Exit status 0 when both
-checks pass; 3 when (a) passes but fewer than 10 clean crossings leave the thickness untested by
-(b); 1 otherwise.
+crossings' median path length and their median deposited energy in keV (for step hits, the
+reach of the residuals instead). Exit status 0 when both checks pass; 3 when (a) passes but
+fewer than 10 clean crossings (1000 step hits) leave the thickness untested by (b); 1 otherwise.
 """
 import argparse, math, os, sys
 import numpy as np
@@ -60,8 +70,33 @@ COS_MIN = 0.9
 PATH_TOL = 0.01
 MIN_SELECTED = 10
 UNDECIDED = 3
+STEP_MAX_OUTSIDE = 0
+REACH_TOL = 0.01
+MIN_STEPS = 1000
 _KEYS = ("thx", "thy", "thz", "tpx", "tpy", "tpz", "tpath", "tedep", "tmc", "pdg",
          "vsx", "vsy", "vex", "vey")
+
+
+def step_depth_test(d, thick_mm):
+    """The step-hit checks of the module docstring on tracker-route arrays `d` of step hits for a
+    thick_mm sensor. Returns a dict:
+      n           number of step hits
+      n_out       hits outside their slab (sensor_crossings.tracker_hit_slab)
+      contained   n_out <= STEP_MAX_OUTSIDE
+      reach_in, reach_out   the largest inward and outward |w - centre| over thick_mm/2 (None
+                  without hits)
+      ok          the reach test: True when both are >= 1 - REACH_TOL, False when either is not,
+                  None when there are fewer than MIN_STEPS hits"""
+    slab = sc.tracker_hit_slab(d, thick_mm)
+    resid = slab["resid"] / (thick_mm / 2)
+    n_out = int(np.count_nonzero(slab["outside"]))
+    out = {"n": int(resid.size), "n_out": n_out, "contained": n_out <= STEP_MAX_OUTSIDE,
+           "reach_in": None, "reach_out": None, "ok": None}
+    if resid.size:
+        out.update(reach_in=float(max(-resid.min(), 0.0)), reach_out=float(max(resid.max(), 0.0)))
+    if resid.size >= MIN_STEPS:
+        out["ok"] = min(out["reach_in"], out["reach_out"]) >= 1 - REACH_TOL
+    return out
 
 
 def path_length_test(d, thick_mm):
@@ -90,6 +125,35 @@ def path_length_test(d, thick_mm):
     if n_sel >= MIN_SELECTED:
         out["ok"] = abs(out["ratio"] - 1.0) <= PATH_TOL
     return out
+
+
+def _validate_steps(d, thick, conflict):
+    """main() for an npz of step hits: step_depth_test in place of (a) and (b)."""
+    s = step_depth_test(d, thick)
+    half = thick / 2
+    print("  hits: one per Geant4 step (hit_mode step); frame: face and layer from the "
+          + ("hit cellIDs (tmodule, tlayer)" if sc.has_cellid_frame(d) else
+             "hit azimuth and depth (the npz has no tmodule/tlayer)"))
+    print(f"  (a) containment: {s['n']} step hits; depth residual w - centre reaches "
+          f"{-s['reach_in'] * half:+.4f} and {s['reach_out'] * half:+.4f} mm; allowed |.| <= "
+          f"{half + DEPTH_TOL_MM:.4f} mm; {s['n_out']} outside ({STEP_MAX_OUTSIDE} allowed) -> "
+          f"{'PASS' if s['contained'] else 'FAIL'}")
+    print("  (b) path length: skipped; a step hit's path length is one Geant4 step, not a crossing's. "
+          "In its place, reach:")
+    if s["ok"] is None:
+        print(f"      fewer than {MIN_STEPS} step hits; the thickness cannot be tested -> UNDECIDED")
+    else:
+        print(f"      the residuals reach {s['reach_in']:.4f} (inward) and {s['reach_out']:.4f} "
+              f"(outward) of thickness/2 (at least {1 - REACH_TOL:.2f} needed) -> "
+              f"{'PASS' if s['ok'] else 'FAIL'}")
+    if conflict or not s["contained"] or s["ok"] is False:
+        print("  RESULT: FAIL")
+        return 1
+    if s["ok"] is None:
+        print("  RESULT: UNDECIDED (containment passes; too few step hits to test the thickness)")
+        return UNDECIDED
+    print("  RESULT: PASS")
+    return 0
 
 
 def main(argv=None):
@@ -125,6 +189,8 @@ def main(argv=None):
     if thx.size == 0:
         print("  no tracker hits -> FAIL")
         return 1
+    if sc.hit_mode(d) == "step":
+        return _validate_steps(d, thick, conflict)
 
     cellid = sc.has_cellid_frame(d)
     slab = sc.tracker_hit_slab(d, thick)

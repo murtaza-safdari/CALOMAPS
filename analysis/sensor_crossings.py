@@ -91,7 +91,7 @@ happened (pixelav_converter.deck_drop_reason).
 Usage:
     python sensor_crossings.py [crossings.npz] [out_prefix] [--variant C|A|B|auto]
 """
-import argparse, json, math, os, re, sys
+import argparse, ast, json, math, os, re, sys
 import numpy as np
 
 import decal_geometry
@@ -121,8 +121,12 @@ MODULE0_FACE = 10
 SLAB_TOL_MM = 0.002
 CELLID_ENCODING_KEY = "{}__CellIDEncoding"   # metadata-tree key of a collection's cellID layout
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-# The sim wrappers append _si<T>um to every output name of a silicon-thickness variant run.
+# The sim wrappers append _si<T>um to every output name of a silicon-thickness variant run,
+# _cut<C>um to that of a run whose silicon has a production cut of its own, and _stepmax<S>um to
+# that of a run whose silicon has a step limit of its own.
 _SI_TAG = re.compile(r"_si([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
+_CUT_TAG = re.compile(r"_cut([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
+_STEP_TAG = re.compile(r"_stepmax([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
 
 # Species that leave no reconstructable track in silicon: neutrals (no primary ionization)
 # and nuclei (slow recoils, not minimum-ionizing tracks; PDG |code| > 1e9), which is why the
@@ -176,6 +180,10 @@ def geometry_provenance(home):
                          places the stack ECAL_STACK_OFFSET_MM further out; si_layer_centers()
                          includes that offset)
       geo_cell_size_mm   pixel pitch
+      geo_si_cut_mm      Geant4 production cut of the silicon's own region (NaN without one: the
+                         silicon then has the run's cut, ddsim's physics.rangecut)
+      geo_si_step_mm     Geant4 maximum step length of the silicon's own limitset (NaN without
+                         one: the silicon then has the calorimeter's, 5 mm)
       geo_home           the config root, as an absolute path
     Aborts (SystemExit) when the compact's mid-planes are not the ones si_layer_centers()
     assumes, because every crossing would then be assigned against the wrong layer centres."""
@@ -183,6 +191,8 @@ def geometry_provenance(home):
         centers = decal_geometry.layer_radii(home)
         thick = decal_geometry.si_thickness_mm(home)
         cell = decal_geometry.cell_size_mm(home)
+        cut = decal_geometry.si_production_cut_mm(home)
+        step = decal_geometry.si_step_limit_mm(home)
     except FileNotFoundError:
         raise SystemExit(f"--home {home!r} has no geometry/SiD_TestBeam.xml + my_custom_ecal.xml -- "
                          f"point it at the config root that was simulated")
@@ -200,43 +210,139 @@ def geometry_provenance(home):
                          f"vs {expected[k]:.6f} mm. Only the Si thickness, changed with "
                          f"sim/make_geometry_variant.py, may differ without updating si_layer_centers().")
     return {"geo_si_thick_mm": np.float64(thick), "geo_si_centers_mm": centers,
-            "geo_cell_size_mm": np.float64(cell), "geo_home": np.array(os.path.abspath(home))}
+            "geo_cell_size_mm": np.float64(cell),
+            "geo_si_cut_mm": np.float64(math.nan if cut is None else cut),
+            "geo_si_step_mm": np.float64(math.nan if step is None else step),
+            "geo_home": np.array(os.path.abspath(home))}
+
+
+def _tag_um(path, pattern, what):
+    tags = {float(t) for t in pattern.findall(os.path.basename(path))}
+    if len(tags) > 1:
+        raise SystemExit(f"{os.path.basename(path)}: more than one {what} tag")
+    return tags.pop() if tags else None
 
 
 def thickness_tag_um(path):
     """The silicon thickness [um] an _si<T>um tag in path's file name names, or None."""
-    tags = {float(t) for t in _SI_TAG.findall(os.path.basename(path))}
-    if len(tags) > 1:
-        raise SystemExit(f"{os.path.basename(path)}: more than one _si<T>um thickness tag")
-    return tags.pop() if tags else None
+    return _tag_um(path, _SI_TAG, "_si<T>um thickness")
+
+
+def cut_tag_um(path):
+    """The silicon production cut [um] a _cut<C>um tag in path's file name names, or None."""
+    return _tag_um(path, _CUT_TAG, "_cut<C>um production-cut")
+
+
+def step_tag_um(path):
+    """The silicon step limit [um] a _stepmax<S>um tag in path's file name names, or None."""
+    return _tag_um(path, _STEP_TAG, "_stepmax<S>um step-limit")
 
 
 def check_thickness_label(in_path, geo, home):
-    """Exit unless the silicon thickness in_path's name implies equals the thickness of the --home
-    geometry `home` (geo = geometry_provenance(home)). An _si<T>um tag names T; an untagged name
-    means this checkout's own geometry (REPO). Every thickness variant has the baseline's Si
-    mid-planes, so the hit positions cannot tell the two apart."""
+    """Exit unless the silicon thickness, production cut and step limit in_path's name implies are
+    those of the --home geometry `home` (geo = geometry_provenance(home)). An _si<T>um tag names
+    T, and an untagged name means this checkout's own thickness (REPO); a _cut<C>um tag names a
+    production cut of C in the silicon's own region, and a _stepmax<S>um tag a step limit of S in
+    its own limitset, and a name without one means silicon without that setting of its own (an
+    npz without geo_si_step_mm has none). Every variant has the baseline's Si mid-planes, so the
+    hit positions cannot tell them apart."""
     base_um = decal_geometry.si_thickness_mm(REPO) * 1e3
     tag_um = thickness_tag_um(in_path)
     named_um = base_um if tag_um is None else tag_um
     home_um = float(geo["geo_si_thick_mm"]) * 1e3
-    if math.isclose(named_um, home_um, rel_tol=1e-5):
+    # (tag, what, the tag's value, the --home value): None for no setting of its own
+    settings = []
+    for tag, what, key, tag_of in (("cut", "production cut", "geo_si_cut_mm", cut_tag_um),
+                                   ("stepmax", "step limit", "geo_si_step_mm", step_tag_um)):
+        mm = float(geo[key]) if key in geo else math.nan
+        settings.append((tag, what, tag_of(in_path), None if math.isnan(mm) else mm * 1e3))
+    ok = math.isclose(named_um, home_um, rel_tol=1e-5) and all(
+        (t is None and h is None) or (t is not None and h is not None and math.isclose(t, h, rel_tol=1e-5))
+        for _, _, t, h in settings)
+    if ok:
         return
     if tag_um is None:
         named = f"has no _si<T>um tag, which means this checkout's {base_um:g} um geometry"
     else:
         named = f"is tagged _si{tag_um:g}um"
-    if math.isclose(named_um, base_um, rel_tol=1e-5):
+    for tag, what, t, _ in settings:
+        if t is None:
+            named += f", and no _{tag}<{tag[0].upper()}>um tag (no {what} of its own in the silicon)"
+        else:
+            named += f", and _{tag}{t:g}um"
+    has = f"{home_um:g} um silicon " + " and ".join(
+        f"without a {what} of its own" if h is None else f"with a {h:g} um {what}"
+        for _, what, _, h in settings)
+    cut_um, step_um = (t for _, _, t, _ in settings)
+    if math.isclose(named_um, base_um, rel_tol=1e-5) and cut_um is None and step_um is None:
         match = REPO
     else:
-        match = (f"{decal_geometry.variant_home(named_um, REPO)} (the {named_um:g} um variant "
-                 f"`python {REPO}/sim/make_geometry_variant.py --si-thickness-um {named_um:g}` writes)")
-    raise SystemExit(f"{os.path.basename(in_path)} {named}, but --home {home} has {home_um:g} um "
-                     f"silicon; nothing written. The --home for this input is {match}")
+        args = (f"--si-thickness-um {named_um:g}" + ("" if cut_um is None else f" --si-cut-um {cut_um:g}")
+                + ("" if step_um is None else f" --si-step-um {step_um:g}"))
+        match = (f"{decal_geometry.variant_home(named_um, REPO, si_cut_um=cut_um, si_step_um=step_um)} "
+                 f"(the variant `python {REPO}/sim/make_geometry_variant.py {args}` writes)")
+    raise SystemExit(f"{os.path.basename(in_path)} {named}, but --home {home} has {has}; nothing "
+                     f"written. The --home for this input is {match}")
 
 
 _RUN_TEXT_KEYS = {"sim_seed": "random.seed", "sim_dd4hep_version": "DD4hepVersion",
                   "sim_geant4_version": "GEANT4Version", "sim_date_utc": "DateUTC"}
+HIT_MODES = ("crossing", "step")
+
+
+def run_header(root_file):
+    """{name: value} of the ddsim run header of the open EDM4hep file root_file (uproot): the
+    string parameters of its `runs` tree (GPStringKeys / GPStringValues) that hold one value, or
+    {} when the file has no such tree or it does not hold exactly one run."""
+    try:
+        runs = root_file["runs"]
+        if runs.num_entries != 1:
+            return {}
+        keys = runs["GPStringKeys"].array(library="ak").tolist()[0]
+        values = runs["GPStringValues"].array(library="ak").tolist()[0]
+    except (KeyError, IndexError, TypeError, ValueError):   # no run header, or not ddsim's layout
+        return {}
+    return {k: v[0] for k, v in zip(keys, values) if len(v) == 1}
+
+
+def header_hit_mode(params, detector="ECalBarrel"):
+    """(mode, setting) of the tracker hits of `detector` that the ddsim run header params
+    (run_header) records: its action.mapActions entry, the action name alone or (name,
+    {parameter: value}) as the steering file set it. mode is "step" when the action collects
+    single deposits (CollectSingleDeposits, one hit per Geant4 step), "crossing" for
+    Geant4TrackerWeightedAction otherwise (one hit per sensor crossing), and None when the
+    header does not map `detector` to a tracker action; setting is the entry as text, or why there
+    is none."""
+    text = params.get("action.mapActions")
+    if text is None:
+        return None, "the run header has no action.mapActions"
+    try:
+        entry = ast.literal_eval(text).get(detector)
+    except (ValueError, SyntaxError, AttributeError):
+        return None, f"action.mapActions {text!r} is not a mapping"
+    if entry is None:
+        return None, f"action.mapActions {text!r} does not map {detector}"
+    try:
+        name, opts = (entry, {}) if isinstance(entry, str) else (entry[0], dict(entry[1]))
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None, f"{detector} -> {entry!r} is neither an action name nor (name, parameters)"
+    if name != "Geant4TrackerWeightedAction":
+        return None, f"{detector} -> {entry!r}, not Geant4TrackerWeightedAction"
+    return ("step" if opts.get("CollectSingleDeposits") else "crossing"), f"{detector} -> {entry!r}"
+
+
+def hit_mode(d):
+    """"step" for a tracker-route npz of per-step hits (extract_trackermom.py stores hit_mode),
+    else "crossing", also for an npz extracted before the extractor stored the mode."""
+    return str(d["hit_mode"]) if "hit_mode" in d else "crossing"
+
+
+def step_npz_refusal(what):
+    """Why `what` (a builder of per-crossing records or decks) refuses an npz of step hits."""
+    return (f"{what} needs one tracker hit per sensor crossing; this npz holds one per Geant4 step "
+            f"(hit_mode step, from sim/run_sim_trackermom.py with CALOMAPS_TRACKER_HITS=step). "
+            f"Simulate with CALOMAPS_TRACKER_HITS=crossing for crossing records and decks; "
+            f"analysis/pixelav/deposit_jobs.py reads step hits.")
 
 
 def sim_provenance(root_file, in_path):
@@ -251,15 +357,7 @@ def sim_provenance(root_file, in_path):
     from in_path's name as the steering files write it (<prefix>_<tag><E>_..., the tag spelling
     pi+ as piplus); every other missing text field is "unknown". Returns (fields, source), source
     saying where particle and energy came from."""
-    params = {}
-    try:
-        runs = root_file["runs"]
-        if runs.num_entries == 1:
-            keys = runs["GPStringKeys"].array(library="ak").tolist()[0]
-            values = runs["GPStringValues"].array(library="ak").tolist()[0]
-            params = {k: v[0] for k, v in zip(keys, values) if len(v) == 1}
-    except (KeyError, IndexError, TypeError, ValueError):   # no run header, or not ddsim's layout
-        params = {}
+    params = run_header(root_file)
     out = {key: np.array(params.get(name, "unknown")) for key, name in _RUN_TEXT_KEYS.items()}
     try:
         n_events = int(params["numberOfEvents"])
@@ -563,7 +661,10 @@ def build_segments_C(d):
     crossing's steps). NOTE: the hit position is the midpoint of the hit's first and last step
     points, which for a straight through-going track is where it crosses the Si mid-plane, not
     the entry-face point; the record keeps the entry_u/entry_v field names, but treat them as
-    that point."""
+    that point. An npz of step hits (hit_mode step) raises ValueError: each of its hits is one
+    Geant4 step, not a crossing."""
+    if hit_mode(d) == "step":
+        raise ValueError(step_npz_refusal("build_segments_C"))
     thx, thy, thz = np.asarray(d["thx"]), np.asarray(d["thy"]), np.asarray(d["thz"])
     tpx, tpy, tpz = np.asarray(d["tpx"]), np.asarray(d["tpy"]), np.asarray(d["tpz"])
     tedep, ttime, tmc = np.asarray(d["tedep"]), np.asarray(d["ttime"]), np.asarray(d["tmc"]).astype(int)
@@ -628,6 +729,8 @@ def main(argv=None):
     npz = args.npz or default_npz()
     out_prefix = args.out_prefix or default_out_prefix(npz, "sensor_crossings")
     d = load_cascade(npz)
+    if hit_mode(d) == "step":
+        sys.exit(f"ERROR: {npz}: {step_npz_refusal('sensor_crossings.py')}")
 
     has_tracker = ("thx" in d) and len(np.atleast_1d(d["thx"])) > 0
     has_calo = ("cmc" in d) and ("cbeg" in d)   # calo-contribution arrays (extract_cascade.py)

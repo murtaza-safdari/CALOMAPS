@@ -34,11 +34,19 @@ Environment knobs (all optional; the defaults reproduce the canonical 50 GeV pho
                              it, by passing a variant --compactFile. Here the default output name
                              is tagged _si<T>um by the --compactFile's own thickness (untagged at
                              the repo's 320 um); the knob only prints a warning when it disagrees.
+    CALOMAPS_SI_CUT_UM       production cut in the sensor silicon in um; like the thickness, only
+                             the sim/*.sh wrappers act on it, and the default output name is
+                             tagged _cut<C>um by the --compactFile's own silicon region
+    CALOMAPS_SI_STEP_UM      maximum Geant4 step length in the sensor silicon in um; likewise
+                             acted on by the wrappers only, and tagged _stepmax<S>um by the
+                             --compactFile's own silicon limitset
+    CALOMAPS_TRACKER_HITS    crossing: one hit per sensor crossing (default); step: one hit per
+                             Geant4 step in the silicon (see "tracker hits" below)
 See docs/handbook.md "Controlling which secondaries are produced and saved" for the physics
 (production cut) vs. output-only (persistency floor) distinction.
 
-The default output name is trackermom_<tag><E>_<N>evt[_si<T>um].root, N being the
---numberOfEvents of the ddsim command line; --outputFile replaces it.
+The default output name is trackermom_<tag><E>_<N>evt[_step][_si<T>um][_cut<C>um][_stepmax<S>um].root,
+N being the --numberOfEvents of the ddsim command line; --outputFile replaces it.
 
 Keep this file pure ASCII (non-ASCII breaks the EDM4hep RunHeader std::map conversion).
 """
@@ -93,12 +101,29 @@ SIM.part.printStartTracking = False
 # position is the midpoint of its first and last step points (the mid-plane point of a straight
 # through-going track, not the entry face) and whose momentum is the mean of the momenta there;
 # one hit per crossing = one crossing record.
-SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
+# ---- tracker hits: per crossing (default) or per Geant4 step (CALOMAPS_TRACKER_HITS=step) ----
+# CollectSingleDeposits makes every step its own hit: the midpoint of the step's pre- and
+# post-step points, the mean of their momenta, the step length as pathLength and the step's
+# deposit as EDep. The tracker filter (1 keV per step) would drop most of those steps, so the
+# ECal gets edep0, which keeps every step with a deposit. The shower itself is unchanged; the run
+# header records both settings (action.mapActions, filter.mapDetFilter), and
+# analysis/extract_trackermom.py reads the hit mode from there.
+_hits = os.environ.get("CALOMAPS_TRACKER_HITS", "").strip() or "crossing"
+if _hits not in ("crossing", "step"):
+    raise SystemExit("CALOMAPS_TRACKER_HITS=%r: expected crossing or step" % _hits)
+if _hits == "step":
+    SIM.action.mapActions['ECalBarrel'] = ('Geant4TrackerWeightedAction',
+                                           {'HitPositionCombination': 2, 'CollectSingleDeposits': True})
+    SIM.filter.mapDetFilter['ECalBarrel'] = 'edep0'
+else:
+    SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
 
-# ---- default output name: event count and silicon thickness from the ddsim command line ----
+# ---- default output name: event count, hit mode and silicon from the ddsim command line ----
 # sim/steering_output.py reads ddsim's command line: _<N>evt from --numberOfEvents, and the
-# thickness of the --compactFile: no tag at the repo's 320 um, _si<T>um otherwise, with a WARNING
-# when CALOMAPS_SI_THICKNESS_UM disagrees.
+# thickness, silicon production cut and silicon step limit of the --compactFile: no tag for the
+# repo geometry, _si<T>um for another thickness, _cut<C>um for a cut of its own and _stepmax<S>um
+# for a step limit of its own, with a WARNING when CALOMAPS_SI_THICKNESS_UM, CALOMAPS_SI_CUT_UM or
+# CALOMAPS_SI_STEP_UM disagrees. Step hits add _step.
 # ddsim exec()s this file without __file__; the compiled code keeps the file's path.
 _si_tag, _n_tag = "", ""
 try:
@@ -115,4 +140,6 @@ except Exception as _err:
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "trackermom")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g%s%s.root" % (_tag, _energy_gev, _n_tag, _si_tag))
+_hits_tag = "_step" if _hits == "step" else ""
+SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g%s%s%s.root"
+                              % (_tag, _energy_gev, _n_tag, _hits_tag, _si_tag))
