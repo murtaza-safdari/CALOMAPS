@@ -58,8 +58,17 @@ RECORDS: one dict per crossing, fields in this order (build_segments_A/B/C via _
   variant            -      "A", "B" or "C"
   flags              -      "|"-separated: tracker_hit (C), dir_from_momentum (A),
                             pixel_centroid (B), grazing
+  evt_id             -      event of the crossing: its entry number in the simulation's ROOT file
+                            (the npz's evt_id_hit (C) or evt_id_particle (A, B)); 0 for an npz
+                            without event ids, which holds one event
+  path_length_mm     mm     C: the hit's Geant4 path length in the silicon (pathLength, summed
+                            over the hit's steps); A, B: NaN, no true path length is taken
 A grazing crossing (direction parallel to the sensor plane, |dw| <= 1e-9) has cot_alpha =
-cot_beta = inf, written as Infinity in the .json and inf in the .csv, and the flag grazing.
+cot_beta = inf, written as Infinity in the .json and inf in the .csv, and the flag grazing. NaN is
+written as NaN in the .json and nan in the .csv.
+
+An npz of several events (extract_trackermom.py) concatenates their particles and hits; track_id
+indexes the concatenated arrays, so records sorted by track_id come grouped by event, in event order.
 
 The records are written as <out_prefix>.json + .csv; by default beside the input npz
 (trackermom_X.npz -> sensor_crossings_X). analysis/pixelav_converter.py builds the PIXELAV deck
@@ -285,7 +294,14 @@ def is_charged(pdg):
     return (~np.isin(pdg, list(_NEUTRAL_PDGS))) & (np.abs(pdg) < 1_000_000_000)
 
 
-def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, variant, flags, time_ns):
+def _event_ids(d, key):
+    """The npz's per-hit or per-particle event ids (key), or None for an npz of one event
+    extracted without them."""
+    return np.asarray(d[key]) if key in d else None
+
+
+def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, variant, flags, time_ns,
+            evt_id=0, path_mm=math.nan):
     cot_a, cot_b = (float(du / dw), float(dv / dw)) if abs(dw) > 1e-9 else (float("inf"), float("inf"))
     if abs(dw) <= 1e-9:
         flags = (flags + "|grazing").strip("|")
@@ -300,6 +316,7 @@ def _record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw, edep, nstep, var
         "sensor_normal_phi": float(phi_n), "depth_w_mm": float(ew),
         "energy_dep_GeV": float(edep), "n_steps": int(nstep), "time_ns": float(time_ns),
         "variant": variant, "flags": flags,
+        "evt_id": int(evt_id), "path_length_mm": float(path_mm),
     }
 
 
@@ -310,6 +327,7 @@ def build_segments_A(d):
     cmc = np.asarray(d["cmc"]); ct = np.asarray(d["ctime"])
     csx, csy, csz = np.asarray(d["csx"]), np.asarray(d["csy"]), np.asarray(d["csz"]); cE = np.asarray(d["cE"])
     pdg_all = d["pdg"]; px_all, py_all, pz_all = d["px"], d["py"], d["pz"]
+    evt_p = _event_ids(d, "evt_id_particle")
     assert cmc.size == 0 or (cmc.min() >= 0 and cmc.max() < len(pdg_all)), "contribution->MCParticle index out of range"
 
     centers = si_layer_centers()
@@ -352,7 +370,8 @@ def build_segments_A(d):
                 flags = "dir_from_momentum"; n_single += 1
             eu, ev, ew = to_local(csx[e], csy[e], csz[e], phi_n)
             segs.append(_record(mc, lay, pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
-                                float(cE[run].sum()), len(run), "A", flags, float(ct[e])))
+                                float(cE[run].sum()), len(run), "A", flags, float(ct[e]),
+                                0 if evt_p is None else evt_p[mc]))
     segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
     return segs, {"neutral_groups_skipped": n_neutral, "dir_from_momentum": n_single}
 
@@ -364,6 +383,7 @@ def build_segments_B(d):
     cbeg, cend, cmc, cE = np.asarray(d["cbeg"]), np.asarray(d["cend"]), np.asarray(d["cmc"]), np.asarray(d["cE"])
     hx, hy, hz = np.asarray(d["hx"]), np.asarray(d["hy"]), np.asarray(d["hz"])
     pdg_all = d["pdg"]; px_all, py_all, pz_all = d["px"], d["py"], d["pz"]
+    evt_p = _event_ids(d, "evt_id_particle")
     centers = si_layer_centers()
     hit_of = np.full(len(cmc), -1, dtype=np.int64)               # contribution -> hit (pixel)
     for h in range(len(cbeg)):
@@ -387,7 +407,8 @@ def build_segments_B(d):
         eu, ev, ew = to_local(ex, ey, ez, phi_n)
         du, dv, dw = to_local(px_all[mc], py_all[mc], pz_all[mc], phi_n)
         segs.append(_record(mc, lay, pdg, float(np.sqrt(px_all[mc]**2+py_all[mc]**2+pz_all[mc]**2)),
-                            eu, ev, ew, phi_n, du, dv, dw, float(wgt.sum()), len(js), "B", "pixel_centroid", 0.0))
+                            eu, ev, ew, phi_n, du, dv, dw, float(wgt.sum()), len(js), "B", "pixel_centroid", 0.0,
+                            0 if evt_p is None else evt_p[mc]))
     segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
     return segs, {}
 
@@ -407,6 +428,8 @@ def build_segments_C(d):
     thx, thy, thz = np.asarray(d["thx"]), np.asarray(d["thy"]), np.asarray(d["thz"])
     tpx, tpy, tpz = np.asarray(d["tpx"]), np.asarray(d["tpy"]), np.asarray(d["tpz"])
     tedep, ttime, tmc = np.asarray(d["tedep"]), np.asarray(d["ttime"]), np.asarray(d["tmc"]).astype(int)
+    tpath = np.asarray(d["tpath"])
+    evt_h = _event_ids(d, "evt_id_hit")
     pdg_all = d["pdg"]
     assert tmc.size == 0 or (tmc.min() >= 0 and tmc.max() < len(pdg_all)), "trackerhit->MCParticle index out of range"
     centers = si_layer_centers()
@@ -424,7 +447,8 @@ def build_segments_C(d):
         du, dv, dw = to_local(float(tpx[j]), float(tpy[j]), float(tpz[j]), phi_n)    # momentum -> local frame
         p_mag = float(np.sqrt(tpx[j]**2 + tpy[j]**2 + tpz[j]**2))                     # REAL |p| at the crossing
         segs.append(_record(mc, int(layer[j]), pdg, p_mag, eu, ev, ew, phi_n, du, dv, dw,
-                            float(tedep[j]), 1, "C", "tracker_hit", float(ttime[j])))
+                            float(tedep[j]), 1, "C", "tracker_hit", float(ttime[j]),
+                            0 if evt_h is None else evt_h[j], float(tpath[j])))
     segs.sort(key=lambda s: (s["track_id"], s["layer_id"]))
     return segs, {"neutral_hits_skipped": n_neutral, "n_tracker_hits": int(len(thx))}
 

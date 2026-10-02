@@ -28,7 +28,7 @@
 #   pixelav_segments_<tag><E>_1evt.pixelav.txt        the 7-column badeaa3 PIXELAV deck (the hand-off file):
 #       cot_alpha cot_beta ppion[GeV/c] flipped modx=v[um] mody=u[um] pT=|p|[GeV/c]
 #   pixelav_segments_<tag><E>_1evt.pixelav.txt.columns.txt   column legend (units and definitions)
-#   pixelav_segments_<tag><E>_1evt.{json,csv}         per-crossing records (16 fields each)
+#   pixelav_segments_<tag><E>_1evt.{json,csv}         per-crossing records (18 fields each)
 # With --fullcascade it ALSO makes the calorimeter cascade (for notebook 05 / notebook 07):
 #   fullcascade_<tag><E>_1evt.root + .npz
 #
@@ -104,5 +104,5 @@ echo "DONE. PIXELAV hand-off package:"
 echo "  deck    : $SEG_PREFIX.pixelav.txt"
 echo "            (7 cols: cot_alpha cot_beta ppion[GeV/c] flipped modx=v[um] mody=u[um] pT=|p|[GeV/c])"
 echo "  legend  : $SEG_PREFIX.pixelav.txt.columns.txt   (units and definitions)"
-echo "  records : $SEG_PREFIX.json / .csv   (16 fields per crossing)"
+echo "  records : $SEG_PREFIX.json / .csv   (18 fields per crossing)"
 echo "  source  : $TRK_NPZ   (MCParticle cascade + tracker-hit arrays)"

@@ -25,7 +25,7 @@ rest under `$CALOMAPS_HOME/models`):
 | `trackermom_<tag><E>_1evt.npz` | the same, plus the full MCParticle cascade, as NumPy arrays |
 | **`pixelav_segments_<tag><E>_1evt.pixelav.txt`** | **the deck** — one line per crossing, 7 columns (`cot_alpha cot_beta ppion flipped modx mody pT`), lengths in microns |
 | `..._1evt.pixelav.txt.columns.txt` | column legend (human reference; PIXELAV doesn't read it) |
-| `..._1evt.json` / `.csv` | per-crossing records, 16 fields each (provenance + the raw numbers behind the deck) |
+| `..._1evt.json` / `.csv` | per-crossing records, 18 fields each (provenance + the raw numbers behind the deck) |
 
 `<tag>` is `gamma`, `piplus`, `piminus`, … and `<E>` is the beam energy in GeV (e.g.
 `trackermom_piplus50_1evt.root`). The deck is the hand-off file; the `.npz`/`.json`/`.csv`

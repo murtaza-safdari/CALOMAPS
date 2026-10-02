@@ -198,14 +198,14 @@ path if CALOMAPS ever wants CMS-style templates.
 
 ### The CALOMAPS per-crossing record — authoritative schema
 
-`pixelav_converter.py` writes, next to the deck, a `.json`/`.csv` with one 16-field record per
+`pixelav_converter.py` writes, next to the deck, a `.json`/`.csv` with one 18-field record per
 crossing (the provenance behind every deck line). Coordinates: **u** = across-pitch (tangential),
 **v** = cylinder-z, **w** = sensor depth (outward face normal); all lengths in **mm** here (the
 deck's length labels are in µm).
 
 | Field | Unit | Meaning |
 |---|---|---|
-| `track_id` | – | index into the event's `MCParticles` (trace any line back to its particle) |
+| `track_id` | – | index into the npz's MCParticle arrays (trace any line back to its particle); with several events these hold every event's particles in turn, and the npz `pid` is the index in the event's own `MCParticles` |
 | `layer_id` | – | Si layer 0–29 (0 = innermost); assignment verified against the readout `cellID` |
 | `pdg` | – | PDG code of the crossing particle |
 | `p_GeV` | GeV | \|p\| — variant **C**: true Geant4 momentum *at the crossing*; **A**/**B**: momentum at production |
@@ -220,6 +220,8 @@ deck's length labels are in µm).
 | `time_ns` | ns | crossing time (deck's `hittime` label is this ×1000, in ps, smartpix layout only) |
 | `variant` | – | `C` (tracker truth), `A` (calo step truth), `B` (pixel centroid fallback) |
 | `flags` | – | provenance markers: `tracker_hit`, `dir_from_momentum`, `pixel_centroid`, `grazing` |
+| `evt_id` | – | event of the crossing: its entry number in the simulation's ROOT file (0 for an npz without event ids, which holds one event) |
+| `path_length_mm` | mm | variant **C**: the hit's Geant4 path length in the Si (`pathLength`, summed over the hit's steps); **A**/**B**: NaN |
 
 Deck-column ↔ record mapping (badeaa3 7-col): `cot_alpha cot_beta ppion flipped modx mody pT` =
 `cot_alpha`, `cot_beta`, `p·(m_π/m_particle)` (βγ-matched), `flipped`, `entry_v·1000` (µm),
