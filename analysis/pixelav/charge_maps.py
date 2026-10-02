@@ -34,6 +34,8 @@ OUTPUT <prefix>.charges.npz (or --out), compressed:
   the jobs table's scalars and provenance keys (pitch_x_um, ..., sim_*, geo_*), as they are
   the collector's own: n_jobs, n_groups, n_pix, total_q, total_neh, total_n_out, total_edep_keV,
       out_files, jobs_npz, pixelav_title (the outputs' first line), pixelav_stimstp_ps
+  pixelav_run: the text of <prefix>.run.json, the record run_deposit_jobs.sh writes of the driver
+      run (driver seed, sensor files' sha256, commits, host, time), when that file exists
 """
 import argparse, os, sys
 import numpy as np
@@ -270,6 +272,11 @@ def main(argv=None):
     if problems:
         sys.exit("charge_maps: " + "; ".join(problems) + "; nothing written")
     pix, J, G = accumulate(B, T, row)
+    record = args.prefix + ".run.json"
+    run = {}
+    if os.path.isfile(record):
+        with open(record, encoding="utf-8", errors="replace") as f:
+            run = {"pixelav_run": np.array(f.read())}
 
     copied = {k: v for k, v in T.items()
               if not k.startswith(("job_", "group_")) and k not in ("job_id", "group_id")}
@@ -287,7 +294,8 @@ def main(argv=None):
         total_n_out=np.int64(tot["n_out"]), total_edep_keV=np.float64(tot["edep_keV"]),
         out_files=np.array([os.path.abspath(f) for f in files]),
         jobs_npz=np.array(os.path.abspath(jobs_npz)),
-        pixelav_title=np.array(title), pixelav_stimstp_ps=np.float64(stimstp))
+        pixelav_title=np.array(title), pixelav_stimstp_ps=np.float64(stimstp),
+        **run)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tmp = out + ".partial"
     try:
@@ -314,6 +322,7 @@ def main(argv=None):
         f"  charge: {tot['q']:.6g} e; sum q / sum neh = {tot['q'] / tot['neh']:.5f}",
         f"  largest |group q - pairs made|: {abs(dq[worst]):.1f} e (group "
         f"{int(T['group_id'][worst])}, {int(G['pairs'][worst])} pairs)" if n_groups else "  no groups",
+        f"  run record: {record}" if run else f"  run record: none ({record} does not exist)",
         f"  written: {out}",
     ]
     print("\n".join(lines))

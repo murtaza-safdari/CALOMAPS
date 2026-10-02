@@ -459,6 +459,7 @@ output's title and pitch line agree with each other and with the table's pitches
 | every `group_*` key of the jobs table, `group_q`, `group_n_pix` | per group: its charge and its number of `pix_*` rows |
 | scalars and provenance | those of the jobs table |
 | `n_jobs`, `n_groups`, `n_pix`, `total_q`, `total_neh`, `total_n_out`, `total_edep_keV`, `out_files`, `jobs_npz`, `pixelav_title`, `pixelav_stimstp_ps` | the collector's own |
+| `pixelav_run` | the text of `<prefix>.run.json`, the record `run_deposit_jobs.sh` writes of the driver run, when that file exists |
 
 ### Limits
 

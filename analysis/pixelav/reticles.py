@@ -105,7 +105,8 @@ SAME_KEYS = ("pitch_x_um", "pitch_y_um", "thick_um", "ev_per_pair", "pixelav_tit
 # describe one batch: kept per input as input_<key>
 BATCH_KEYS = ("sim_seed", "sim_date_utc", "sim_n_events", "num_events", "events_first",
               "events_stop", "source_npz", "jobs_npz", "geo_home", "sensor_source", "parts",
-              "n_jobs", "n_groups", "n_pix", "total_q", "total_neh", "total_n_out", "total_edep_keV")
+              "n_jobs", "n_groups", "n_pix", "total_q", "total_neh", "total_n_out", "total_edep_keV",
+              "pixelav_run")
 _NEEDED = ("pix_group_id", "pix_iv", "pix_iu", "pix_q", "group_id", "group_evt_id", "group_module",
            "group_layer", "group_root_pdg", "group_root_p_MeV", "group_created_in_slab",
            "events_first", "events_stop", "pitch_x_um", "pitch_y_um")
