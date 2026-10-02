@@ -56,9 +56,12 @@
 #define TYSIZE 13
 
 /* Define maximum E-field and weighting potential array sizes */
+/* NARRAYY is 26 here, 13 upstream: the 50x25 um model's grid is 26x26x51, the others are 26x13x51.
+   A grid smaller than the arrays fills part of them; fieldsav/wgtpotsav index each axis only up
+   to npix-1. */
 
 #define NARRAYX 26
-#define NARRAYY 13
+#define NARRAYY 26
 #define NARRAYZ 51
 
 
@@ -150,6 +153,8 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
     static int fileind, filebase, fileoff, runsize, irun, ievent, frun, nskip, procid, new_drde, ehole;
     static float rvec[4], pimom, xoffset, yoffset, lenxmin, lenxmax, deltaxlen, lenymin, lenymax, deltaylen, locdir[3], cotalpha, cotbeta;
     static float clusxlen, clusylen;
+    static float wthick, wxsize, wysize;
+    static int wnx, wny, wnz;
     static char outfile[500], seedfile[500];
     static double alpha;
 
@@ -225,6 +230,24 @@ static int Nscale = 1;  /* This doesn't cause additional fluctuations (we alread
     /*  Define the detector parameters from the global initialization file */
 
     pixinit(&pimom, &thick, &xsize, &ysize, &temp, flux, &rhe, &rhh, &peaktim, &samptim, &ehole, &new_drde, &filebase);
+
+    /* pixinit() returns 0 also when ppixel2.init is missing, when its grid exceeds NARRAYX/Y/Z
+       ("Efield array too large") and when wgt_pot.init disagrees with it ("match problem"),
+       leaving the field or weighting arrays unread (zero); an oversized grid would also index
+       past the arrays. Transport would then run on zero fields, so stop here instead. */
+    if(npixx < 2 || npixy < 2 || npixz < 2 || npixx > NARRAYX || npixy > NARRAYY || npixz > NARRAYZ) {
+      printf("ERROR: field grid %d x %d x %d is missing or does not fit the %d x %d x %d arrays \n",
+             npixx, npixy, npixz, NARRAYX, NARRAYY, NARRAYZ);
+      return 1;
+    }
+    iifp = fopen("wgt_pot.init", "r");
+    if(iifp == NULL || fscanf(iifp, "%f %f %f %d %d %d", &wthick, &wxsize, &wysize, &wnx, &wny, &wnz) != 6
+       || wthick != thick || wxsize != xsize || wysize != ysize || wnx != npixx || wny != npixy || wnz != npixz) {
+      printf("ERROR: wgt_pot.init is missing or its header differs from ppixel2.init (%f %f %f %d %d %d) \n",
+             thick, xsize, ysize, npixx, npixy, npixz);
+      return 1;
+    }
+    fclose(iifp);
 
     crrc(peaktim, samptim, &stimstp, crrcresp);
     printf("sample time %f \n", stimstp);
