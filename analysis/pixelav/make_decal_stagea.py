@@ -36,7 +36,10 @@ V_BIAS = 320.0         # V    -> uniform E_z = V_bias/thick = 1 V/um = 10000 V/c
 TEMP = 300.0           # K    (room-temperature test-beam operation)
 BFIELD = (0.0, 0.0, 0.0)        # T   (no field: simplest well-defined model)
 RHE, RHH = 1.0, 1.0    # Hall factors (irrelevant at B=0)
-PEAKTIM, SAMPTIM = 20000.0, 4000.0   # ps  preamp CR-RC shaping (as bundled BPix)
+# SAMPTIM is the time the charge is followed for; the 20 output time slices divide it. At 10 kV/cm
+# and 300 K the last holes of a 320 um sensor arrive after about 9.5 ns; the bundled BPix value of
+# 4000 ps (enough for 100 um) leaves the last slice at 89% of the pairs made.
+PEAKTIM, SAMPTIM = 20000.0, 12000.0  # ps  preamp CR-RC peaking time; sampling time
 EHOLE = 0              # collect electrons
 NEW_DRDE = 1           # NIST ESTAR dE/dx
 PIMOM = 1.0            # <1.1 -> PIXELAV default 45 GeV (per-track ppion overrides)
