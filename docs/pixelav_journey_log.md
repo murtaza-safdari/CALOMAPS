@@ -8,7 +8,8 @@ off-quota but **wiped on container restart**.
 Conceptual background and source provenance are in
 [`pixelav_reference.md`](pixelav_reference.md); this file is the *how it actually runs*.
 
-Branch: `pixelav-integration`. Stable return point: tag `pre-pixelav-journey`
+Branch: `pixelav-cms`, which carries the work of the `pixelav-inputs` and `pixelav-integration`
+branches. Stable return point: tag `pre-pixelav-journey`
 (`git fetch --tags && git checkout pre-pixelav-journey`).
 
 Notebook numbers in the dated sections below are the ones in use at the time. Notebook 05
@@ -25,7 +26,7 @@ Notebook numbers in the dated sections below are the ones in use at the time. No
 |-------|------|-------|
 | PIXELAV build | EAF `/tmp/pixelav_journey/pixelav/` | **ephemeral**; rebuild with `setup/setup_pixelav.sh` |
 | Upstream source | `github.com/badeaa3/pixelav` | public mirror of Swartz's code, no CERN login |
-| Our additions | repo `analysis/pixelav/` | patched driver, Stage-A config, deck writer — **durable** |
+| Our additions | repo `analysis/pixelav/` | patched list driver, deposit-injection driver, Stage-A generator, sensor-model check, cluster parser, deposit-job tools — **durable** |
 | Per-crossing input | repo `analysis/pixelav_converter.py` | builds the 7-column deck from the cascade `.npz` |
 | Reference PDFs | `github.com/badeaa3/pixelav` `docs/` | `Pixelav_ac_file_format.pdf`, `Pixelav_coordinates.pdf` |
 
@@ -37,13 +38,16 @@ EAF to `/nashome` are native NFS (reliable).
 ## 1. Reproduce the build (one command)
 
 ```bash
-# on an EAF JupyterLab terminal, in the CALOMAPS repo root
+# with the Key4hep stack sourced (an EAF JupyterLab terminal, an LPC login node), in the repo root
 bash setup/setup_pixelav.sh
 ```
 
-This clones `badeaa3/pixelav` into `/tmp/pixelav_journey/`, builds the list driver
-(`gcc -O2 ppixelav2_list_trkpy_n_2f.c -msse -lm`), installs our patched driver and DECAL
-Stage-A config if present in `analysis/pixelav/`, and runs a one-track smoke test.
+This clones `badeaa3/pixelav` into `$PIXELAV_WORK` (default `/tmp/pixelav_journey/`) at the
+pinned commit `8a774a3`, builds the baseline list driver
+(`gcc -O2 ppixelav2_list_trkpy_n_2f.c -msse -lm` on x86-64), our patched list driver and the
+deposit-injection driver from `analysis/pixelav/`, installs the sensor model `PIXELAV_SENSOR`
+selects (default `decal320`) in a run directory, checks it with `sensor_model.py --summary`, and
+runs a one-track and a one-job smoke test. Knobs and models: `pixelav_handoff.md` §5.1.
 
 Toolchain confirmed on EAF: gcc 11.5, make 4.3, cmake 3.26 (only gcc is needed). The
 `sse2neon.h` shim is ARM-only; x86-64 uses `<xmmintrin.h>`.
@@ -52,14 +56,15 @@ Toolchain confirmed on EAF: gcc 11.5, make 4.3, cmake 3.26 (only gcc is needed).
 
 - **Stage A — sensor/field model** (hand-authored per sensor, *external* to our sim): a 3-D
   E-field map, weighting potential, thickness, pixel pitch, bias, temperature, mobility/Hall
-  model and B-field. Lives in `ppixel2.init` (E-field + scalar params) and a weighting-
-  potential file named by `wgt_pot.init`. The bundled example is a CMS BPix "dot1" smart-pixel
-  sensor (see §6).
+  model and B-field. Lives in `ppixel2.init` (E-field + scalar params) and `wgt_pot.init`, which
+  must hold the weighting-potential grid itself (upstream's `wgt_pot.init` holds only the path of
+  `weighting_BPix_50x13x100.init`; `setup_pixelav.sh` copies that file over it, §9). The bundled
+  example is a CMS BPix "dot1" smart-pixel sensor (see §6).
 - **Stage B — per-track event input** (this is what our converter produces): one ASCII line per
   charged-track sensor crossing in `track_list.txt`.
 
-A run directory needs: `SIRUTH.SPR` (Bichsel straggling table), `ppixel2.init`, `wgt_pot.init`,
-the weighting-potential file it points to, and `track_list.txt`. Invoke:
+A run directory needs: `SIRUTH.SPR` (Bichsel straggling table), `ppixel2.init`, `wgt_pot.init`
+(the weighting-potential grid) and `track_list.txt`. Invoke:
 
 ```bash
 ./ppixelav2_list_trkpy_n_2f 1 track_list.txt clusters.out seedfile.txt
@@ -80,11 +85,12 @@ cot_alpha  cot_beta  ppion  flipped  modx  mody  pT
 | `cot_beta`  | slope along the **21-px (x)** axis | — |
 | `ppion` | momentum magnitude (treated as a pion for dE/dx) | GeV |
 | `flipped` | entry face: `1` → enters at z=0 (back), `0` → enters at z=thickness (ROC side) | int |
-| `modx` | local impact across the pitch (label only upstream; **our patch consumes it**) | µm |
-| `mody` | local impact (label only upstream; **our patch consumes it**) | µm |
-| `pT` | written to the cluster header as `track_q_sign*pT` (label) | GeV |
+| `modx` | local impact along the **21-px (x)** axis (label only upstream; **our patch consumes it**) | µm |
+| `mody` | local impact along the **13-px (y)** axis (label only upstream; **our patch consumes it**) | µm |
+| `pT` | copied into the cluster header (label) | GeV |
 
-Tracks with `|cot_alpha|>10` or `|cot_beta|>10` are silently skipped by the driver.
+Tracks with `|cot_alpha|>10` or `|cot_beta|>10` are skipped by the driver. Upstream skips them
+silently; the patched driver prints each skipped deck line and counts them at the end of the run.
 
 ## 4. Coordinate / axis convention (the swap — important)
 
@@ -114,15 +120,19 @@ z-entry=thickness, n_z<0.
 <80-char header>
 x-pitch  y-pitch  thickness  time-slice-step          # all µm, ps
 <cluster>
-x-entry y-entry z-entry  px py pz  neh  y_module  track_q_sign*pT
-<time slice 1 ps> ... <time slice 20 ps>              # NCRRC=20 slices
+x-entry y-entry z-entry  px py pz  neh  y_module  pT  [deck_line]
+<time slice T ps>  (T = k·time-slice-step, k = 1..20) # NCRRC=20 slices
   each slice: 13 rows × 21 cols of pixel charge
 <cluster> ...
 ```
 
-`(px,py,pz)` are momentum components (`direction · ppion`), not bare cosines. Pixel charges
-must be ×10 to recover total charge = `neh` (a sampling factor). The track midplane position
-is forced into the 3×3 about `pix_06_10`.
+`(px,py,pz)` are momentum components (`direction · ppion`), not bare cosines. The patched
+driver adds the 1-based deck line as a 10th header field. The time slices are cumulative: slice
+k holds the charge collected or induced up to time k·step, so a cluster's charge is its **last**
+slice; summing the slices overstates it 10–18 times. The last slice holds the full charge only if
+the model's sampling time outlasts the charge collection (12 ns for the 320 µm DECAL model). The
+track midplane position is forced into the 3×3 about `pix_06_10` (upstream; the patched driver
+places it in the central pixel, §7).
 
 ## 6. Bundled baseline config (sanity reference)
 
@@ -241,14 +251,16 @@ and sufficient PIXELAV input, how it relates to the calorimeter readout, and the
 
 **Two readouts, one shower.** The ECal Si is read out two ways: calorimeter SD -> `SimCalorimeterHit`
 + `CaloHitContribution` (energy per pixel + per-step deposits; NO momentum; used by nb01-04); tracker
-SD (`Geant4TrackerWeightedAction`) -> `SimTrackerHit` (one per crossing: momentum, energy-weighted
-~mid-plane position, `pathLength`, `eDep`, time, MCParticle link). The sensitive detector is a passive
+SD (`Geant4TrackerWeightedAction`) -> `SimTrackerHit` (one per crossing: momentum, ~mid-plane
+position (the midpoint of the hit's first and last step points), `pathLength`, `eDep`, time,
+MCParticle link). The sensitive detector is a passive
 observer -- verified by byte-identical MCParticle cascades (78,270 particles, identical momenta and
 vertices) between the two same-seed runs.
 
 **PIXELAV wants the mid-plane impact.** The patched driver reduces `modx/mody` mod-pitch as the sub-
-pixel MID-PLANE impact and projects to the faces itself via the direction. The tracker energy-weighted
-position IS the mid-plane, so it feeds PIXELAV directly; back-projecting to the entry face would
+pixel MID-PLANE impact and projects to the faces itself via the direction. The tracker hit position
+(the midpoint of its first and last step points) IS the mid-plane point of a straight through-going
+track, so it feeds PIXELAV directly; back-projecting to the entry face would
 double-project. => the tracker SD alone is the natural, sufficient PIXELAV input. The combined
 calo+tracker SD idea was evaluated and dropped (DD4hep needs a custom plugin / untested `collections=`
 path, and it buys nothing for PIXELAV).
@@ -314,6 +326,6 @@ Key4hep pinned `2026-02-01`), starting from a fresh `git clone` of `main`:
 Scope split (settled 2026-07-10): `main` carries the input-preparation side only —
 `sim/make_pixelav_inputs.sh`, the deck converter, notebook 05c (input inspection) and
 `docs/pixelav_handoff.md`. The PIXELAV build/run tooling in this log (`analysis/pixelav/`,
-`setup/setup_pixelav.sh`, notebook 06, this log itself) stays on this branch by design; the
-2026-07-09 fixes (clean-PYTHONPATH Stage-A invocation, the verification results above) are
-committed here.
+`setup/setup_pixelav.sh`, notebook 06, this log itself) stays on the `pixelav-integration`
+branch by design; the 2026-07-09 fixes (clean-PYTHONPATH Stage-A invocation, the verification
+results above) are committed there.

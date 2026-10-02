@@ -388,9 +388,9 @@ off after simulation (§10.1). The full notebook set, in pipeline order:
 | `05_shower_4vectors` | full-cascade MCParticle 4-vectors |
 | `06`/`07_sensor_crossings` | per-sensor track crossings — tracker / calorimeter routes (§10.1) |
 
-(Converting the crossing records into input decks for PIXELAV — our collaborators' silicon
-charge-transport simulation — lives on the `pixelav-inputs` branch; building and *running*
-PIXELAV lives on `pixelav-integration`.)
+(Feeding the shower to PIXELAV — our collaborators' silicon charge-transport simulation — as
+track-crossing decks or as Geant4 step deposits, and building and running PIXELAV, is described
+in [`pixelav_handoff.md`](pixelav_handoff.md).)
 
 ---
 
@@ -651,10 +651,11 @@ step truth, production momentum). Notebooks
 [`06_sensor_crossings_tracker`](../notebooks/06_sensor_crossings_tracker.ipynb) (§5 validates
 the per-crossing momentum) and
 [`07_sensor_crossings_calo`](../notebooks/07_sensor_crossings_calo.ipynb) inspect these
-outputs. Main deliberately stops at the validated crossing records: converting them into input
-decks for **PIXELAV** (our collaborators' silicon charge-transport simulation) lives on the
-`pixelav-inputs` branch, and building/running PIXELAV itself on the `pixelav-integration`
-branch.
+outputs. This manual chain stops at the validated crossing records.
+[`sim/make_pixelav_inputs.sh`](../sim/make_pixelav_inputs.sh) runs the tracker leg in one command,
+for any number of events (`CALOMAPS_N_EVENTS`), and continues to the **PIXELAV** inputs: a deck
+of track crossings, or (`CALOMAPS_PIXELAV_ROUTE=deposits`) jobs of Geant4 step deposits; see
+[`pixelav_handoff.md`](pixelav_handoff.md) for both and for building and running PIXELAV.
 
 Notebook 05 §2 also contrasts the stock vs full-cascade config over 20 events each to show the
 persistency settings don't change the physics; it reads `models/config_ab_gamma50.npz`, which
@@ -714,6 +715,16 @@ that out-of-tracking-region ECal secondaries (born at r > 1267 mm) persist at al
 persistency floor when you want a smaller truth file without touching the physics; use the range
 cut when you want to change what the shower actually produces. To change the **gun energy**, set
 `CALOMAPS_GUN_ENERGY_GEV` (the same variable name the baseline `run_sim.py` uses).
+
+**A cut and a step limit in the silicon only.** `CALOMAPS_SI_CUT_UM` gives the sensor silicon a
+production cut of its own (in µm, through a DD4hep region), and `CALOMAPS_SI_STEP_UM` a largest
+Geant4 step length of its own; everywhere else the run's cut and the calorimeter's 5 mm step
+limit still apply. Only the `sim/*.sh` wrappers act on them (through `sim/geometry_variant.sh`):
+they simulate a variant geometry that `sim/make_geometry_variant.py` writes under
+`$CALOMAPS_DATA_BASE`, and every output name carries `_cut<C>um` / `_stepmax<S>um`. Unset (the
+default), the geometry and the names are unchanged. The PIXELAV deposits route sets them to 1 µm
+and 5 µm, so delta rays become particles with their own steps and every step in the silicon is
+nearly straight ([`pixelav_handoff.md`](pixelav_handoff.md)).
 
 ---
 
@@ -983,6 +994,12 @@ Both `sim/generate_dataset.sh` and `sim/generate_batched.sh` delete the previous
 
 ### CMS image vs GPU image
 The CMS profile on EAF mounts `/uscms_data/`. The GPU profile (which CALOMAPS uses) doesn't — `/uscms_data/` is invisible. CALOMAPS doesn't need it. Make sure you spawn the GPU profile.
+
+### PIXELAV list driver: `ERROR: seed file … is at run … event … of an earlier run`
+`ppixelav2_list_trkpy_real_entry` saves its random-number state and its event counter in the seed file after every deck line, and a new run would resume from that counter. So a seed file left by an earlier run, or an existing output file (`ERROR: output file … exists`), stops the run. To run the deck again, remove both files. `PIXELAV_RESUME=1` continues the earlier run instead; for a deck that already finished, that writes nothing. See [pixelav_handoff.md](pixelav_handoff.md) §5.2.
+
+### PIXELAV cluster charge 10–18 times too large
+The 20 time slices of a PIXELAV cluster are cumulative: slice k holds the charge collected or induced up to time k. A cluster's charge is its **last** slice; summing the slices overstates it 10–18 times. `analysis/pixelav/parse_cluster.py` and `analysis/pixelav/charge_maps.py` take the last slice. See [pixelav_reference.md](pixelav_reference.md) §4.
 
 ---
 
