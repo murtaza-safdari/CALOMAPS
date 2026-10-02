@@ -7,6 +7,7 @@
                                             [--truths n_frac,n_own,n_in] [--min-count 20]
                                             [--gbt-iter 300] [--gbt-max-rows 400000]
                                             [--count-bits 8] [--no-scan] [--no-figures]
+                                            [--layer-weights L:W[,L:W ...]]
                                             [--include-preds <preds.npz> ...]
     python analysis/pixelav/mip_counting.py --self-test
 
@@ -76,9 +77,13 @@ the files of overlay <= --extrap-max-k only, evaluated on the files of larger ov
 METRICS per file and truth: bias and rms of estimate - truth in TRUTH_BINS and in R_BINS of r_mm;
 per super-event totals over all its stored reticles: sum(estimate)/sum(truth) (mean and spread),
 the relative spread std/mean of sum(estimate) beside those of sum(truth), sum(n_hits) and
-sum(charge); data volume per reticle holding hits, from the file's reticle shape: bitmap (one bit
-per pixel), zero-suppressed addresses (ceil(log2(pixels)) bits per hit), count (--count-bits, with
-the share of reticles whose n_in does not fit).
+sum(charge). These sums weigh every layer alike. With --layer-weights L:W[,L:W ...] the same
+totals are also given with each reticle weighed by its layer ("weighted"): W from layer L on (the
+largest L not above the layer), 1 below the first L. The DECAL barrel (20 layers behind 2.5 mm
+of tungsten, then 10 behind 5 mm) sums with 20:2; its unweighted spread is dominated by how deep
+the shower develops, not by the counting. Data volume per reticle holding hits, from the file's
+reticle shape: bitmap (one bit per pixel), zero-suppressed addresses (ceil(log2(pixels)) bits per
+hit), count (--count-bits, with the share of reticles whose n_in does not fit).
 
 OUTPUT in --out-dir: results.json; preds.npz (per file tag: the truths, super_evt, layer, r_mm,
 q_sum, n_hits, n_clusters, fold, and pred__<truth>__<estimator> / xpred__<truth>__<estimator> for
@@ -717,22 +722,57 @@ def _spread(x):
     return float(x.std(ddof=1) / x.mean()) if len(x) > 1 and x.mean() else None
 
 
-def event_totals(D, est, truth):
-    """per super-event sums of estimate and truth: ratio mean and spread, relative spreads."""
+def parse_layer_weights(spec):
+    """'L:W[,L:W ...]' -> [(L, W), ...] sorted by L; W applies from layer L on."""
+    steps = []
+    for item in spec.split(","):
+        try:
+            first, w = item.split(":")
+            first, w = int(first), float(w)
+        except ValueError:
+            raise Inconsistent(f"--layer-weights: '{item}' is not L:W") from None
+        _require(first >= 0 and w > 0 and math.isfinite(w), f"--layer-weights: '{item}' needs L >= 0 and W > 0")
+        steps.append((first, w))
+    _require(len({f for f, _ in steps}) == len(steps), "--layer-weights: a layer is given twice")
+    return sorted(steps)
+
+
+def layer_weights(steps, layer):
+    """The weight of each reticle from its layer: 1 below the first step."""
+    w = np.ones(len(layer))
+    for first, v in steps:
+        w[layer >= first] = v
+    return w
+
+
+def _totals(D, est, truth, w):
     ns = D["n_super_events"]
-    se = np.bincount(D["super_evt"], est, ns)
-    st = np.bincount(D["super_evt"], truth, ns)
+    se = np.bincount(D["super_evt"], est * w, ns)
+    st = np.bincount(D["super_evt"], truth * w, ns)
     _require(np.all(st > 0), f"{D['tag']}: a super-event without particles")
     ratio = se / st
-    return {"n_super_events": ns, "ratio_mean": float(ratio.mean()),
-            "ratio_std": float(ratio.std(ddof=1)) if ns > 1 else None,
+    return {"ratio_mean": float(ratio.mean()), "ratio_std": float(ratio.std(ddof=1)) if ns > 1 else None,
             "spread_est": _spread(se), "spread_truth": _spread(st)}
+
+
+def event_totals(D, est, truth):
+    """per super-event sums of estimate and truth: ratio mean and spread, relative spreads; with
+    D["layer_w"] the same for the layer-weighted sums under "weighted"."""
+    out = {"n_super_events": D["n_super_events"], **_totals(D, est, truth, 1.0)}
+    if "layer_w" in D:
+        out["weighted"] = _totals(D, est, truth, D["layer_w"])
+    return out
 
 
 def event_references(D):
     ns = D["n_super_events"]
-    return {"spread_hits": _spread(np.bincount(D["super_evt"], D["n_hits"], ns)),
-            "spread_charge": _spread(np.bincount(D["super_evt"], D["q_sum"], ns))}
+    out = {"spread_hits": _spread(np.bincount(D["super_evt"], D["n_hits"], ns)),
+           "spread_charge": _spread(np.bincount(D["super_evt"], D["q_sum"], ns))}
+    if "layer_w" in D:
+        w = D["layer_w"]
+        out["weighted"] = {"spread_hits": _spread(np.bincount(D["super_evt"], D["n_hits"] * w, ns)),
+                           "spread_charge": _spread(np.bincount(D["super_evt"], D["q_sum"] * w, ns))}
+    return out
 
 
 def data_volume(D, count_bits=COUNT_BITS):
@@ -866,22 +906,33 @@ def table(results, truth, kind="main"):
         head = f"  {tag} {truth}" + (" (trained on small overlays)" if kind != "main" else "")
         lines.append(f"{head}: {E['n_reticles']} reticles, {E['n_super_events']} super-events, "
                      f"sum truth {T['sum_truth']:.1f}")
+        weighted = "weighted" in src[names[0]]["event_totals"]
         lines.append("    " + f"{'estimator':<19}" + "".join(f"{b['bin']:>14}" for b in first)
-                     + f"{'sum ratio':>16}{'spread':>8}")
+                     + f"{'sum ratio':>16}{'spread':>8}" + (f"{'w. ratio':>16}{'w. spr.':>8}" if weighted else ""))
         lines.append("    " + f"{'reticles':<19}" + "".join(f"{b['N']:>14}" for b in first))
         for nm in names:
             r = src[nm]
             et = r["event_totals"]
             rs = f"{et['ratio_mean']:.3f}+-{et['ratio_std']:.3f}" if et["ratio_std"] is not None else f"{et['ratio_mean']:.3f}"
             sp = f"{et['spread_est']:.3f}" if et["spread_est"] is not None else "-"
-            lines.append("    " + f"{nm:<19}" + "".join(f"{_cell(b):>14}" for b in r["truth_bins"])
-                         + f"{rs:>16}{sp:>8}")
+            tail = f"{rs:>16}{sp:>8}"
+            if weighted:
+                ew = et["weighted"]
+                rs = (f"{ew['ratio_mean']:.3f}+-{ew['ratio_std']:.3f}" if ew["ratio_std"] is not None
+                      else f"{ew['ratio_mean']:.3f}")
+                sp = f"{ew['spread_est']:.3f}" if ew["spread_est"] is not None else "-"
+                tail += f"{rs:>16}{sp:>8}"
+            lines.append("    " + f"{nm:<19}" + "".join(f"{_cell(b):>14}" for b in r["truth_bins"]) + tail)
         et0 = src[names[0]]["event_totals"]
         ref = E["references"]
         if et0["spread_truth"] is not None:
             lines.append(f"    event-to-event spread (std/mean over {E['n_super_events']} super-events): "
                          f"truth {et0['spread_truth']:.3f}, hits {ref['spread_hits']:.3f}, "
                          f"charge {ref['spread_charge']:.3f}")
+            if weighted:
+                rw = ref["weighted"]
+                lines.append(f"    the same with the layer weights: truth {et0['weighted']['spread_truth']:.3f}, "
+                             f"hits {rw['spread_hits']:.3f}, charge {rw['spread_charge']:.3f}")
     return lines
 
 
@@ -976,17 +1027,24 @@ def figures(Ds, preds, results, out_dir, truth="n_own", prefix="fig", names=None
     # event totals vs K
     fig, axs = plt.subplots(1, 2, figsize=(9, 3.8))
     Ks = [D["overlay"] for D in Ds]
+    weighted = all("layer_w" in D for D in Ds)
+
+    def totals(d):
+        return d["weighted"] if weighted else d
+
     for nm in have:
         et = [results[D["tag"]]["truths"][truth][nm]["event_totals"] for D in Ds]
-        err = [(e["ratio_std"] or 0) / math.sqrt(e["n_super_events"]) for e in et]
+        err = [(totals(e)["ratio_std"] or 0) / math.sqrt(e["n_super_events"]) for e in et]
+        et = [totals(e) for e in et]
         axs[0].errorbar(Ks, [e["ratio_mean"] for e in et], yerr=err, marker="o", ms=4, capsize=2,
                         label=nm, **style(nm))
         axs[1].plot(Ks, [e["spread_est"] or np.nan for e in et], marker="o", ms=4, label=nm, **style(nm))
-    ref_t = [results[D["tag"]]["truths"][truth][have[0]]["event_totals"]["spread_truth"] or np.nan for D in Ds]
+    ref_t = [totals(results[D["tag"]]["truths"][truth][have[0]]["event_totals"])["spread_truth"] or np.nan
+             for D in Ds]
     axs[1].plot(Ks, ref_t, color="#555555", lw=1.5, ls=":", marker="s", ms=4, label="truth (particles)")
-    axs[1].plot(Ks, [results[D["tag"]]["references"]["spread_hits"] or np.nan for D in Ds], color="#999999",
+    axs[1].plot(Ks, [totals(results[D["tag"]]["references"])["spread_hits"] or np.nan for D in Ds], color="#999999",
                 lw=1.5, ls="-.", marker="^", ms=4, label="hit count")
-    axs[1].plot(Ks, [results[D["tag"]]["references"]["spread_charge"] or np.nan for D in Ds], color="#bbbbbb",
+    axs[1].plot(Ks, [totals(results[D["tag"]]["references"])["spread_charge"] or np.nan for D in Ds], color="#bbbbbb",
                 lw=1.5, ls="--", marker="v", ms=4, label="charge sum")
     axs[0].axhline(1, color="#999999", lw=1)
     for ax in axs:
@@ -998,7 +1056,7 @@ def figures(Ds, preds, results, out_dir, truth="n_own", prefix="fig", names=None
     axs[1].set_ylabel("event-to-event std / mean of the sum")
     axs[1].legend(frameon=False, fontsize=7, ncol=2)
     ns = ", ".join(f"K{D['overlay']}: {D['n_super_events']}" for D in Ds)
-    fig.suptitle(f"shower totals of {label}; super-events {ns}", fontsize=9)
+    fig.suptitle(f"shower totals of {label}{', layer-weighted' if weighted else ''}; super-events {ns}", fontsize=9)
     fig.tight_layout()
     p = os.path.join(out_dir, f"{prefix}_event_totals_{truth}.png")
     fig.savefig(p, dpi=FIG_DPI)
@@ -1269,6 +1327,19 @@ def self_test():
           and abs(dv["mean_bits_per_reticle"]["zero_suppressed"] - 11 * 102.5) < 1e-9
           and abs(dv["count_overflow_share"] - 0.5) < 1e-12,
           "data volume of a 42 x 26 reticle: 1092-bit bitmap, 11-bit addresses, 8-bit count overflow")
+    Dw = {"tag": "w", "n_super_events": 2, "super_evt": np.array([0, 0, 1, 1]), "layer": np.array([0, 20, 0, 20]),
+          "n_hits": np.array([1, 1, 3, 1]), "q_sum": np.array([1.0, 1.0, 1.0, 3.0])}
+    Dw["layer_w"] = layer_weights(parse_layer_weights("20:2"), Dw["layer"])
+    et = event_totals(Dw, np.array([2.0, 1.0, 2.0, 2.0]), np.array([1.0, 1.0, 1.0, 1.0]))
+    check(Dw["layer_w"].tolist() == [1, 2, 1, 2] and np.isclose(et["ratio_mean"], 1.75)
+          and np.isclose(et["weighted"]["ratio_mean"], (4 / 3 + 2) / 2) and np.isclose(et["weighted"]["spread_truth"], 0)
+          and np.isclose(event_references(Dw)["weighted"]["spread_hits"], np.std([3, 5], ddof=1) / 4),
+          "layer weights 20:2: weighted event totals")
+    try:
+        parse_layer_weights("20:2,20:3")
+        check(False, "a layer given twice in --layer-weights refused")
+    except Inconsistent:
+        check(True, "a layer given twice in --layer-weights refused")
     print(f"self-test: {len(fails)} failure(s)")
     return len(fails)
 
@@ -1323,6 +1394,8 @@ def main(argv=None):
     ap.add_argument("--count-bits", type=int, default=COUNT_BITS, metavar="B")
     ap.add_argument("--no-scan", action="store_true", help="skip the threshold and noise scan")
     ap.add_argument("--no-figures", action="store_true")
+    ap.add_argument("--layer-weights", metavar="L:W[,L:W ...]",
+                    help="also give the event totals with each reticle weighed W from layer L on")
     ap.add_argument("--include-preds", nargs="*", default=[], metavar="NPZ",
                     help="preds.npz of the same inputs and readout whose estimators join the report")
     ap.add_argument("--self-test", action="store_true")
@@ -1353,6 +1426,10 @@ def main(argv=None):
     tags = file_tags(raws)
     try:
         Ds, ev_fold = prepare(raws, tags, args.threshold, args.noise, args.seed, args.folds)
+        if args.layer_weights:
+            steps = parse_layer_weights(args.layer_weights)
+            for D in Ds:
+                D["layer_w"] = layer_weights(steps, D["layer"])
     except Inconsistent as err:
         raise SystemExit(f"mip_counting: {err}") from None
     n_events = raws[0]["n_events"]
@@ -1446,7 +1523,7 @@ def main(argv=None):
                         "skip_extrapolation": args.skip_extrapolation, "truths": args.truths,
                         "truth_objects": Ds[0]["truth_objects"], "reticle_shape": [Ds[0]["ny"], Ds[0]["nx"]],
                         "min_count": args.min_count, "gbt_iter": args.gbt_iter, "gbt_max_rows": args.gbt_max_rows,
-                        "count_bits": args.count_bits,
+                        "count_bits": args.count_bits, "layer_weights": args.layer_weights,
                         "include_preds": [os.path.abspath(p) for p in args.include_preds],
                         "truth_cut": "charge > threshold", "features": FEATURES + ["row_u%d" % i for i in range(Ds[0]["ny"])]
                         + ["col_v%d" % i for i in range(Ds[0]["nx"])], "gbt_layer_extra_feature": "layer"},
@@ -1456,7 +1533,8 @@ def main(argv=None):
         json.dump(_jsonable(out), f, indent=1)
 
     lines = ["", "rms/bias of estimate - truth per truth bin (n_frac rounded to an integer); sum ratio = "
-             "mean+-std over super-events of sum(estimate)/sum(truth); spread = std/mean of sum(estimate)"]
+             "mean+-std over super-events of sum(estimate)/sum(truth); spread = std/mean of sum(estimate)"
+             + ("; w. = the same with the layer weights " + args.layer_weights if args.layer_weights else "")]
     for t in args.truths:
         lines += table(results, t)
     for t in args.truths:

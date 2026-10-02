@@ -7,6 +7,7 @@
                                                 [--sizes tiny,small] [--input binary,tot2,analog]
                                                 [--targets n_frac] [--steps 3000 | --epochs E]
                                                 [--batch 512] [--lr 0.003] [--device auto]
+                                                [--layer-weights L:W[,L:W ...]]
                                                 [--out-name cnn] [--compare <preds.npz> ...]
 
 The readout, truths, folds and file tags are those of analysis/pixelav/mip_counting.py (its
@@ -205,6 +206,8 @@ def main(argv=None):
     ap.add_argument("--batch", type=int, default=BATCH)
     ap.add_argument("--lr", type=float, default=LR)
     ap.add_argument("--device", default="auto", help="auto, cpu, mps or cuda")
+    ap.add_argument("--layer-weights", metavar="L:W[,L:W ...]",
+                    help="also give the event totals with each reticle weighed W from layer L on (mip_counting.py)")
     ap.add_argument("--out-name", default="cnn", metavar="NAME", help="name of the output files")
     ap.add_argument("--verbose", action="store_true", help="the epoch losses of the first fold")
     ap.add_argument("--compare", nargs="+", default=[], metavar="NPZ",
@@ -238,6 +241,10 @@ def main(argv=None):
     try:
         Ds, ev_fold = mc.prepare(raws, tags, args.threshold, args.noise, args.seed, args.folds,
                                  keep_hits="binary" in inputs, encode=tuple(i for i in inputs if i != "binary"))
+        if args.layer_weights:
+            steps = mc.parse_layer_weights(args.layer_weights)
+            for D in Ds:
+                D["layer_w"] = mc.layer_weights(steps, D["layer"])
     except mc.Inconsistent as err:
         raise SystemExit(f"mip_counting_cnn: {err}") from None
     del raws
@@ -290,6 +297,7 @@ def main(argv=None):
                         "extrap_max_k": args.extrap_max_k, "skip_extrapolation": args.skip_extrapolation,
                         "steps": args.steps, "epochs": args.epochs, "batch": args.batch, "lr": args.lr,
                         "device": str(device), "targets": targets, "inputs": inputs,
+                        "layer_weights": args.layer_weights,
                         "reticle_shape": [ny, nx], "estimators": names},
            "models": info, "trainings": runs, "results": results}
 
