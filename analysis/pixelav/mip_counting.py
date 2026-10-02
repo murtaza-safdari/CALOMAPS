@@ -25,7 +25,8 @@ a pure-noise reticle) is given separately in the threshold scan.
 TRUTH: a truth object is one part_id of reticles.py (a crossing, a connected island of a particle's
 pixels on the plane, or with --truth particles a whole particle with its delta rays); a file
 without part_id is read as particles (part_id = part_group, part_q_total = the sum of its part_q).
-The charge cut equals the threshold and is strict everywhere: charge > cut. n_in counts the objects
+The charge cut equals --threshold (also at every point of the threshold scan, which changes only
+the readout) and is strict everywhere: charge > cut. n_in counts the objects
 whose charge inside the reticle exceeds the cut (part_q > cut; the n_true of reticles.py at that
 cut, checked when the cut is one of its truth_cuts). n_own counts every object whose charge on the
 plane exceeds the cut (part_q_total > cut) once, in the reticle holding the largest part of it
@@ -52,9 +53,12 @@ for every binary-readout estimator:
   hits             E[n | n_hits], one table entry per hit count
   clusters         E[n | n_clusters]
   hits_clusters    E[n | n_hits, n_clusters], each cell shrunk toward the hits table with weight
-                   --min-count: (sum + m * hits(n_hits)) / (count + m)
+                   --min-count: (sum + m * hits(n_hits)) / (count + m); then the cells of one
+                   n_hits holding at least m reticles scaled by one factor so that count * value
+                   sums to their training sum
   cluster_shape    per cluster E[objects | size, width, height] shrunk toward E[objects | size]
-                   with weight m, summed over the clusters of the reticle
+                   with weight m and scaled per size in the same way, summed over the clusters of
+                   the reticle
   cluster_shape_edge  the same with the edge flag in the key
   gbt              histogram gradient-boosted trees (squared error) on the reticle summary
                    features FEATURES and the hits per row and per column; at most --gbt-max-rows
@@ -63,8 +67,11 @@ for every binary-readout estimator:
                    not where the shower axis lies)
   analog           reference, not available to a binary readout: E[n | noise-free charge sum],
                    in training quantile bins, interpolated
-A 1-D table entry with fewer than m training reticles pools the neighbouring entries symmetrically
-until it holds m; above the largest trained value an entry scales the last one in proportion.
+A 1-D table entry v with fewer than m training reticles pools the neighbouring entries
+symmetrically (as far as the range allows) until it holds m and takes the pooled mean of the count
+times v / the pooled mean of the value (the plain pooled mean at v = 0), so that a window growing
+to one side only, at the top of the range, keeps the slope; above the largest trained value an
+entry scales the last one in proportion.
 
 FOLDS: the events are split into --folds contiguous blocks of the underlying event index with
 boundaries on multiples of the least common multiple of the overlays, so that no super-event of
@@ -87,10 +94,13 @@ hit), count (--count-bits, with the share of reticles whose n_in does not fit).
 
 OUTPUT in --out-dir: results.json; preds.npz (per file tag: the truths, super_evt, layer, r_mm,
 q_sum, n_hits, n_clusters, fold, and pred__<truth>__<estimator> / xpred__<truth>__<estimator> for
-the out-of-fold and extrapolation predictions, with the readout settings; the layout read by
---include-preds and analysis/pixelav/mip_counting_cnn.py); clusters.npz (the cluster table of the
-main readout); fig_*.png. A printed summary. --include-preds adds the predictions of other
-preds.npz files of the same inputs and readout (checked) to the metrics and figures.
+the out-of-fold and extrapolation predictions, with the file tags and names, the readout settings
+and --extrap-max-k; the layout read by --include-preds and analysis/pixelav/mip_counting_cnn.py);
+clusters.npz (the cluster table of the main readout); fig_*.png. A printed summary.
+--include-preds adds the predictions of other preds.npz files of the same inputs, tags, readout
+and --extrap-max-k (checked, file names without their directories; a file without the tags, names
+or --extrap-max-k is read with a printed line that they were not checked) to the metrics and
+figures.
 """
 import argparse, json, math, os, sys
 import numpy as np
@@ -132,9 +142,10 @@ _NEED = ("img", "super_evt", "module", "layer", "r_mm", "q_sum", "n_true", "trut
          "size_x", "size_y", "offset_x", "offset_y", "pitch_x_um", "pitch_y_um", "n_events",
          "n_super_events", "inputs", "input_event_offset", "input_n_events", "n_empty_within",
          "count_radii_mm")
-_OPTIONAL = ("part_id", "part_island", "part_q_total", "truth")
+_OPTIONAL = ("part_id", "part_island", "part_q_total", "truth", "island_gap")
 _SAME = ("inputs", "input_event_offset", "input_n_events", "n_events", "size_x", "size_y",
          "pitch_x_um", "pitch_y_um", "truth")
+_PRED_OPTIONAL = ("extrap_max_k",)    # settings a preds.npz may lack (read without that check)
 
 
 class Inconsistent(RuntimeError):
@@ -197,13 +208,18 @@ def file_tags(raws):
 
 
 def check_same_events(raws):
-    """Every file cut from the same events with the same reticle size, pitch and truth objects."""
+    """Every file cut from the same events with the same reticle size, pitch and truth objects;
+    with crossings, the same island_gap (or none stored in either)."""
     r0 = raws[0]
     for R in raws[1:]:
         for k in _SAME:
             a, b = np.asarray(r0[k]), np.asarray(R[k])
             _require(a.shape == b.shape and np.array_equal(a, b),
                      f"{R['path']} and {r0['path']} differ in {k}: not cut from the same events")
+        if r0["truth"] == "crossings":
+            a, b = (int(X["island_gap"]) if "island_gap" in X else None for X in (r0, R))
+            _require(a == b, f"{R['path']} and {r0['path']} differ in island_gap ({b} vs {a}): "
+                     "not the same truth objects")
 
 
 def truths(R, cut):
@@ -418,10 +434,11 @@ def super_event_fold(ev_fold, n_super, K):
     return f[:, 0]
 
 
-def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode=()):
+def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode=(), truth_cut=None):
     """Per file: the readout, truths, cluster table and features of the module docstring, with the
-    fold of each reticle; with keep_hits the hit maps, with encode those encodings of the noisy
-    image (readout)."""
+    fold of each reticle; the truths at the charge cut truth_cut (default the threshold); with
+    keep_hits the hit maps, with encode those encodings of the noisy image (readout)."""
+    cut = threshold if truth_cut is None else truth_cut
     check_same_events(raws)
     ev_fold = event_folds(raws[0]["n_events"], [R["overlay"] for R in raws], n_folds)
     out = []
@@ -435,7 +452,7 @@ def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode
         px, py = float(R["pitch_x_um"]), float(R["pitch_y_um"])
         rng = np.random.default_rng((seed, i))
         hits, enc = readout(img, threshold, noise, rng, encode)
-        T, W, info = truths(R, threshold)
+        T, W, info = truths(R, cut)
         pix, cl = clusters(hits, px, py)
         F = reticle_features(pix, cl, n, ny, nx)
         D = {"tag": tag, "path": R["path"], "overlay": K, "n": n, "ny": ny, "nx": nx,
@@ -467,8 +484,10 @@ def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode
 # estimators
 
 class Lookup1D:
-    """E[y | x] for integer x >= 0: one entry per value; an entry with fewer than m training rows
-    pools its neighbours symmetrically; beyond the largest trained value, proportional."""
+    """E[y | x] for integer x >= 0: one entry per value; an entry v with fewer than m training rows
+    pools its neighbours symmetrically (as far as the range allows) and takes the pooled mean of y
+    times v / the pooled mean of x (the plain pooled mean at v = 0 or when that mean of x is 0);
+    beyond the largest trained value, proportional."""
 
     def __init__(self, m):
         self.m = m
@@ -479,6 +498,7 @@ class Lookup1D:
         cnt = np.bincount(x, minlength=vmax + 1).astype(np.float64)
         s = np.bincount(x, y, vmax + 1)
         C, Sm = np.r_[0.0, np.cumsum(cnt)], np.r_[0.0, np.cumsum(s)]
+        Sx = np.r_[0.0, np.cumsum(cnt * np.arange(vmax + 1))]
         t = np.zeros(vmax + 1)
         for v in range(vmax + 1):
             w = 0
@@ -488,7 +508,9 @@ class Lookup1D:
                 if c >= self.m or (lo == 0 and hi == vmax):
                     break
                 w += 1
-            t[v] = (Sm[hi + 1] - Sm[lo]) / c if c else 0.0
+            ym = (Sm[hi + 1] - Sm[lo]) / c if c else 0.0
+            xm = (Sx[hi + 1] - Sx[lo]) / c if c else 0.0
+            t[v] = ym * v / xm if w > 0 and v > 0 and xm > 0 else ym
         self.table, self.vmax = t, vmax
         return self
 
@@ -525,14 +547,28 @@ class QuantileLookup:
         return out
 
 
-def _shrunk_table(keys, y, prior, m):
-    """{key: (sum + m * prior) / (count + m)} as sorted keys and values, prior per row."""
+def _shrunk_table(keys, y, prior, group, m):
+    """{key: (sum + m * prior) / (count + m)} as sorted keys and values, prior and group per row
+    (both functions of the key; a group holds the keys of one prior value). The values of a group
+    of at least m rows are then scaled by sum(sum) / sum(count * value) over its keys, so that
+    they keep its training sum; a smaller group, or one whose denominator is not positive, keeps
+    the shrunk values."""
     uk, inv = np.unique(keys, return_inverse=True)
     inv = inv.ravel()
     c = np.bincount(inv, minlength=len(uk))
     s = np.bincount(inv, y, len(uk))
     p = np.bincount(inv, prior, len(uk)) / c          # the prior is a function of the key
-    return uk, (s + m * p) / (c + m)
+    val = (s + m * p) / (c + m)
+    gk = np.zeros(len(uk), np.int64)
+    gk[inv] = group
+    ug, ginv = np.unique(gk, return_inverse=True)
+    ginv = ginv.ravel()
+    gc, gs = np.bincount(ginv, c, len(ug)), np.bincount(ginv, s, len(ug))
+    gd = np.bincount(ginv, c * val, len(ug))
+    ok = (gc >= m) & (gd > 0)
+    scale = np.ones(len(ug))
+    scale[ok] = gs[ok] / gd[ok]
+    return uk, val * scale[ginv]
 
 
 def _lookup(uk, val, keys, fallback):
@@ -585,12 +621,12 @@ class Estimators:
             self.clusters = Lookup1D(self.m).fit(c, y)
         if "hits_clusters" in self.names:
             self.cmax = int(c.max()) + 1
-            self.hc = _shrunk_table(h * self.cmax + c, y, self.hits.predict(h), self.m)
+            self.hc = _shrunk_table(h * self.cmax + c, y, self.hits.predict(h), h, self.m)
         if "cluster_shape" in self.names or "cluster_shape_edge" in self.names:
             cy = V["cl"][f"a_{target}"].astype(np.float64)
             self.size = Lookup1D(self.m).fit(V["cl"]["size"], cy)
             prior = self.size.predict(V["cl"]["size"])
-            self.shape = {e: _shrunk_table(_shape_keys(V["cl"], e), cy, prior, self.m)
+            self.shape = {e: _shrunk_table(_shape_keys(V["cl"], e), cy, prior, V["cl"]["size"], self.m)
                           for e in (False, True)}
         if "analog" in self.names:
             self.analog = QuantileLookup(max(20, min(400, len(y) // 200))).fit(V["q_sum"], y)
@@ -647,25 +683,33 @@ class Estimators:
         return P
 
 
+def check_unseen(n_events, tr, train_masks, ev, eval_masks, what):
+    """Inconsistent when an underlying event of a reticle that eval_masks select (in the files ev)
+    is also one of a reticle that train_masks select (in the files tr)."""
+    seen = np.zeros(n_events, bool)
+    for D, msk in zip(tr, train_masks):
+        seen[D["events"][msk].ravel()] = True
+    for D, msk in zip(ev, eval_masks):
+        _require(not seen[D["events"][msk].ravel()].any(),
+                 f"{what}: an event of {D['tag']} is also in the training set")
+
+
 def crossfit(Ds, target, names, n_folds, train_tags, eval_tags, m=MIN_COUNT, gbt_iter=GBT_ITER,
              seed=SEED, n_events=None, log=None, gbt_max_rows=GBT_MAX_ROWS):
     """{tag: {name: out-of-fold prediction}} for the eval files, trained per fold on the other
-    folds of the train files."""
+    folds of the train files; with n_events, check_unseen on the masks that select the training
+    and the evaluated reticles."""
     tr = [D for D in Ds if D["tag"] in train_tags]
     ev = [D for D in Ds if D["tag"] in eval_tags]
     P = {D["tag"]: {nm: np.full(D["n"], np.nan) for nm in names} for D in ev}
     for f in range(n_folds):
-        V = view(tr, [D["fold"] != f for D in tr])
-        if n_events is not None:          # no underlying event both in training and in this fold
-            seen = np.zeros(n_events, bool)
-            for D in tr:
-                seen[D["events"][D["fold"] != f].ravel()] = True
-            for D in ev:
-                _require(not seen[D["events"][D["fold"] == f].ravel()].any(),
-                         f"fold {f}: an event of {D['tag']} is also in the training set")
+        train_masks = [D["fold"] != f for D in tr]
+        eval_masks = [D["fold"] == f for D in ev]
+        if n_events is not None:
+            check_unseen(n_events, tr, train_masks, ev, eval_masks, f"fold {f}")
+        V = view(tr, train_masks)
         est = Estimators(names, m, gbt_iter, seed, gbt_max_rows).fit(V, target)
-        for D in ev:
-            sel = D["fold"] == f
+        for D, sel in zip(ev, eval_masks):
             pr = est.predict(view([D], [sel]))
             for nm in names:
                 P[D["tag"]][nm][sel] = pr[nm]
@@ -830,6 +874,8 @@ def evaluate(Ds, preds, xpreds=None):
 # predictions file
 
 def save_preds(path, Ds, preds, xpreds, settings):
+    """The preds.npz of the module docstring: the tags and files of Ds (the files the predictions
+    were trained on), the settings (readout, folds, extrap_max_k) and the per-file arrays."""
     arrays = {"tags": np.array([D["tag"] for D in Ds]), "files": np.array([D["path"] for D in Ds]),
               **{k: np.asarray(v) for k, v in settings.items()}}
     for D in Ds:
@@ -853,12 +899,27 @@ def save_preds(path, Ds, preds, xpreds, settings):
 
 
 def load_preds(path, Ds, settings):
-    """(preds, xpreds) of a preds.npz, after checking it holds the same files, readout and truths."""
+    """(preds, xpreds) of a preds.npz, after checking it holds the same tags, files (by name),
+    readout, extrap_max_k and truths; a file without tags, files or extrap_max_k is read with one
+    printed line naming those not checked."""
     with np.load(path, allow_pickle=False) as d:
         A = {k: d[k] for k in d.files}
+    unchecked = []
+    here = {"tags": [D["tag"] for D in Ds], "files": [os.path.basename(D["path"]) for D in Ds]}
+    for k, v in here.items():
+        if k not in A:
+            unchecked.append(k)
+            continue
+        got = [os.path.basename(str(p)) if k == "files" else str(p) for p in np.atleast_1d(A[k])]
+        _require(got == v, f"{path}: {k} differ from this run ({got} vs {v})")
     for k, v in settings.items():
+        if k not in A and k in _PRED_OPTIONAL:
+            unchecked.append(k)
+            continue
         _require(k in A and np.array_equal(np.asarray(A[k]), np.asarray(v)),
                  f"{path}: {k} differs from this run ({A.get(k)} vs {v})")
+    if unchecked:
+        print(f"{path}: no {', '.join(unchecked)} stored, not checked")
     preds, xpreds = {}, {}
     for D in Ds:
         g = D["tag"]
@@ -1041,7 +1102,7 @@ def figures(Ds, preds, results, out_dir, truth="n_own", prefix="fig", names=None
         axs[1].plot(Ks, [e["spread_est"] or np.nan for e in et], marker="o", ms=4, label=nm, **style(nm))
     ref_t = [totals(results[D["tag"]]["truths"][truth][have[0]]["event_totals"])["spread_truth"] or np.nan
              for D in Ds]
-    axs[1].plot(Ks, ref_t, color="#555555", lw=1.5, ls=":", marker="s", ms=4, label="truth (particles)")
+    axs[1].plot(Ks, ref_t, color="#555555", lw=1.5, ls=":", marker="s", ms=4, label="truth")
     axs[1].plot(Ks, [totals(results[D["tag"]]["references"])["spread_hits"] or np.nan for D in Ds], color="#999999",
                 lw=1.5, ls="-.", marker="^", ms=4, label="hit count")
     axs[1].plot(Ks, [totals(results[D["tag"]]["references"])["spread_charge"] or np.nan for D in Ds], color="#bbbbbb",
@@ -1128,12 +1189,13 @@ def noise_only(est, nx, ny, threshold, noise, seed, pitch_x, pitch_y, n_maps=N_N
 
 def scan(raws, tags, args, log):
     """Cheap estimators at each (threshold, noise): binned rms/bias per file, event totals, and the
-    noise-only rate."""
+    noise-only rate, as {"truth_cut", "rows"}. The truth of every scan point is that at the run's
+    --threshold (charge > truth_cut), so only the readout changes along the scan."""
     out = []
     groups = ((1, 3), (4, 12), (13, 40), (41, None))
     for thr in SCAN_THRESHOLDS:
         for nz in SCAN_NOISES:
-            Ds, _ = prepare(raws, tags, thr, nz, args.seed, args.folds)
+            Ds, _ = prepare(raws, tags, thr, nz, args.seed, args.folds, truth_cut=args.threshold)
             n_events = raws[0]["n_events"]
             row = {"threshold": thr, "noise": nz, "files": {}}
             for t in args.truths:
@@ -1157,15 +1219,15 @@ def scan(raws, tags, args, log):
                                  / (R0["n_super_events"] * R0["overlay"])}
             out.append(row)
             log(f"  scan threshold {thr:g} e, noise {nz:g} e done")
-    return out
+    return {"truth_cut": float(args.threshold), "rows": out}
 
 
-def scan_table(rows, truth="n_frac"):
-    lines = [f"  threshold scan ({truth}): per file rms of estimate - truth in truth groups 1-3, 4-12, "
-             f"13-40, 41+ and r = mean sum(estimate)/sum(truth) (biases in the json); noise only: hit "
-             f"probability per pixel, hits and estimated particles per empty reticle, and those times the "
-             f"empty reticles per shower within the largest count radius"]
-    for row in rows:
+def scan_table(sc, truth="n_frac"):
+    lines = [f"  threshold scan ({truth} at charge > {sc['truth_cut']:g} e for every point): per file rms of "
+             f"estimate - truth in truth groups 1-3, 4-12, 13-40, 41+ and r = mean sum(estimate)/sum(truth) "
+             f"(biases in the json); noise only: hit probability per pixel, hits and estimated particles per "
+             f"empty reticle, and those times the empty reticles per shower within the largest count radius"]
+    for row in sc["rows"]:
         npo = row["noise_only"]
         e = npo["estimate_per_empty_reticle"]
         ne = npo["empty_reticles_per_shower"]
@@ -1318,8 +1380,36 @@ def self_test():
         check(False, "a fold boundary inside a super-event refused")
     except Inconsistent:
         check(True, "a fold boundary inside a super-event refused")
+    names = ("hits", "clusters", "hits_clusters", "cluster_shape", "cluster_shape_edge", "gbt", "gbt_layer")
+    f1 = D["fold"] == 1
+    Dx = dict(D, cl=dict(D["cl"]))
+    Dx["n_frac"] = np.where(f1, 1000.0 * D["n_frac"], D["n_frac"])
+    for k in ("t_n_frac", "a_n_frac"):
+        Dx["cl"][k] = np.where(f1[D["cl"]["reticle"]], 1000.0 * D["cl"][k], D["cl"][k])
+    P0, P1 = (crossfit([X], "n_frac", names, 5, ["K2"], ["K2"], m=2, gbt_iter=20)["K2"] for X in (D, Dx))
+    bad = [nm for nm in names if not np.array_equal(P0[nm][f1], P1[nm][f1])]
+    check(not bad, f"cross-fit: the predictions of fold 1 do not change when its truths are multiplied by "
+          f"1000 (changed: {', '.join(bad) or 'none'})")
+    bad = [nm for nm in names if np.allclose(P0[nm][~f1], P1[nm][~f1])]
+    check(not bad, f"cross-fit: those of the other folds do (unchanged: {', '.join(bad) or 'none'})")
+    try:
+        crossfit([D], "n_frac", ("hits",), 5, ["K2"], ["K2"], m=2, n_events=20)
+        check(True, "cross-fit: the leakage guard passes the rows trained on")
+    except Inconsistent as err:
+        check(False, f"cross-fit: the leakage guard passes the rows trained on ({err})")
+    try:
+        check_unseen(20, [D], [D["fold"] != 2], [D], [f1], "test")
+        check(False, "leakage guard: training rows holding an evaluated super-event refused")
+    except Inconsistent:
+        check(True, "leakage guard: training rows holding an evaluated super-event refused")
     lk = Lookup1D(2).fit(np.array([0, 1, 1, 2, 3, 3]), np.array([0.0, 1, 1, 2, 3, 3]))
     check(np.allclose(lk.predict(np.array([1, 3, 6])), [1, 3, 6]), "1-D lookup: means and proportional tail")
+    xb = np.r_[np.repeat(np.arange(40), 30), [50, 70, 100, 119]]
+    lb = Lookup1D(20).fit(xb, xb.astype(np.float64))
+    pooled = np.flatnonzero(np.bincount(xb) < 20)
+    dev = max(float(np.abs(lb.table[pooled] - pooled).max()), abs(float(lb.predict(np.array([238]))[0]) - 238))
+    check(dev < 1e-9, f"1-D lookup of y = x with sparse top values: pooled entries equal their value, "
+          f"predict(2 vmax) = 2 vmax (largest deviation {dev:.3g})")
     dv = data_volume({"nx": 42, "ny": 26, "n_hits": np.array([0, 5, 200]), "n_own": np.array([0, 1, 50]),
                       "n_frac": np.array([0.0, 1.0, 50.0]), "n_in": np.array([0, 1, 300]),
                       "super_evt": np.array([0, 0, 0]), "n_super_events": 1})
@@ -1335,6 +1425,14 @@ def self_test():
           and np.isclose(et["weighted"]["ratio_mean"], (4 / 3 + 2) / 2) and np.isclose(et["weighted"]["spread_truth"], 0)
           and np.isclose(event_references(Dw)["weighted"]["spread_hits"], np.std([3, 5], ddof=1) / 4),
           "layer weights 20:2: weighted event totals")
+    ew = et["weighted"]               # weighted sums 4 and 6 over truths 3 and 3: ratios 4/3 and 2
+    check(ew["spread_est"] is not None and np.isclose(ew["spread_est"], np.sqrt(2) / 5)
+          and ew["ratio_std"] is not None and np.isclose(ew["ratio_std"], np.sqrt(2) / 3),
+          f"layer weights 20:2: weighted spread_est sqrt(2)/5 and ratio_std sqrt(2)/3 "
+          f"(got {ew['spread_est']}, {ew['ratio_std']})")
+    for spec in ("20:2,10:1.5", "10:1.5,20:2"):
+        got = layer_weights(parse_layer_weights(spec), np.array([5, 12, 20, 25])).tolist()
+        check(got == [1, 1.5, 2, 2], f"layer weights {spec}: layers 5, 12, 20, 25 weigh 1, 1.5, 2, 2 (got {got})")
     try:
         parse_layer_weights("20:2,20:3")
         check(False, "a layer given twice in --layer-weights refused")
@@ -1434,7 +1532,7 @@ def main(argv=None):
         raise SystemExit(f"mip_counting: {err}") from None
     n_events = raws[0]["n_events"]
     settings = {"threshold": args.threshold, "noise": args.noise, "seed": args.seed,
-                "folds": args.folds, "event_fold": ev_fold}
+                "folds": args.folds, "event_fold": ev_fold, "extrap_max_k": args.extrap_max_k}
     log(f"mip_counting: {len(Ds)} file(s), {n_events} events, folds of "
         f"{np.bincount(ev_fold).tolist()} events; threshold {args.threshold:g} e, noise {args.noise:g} e; "
         f"{Ds[0]['ny']} x {Ds[0]['nx']} pixels; truth objects: {Ds[0]['truth_objects']}")
@@ -1505,11 +1603,11 @@ def main(argv=None):
 
     results = evaluate(Ds, preds, xpreds)
     volume = {D["tag"]: data_volume(D, args.count_bits) for D in Ds}
-    scan_rows = []
+    scan_out = None
     if not args.no_scan:
         log("  threshold and noise scan")
         try:
-            scan_rows = scan(raws, tags, args, log)
+            scan_out = scan(raws, tags, args, log)
         except Inconsistent as err:
             raise SystemExit(f"mip_counting: {err}") from None
     figs = []
@@ -1527,7 +1625,7 @@ def main(argv=None):
                         "include_preds": [os.path.abspath(p) for p in args.include_preds],
                         "truth_cut": "charge > threshold", "features": FEATURES + ["row_u%d" % i for i in range(Ds[0]["ny"])]
                         + ["col_v%d" % i for i in range(Ds[0]["nx"])], "gbt_layer_extra_feature": "layer"},
-           "clusters": summary, "results": results, "data_volume": volume, "scan": scan_rows,
+           "clusters": summary, "results": results, "data_volume": volume, "scan": scan_out,
            "figures": figs}
     with open(os.path.join(args.out_dir, "results.json"), "w") as f:
         json.dump(_jsonable(out), f, indent=1)
@@ -1552,8 +1650,8 @@ def main(argv=None):
         for key, nm in (("per_truth_bin", "n_own"), ("per_n_frac_bin", "n_frac")):
             lines.append(f"      zero-suppressed bits by {nm} bin: " + ", ".join(
                 f"{b['bin']}: {b['zero_suppressed']:.0f}" for b in v[key] if b["N"]))
-    if scan_rows:
-        lines += scan_table(scan_rows, args.truths[0])
+    if scan_out:
+        lines += scan_table(scan_out, args.truths[0])
     lines.append(f"  written: {args.out_dir}/results.json, preds.npz, clusters.npz, {len(figs)} figure(s)")
     print("\n".join(lines))
     return 0

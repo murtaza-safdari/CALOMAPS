@@ -40,7 +40,8 @@ is printed and stored.
 OUTPUT in --out-dir: <out-name>_preds.npz in the layout of mip_counting.py's preds.npz (readable
 by its --include-preds), results_<out-name>.json (the metrics of mip_counting.py for these
 estimators, the parameter counts, losses and wall times). With --compare <preds.npz> ... (of
-mip_counting.py or of this script, the same files and readout, checked): the comparison table of
+mip_counting.py or of this script, the same files, readout and --extrap-max-k, checked by its
+load_preds): the comparison table of
 every estimator and the figures fig_<out-name>_*.png with all of them.
 """
 import argparse, json, math, os, sys, time
@@ -160,21 +161,18 @@ def crossfit_cnn(Ds, Xd, Yd, target, size, inp, args, device, train_tags, eval_t
     folds = []
     key0 = (args.seed, list(MODELS).index(size), mc.TRUTHS.index(target), len(train_tags), INPUTS.index(inp))
     for f in range(args.folds):
-        seen = np.zeros(n_events, bool)
-        for D in tr:
-            seen[D["events"][D["fold"] != f].ravel()] = True
-        for D in ev:
-            mc._require(not seen[D["events"][D["fold"] == f].ravel()].any(),
-                        f"fold {f}: an event of {D['tag']} is also in the training set")
+        train_masks = [(D["fold"] != f) & (D["n_hits"] > 0) for D in tr]
+        eval_masks = [D["fold"] == f for D in ev]
+        mc.check_unseen(n_events, tr, train_masks, ev, eval_masks, f"fold {f}")
         t0 = time.time()
-        rows = [torch.from_numpy(np.flatnonzero((D["fold"] != f) & (D["n_hits"] > 0))).to(device) for D in tr]
+        rows = [torch.from_numpy(np.flatnonzero(msk)).to(device) for msk in train_masks]
         X = torch.cat([Xd[D["tag"]][r] for D, r in zip(tr, rows)])
         y = torch.cat([Yd[D["tag"]][target][r] for D, r in zip(tr, rows)])
         model, ls, epochs, steps = train(X, y, SCALE[inp], MODELS[size], args, device, (key0[0], f) + key0[1:],
                                          log if (f == 0 and args.verbose) else None)
         del X, y
-        for D in ev:
-            s = np.flatnonzero(D["fold"] == f)
+        for D, sel in zip(ev, eval_masks):
+            s = np.flatnonzero(sel)
             p = predict(model, Xd[D["tag"]][torch.from_numpy(s).to(device)], SCALE[inp])
             P[D["tag"]][s] = np.where(D["n_hits"][s] > 0, p, 0.0)
         dt = time.time() - t0
@@ -251,7 +249,7 @@ def main(argv=None):
     n_events = int(len(ev_fold))
     ny, nx = Ds[0]["ny"], Ds[0]["nx"]
     settings = {"threshold": args.threshold, "noise": args.noise, "seed": args.seed,
-                "folds": args.folds, "event_fold": ev_fold}
+                "folds": args.folds, "event_fold": ev_fold, "extrap_max_k": args.extrap_max_k}
     info = {}
     for s in sizes:
         info[s] = {"channels": list(MODELS[s]), "parameters": n_params(build(MODELS[s])),
