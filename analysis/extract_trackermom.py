@@ -54,11 +54,12 @@ does not always name its face; sensor_crossings.tracker_hit_frame takes face and
 these. Without the layout, or without both fields in it, none of the three is stored and the
 run says so; readers then fall back to the hit azimuth and depth.
 
-PROVENANCE: the sim_* keys (seed, events simulated, gun particle and energy, DD4hep and Geant4
-versions, date) and meta come from the file's ddsim run header (sensor_crossings.sim_provenance);
-without one, particle and energy come from the file name and the seed is "unknown". A _seed<R> tag
-in the input's name must be the seed the run header records (sensor_crossings.check_seed_label):
-nothing is written otherwise. An untagged name, or a file without a run header, is not checked.
+PROVENANCE: the sim_* keys (seed, events simulated, gun particle and energy, the run's production
+cut, DD4hep and Geant4 versions, date) and meta come from the file's ddsim run header
+(sensor_crossings.sim_provenance); without one, particle and energy come from the file name and
+the seed is "unknown". A _seed<R> tag in the input's name must be the seed the run header records
+(sensor_crossings.check_seed_label): nothing is written otherwise. An untagged name, or a file
+without a run header, is not checked.
 
 --home is the config root whose geometry/ was simulated (default: $CALOMAPS_HOME, else this
 repo); sim/make_pixelav_inputs.sh passes it. The npz records that geometry (geo_si_thick_mm,
@@ -67,6 +68,10 @@ Nothing is written when the data and --home disagree:
   - before the ROOT file is read: the --home Si mid-planes must be the ones the crossing code
     assumes, and the silicon thickness the input's name implies must be the --home thickness
     (an _si<T>um tag names T; an untagged name means this checkout's own geometry);
+  - once the file is open: the compact its run header records must have the --home silicon
+    (thickness, production cut, step limit), read from the compact when it is readable here, else
+    from its variant root's name (sensor_crossings.check_compact_geometry); a NOTE says when the
+    geometry could not be cross-checked this way;
   - after the hits are read: the path-length test of validate_crossings.py must pass for the
     --home thickness. When too few clean crossings exist to decide, the npz is written and the
     run says the data could not confirm the thickness. Step hits take validate_crossings.py's
@@ -78,8 +83,9 @@ production cut and the step limit of the --home silicon (geo_si_cut_mm, geo_si_s
 import argparse, math, os
 import numpy as np
 from sensor_crossings import (REPO, HIT_MODES, geometry_provenance, check_thickness_label,
-                              check_seed_label, sim_provenance, run_header, header_hit_mode,
-                              cellid_encoding, decode_cellid, face_phi, module_face_phi, N_FACES)
+                              check_seed_label, check_compact_geometry, sim_provenance, run_header,
+                              header_hit_mode, cellid_encoding, decode_cellid, face_phi,
+                              module_face_phi, N_FACES)
 from validate_crossings import (MIN_SELECTED, MIN_STEPS, PATH_TOL, REACH_TOL, path_length_test,
                                 step_depth_test)
 
@@ -232,7 +238,11 @@ def main(argv=None):
     f = uproot.open(IN)
     SIM, sim_source = sim_provenance(f, IN)
     check_seed_label(IN, SIM)
-    header_mode, setting = header_hit_mode(run_header(f))
+    params = run_header(f)
+    geo_note = check_compact_geometry(params, IN, GEO, args.home)
+    if geo_note:
+        print(f"NOTE: {geo_note}")
+    header_mode, setting = header_hit_mode(params)
     if header_mode is None and args.hits is None:
         raise SystemExit(f"{IN}: the tracker hits are per crossing or per step, and the run header "
                          f"does not say which ({setting}); give --hits crossing or --hits step")

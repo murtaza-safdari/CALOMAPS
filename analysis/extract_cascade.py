@@ -33,12 +33,15 @@ its Si mid-planes are not the ones the crossing code assumes, or if the silicon 
 implies is not the --home silicon: an _si<T>um tag names the thickness T, and an untagged name
 means this checkout's own thickness; a _cut<C>um or _stepmax<S>um tag names a production cut or
 a step limit of the silicon's own, and a name without one means silicon without it
-(sensor_crossings.check_thickness_label).
+(sensor_crossings.check_thickness_label). Once the file is open, the compact its run header
+records must have the --home silicon, read from the compact when it is readable here, else from
+its variant root's name (sensor_crossings.check_compact_geometry); a NOTE says when the geometry
+could not be cross-checked this way.
 """
 import argparse, math, os
 import numpy as np
 from sensor_crossings import (REPO, geometry_provenance, check_thickness_label, check_seed_label,
-                              sim_provenance)
+                              check_compact_geometry, sim_provenance, run_header)
 
 
 def main(argv=None):
@@ -66,6 +69,9 @@ def main(argv=None):
     f = uproot.open(IN)
     SIM, _ = sim_provenance(f, IN)
     check_seed_label(IN, SIM)
+    geo_note = check_compact_geometry(run_header(f), IN, GEO, args.home)
+    if geo_note:
+        print(f"NOTE: {geo_note}")
     _meta_particle = str(SIM["sim_gun_particle"])
     _energy = float(SIM["sim_gun_energy_GeV"])
     _meta_energy = f"{_energy:g} GeV" if math.isfinite(_energy) else "unknown"

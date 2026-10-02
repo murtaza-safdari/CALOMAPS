@@ -20,7 +20,9 @@ crossing records' outside_si, starts_in_si and stops_in_si flags:
       HitPositionCombination 2), inside the slab when both points are. Passes when at most
       0.1% of the hits are outside (a thickness below the true one puts ~20% outside). The
       allowance is for merged hits: the tracker action closes a hit when the track leaves the
-      Si volume, but the 1 keV step filter can hide the exit step, and the 12 staves are
+      Si volume, but the ECal's step filter (the run header's filter.calo, edep0, which ddsim
+      gives the calorimeter-type ECalBarrel) drops steps without a deposit, so the exit step of
+      a track that deposits nothing there never reaches the action, and the 12 staves are
       placements of one volume, so a later deposit of the same track in the same layer of
       another stave joins the open hit and the midpoint falls between the two. Seen for
       neutrons, 1 hit in 90,438 of a 20-event 50 GeV photon run, 434 mm from its slab.

@@ -273,9 +273,7 @@ def check_thickness_label(in_path, geo, home):
             named += f", and no _{tag}<{tag[0].upper()}>um tag (no {what} of its own in the silicon)"
         else:
             named += f", and _{tag}{t:g}um"
-    has = f"{home_um:g} um silicon " + " and ".join(
-        f"without a {what} of its own" if h is None else f"with a {h:g} um {what}"
-        for _, what, _, h in settings)
+    has = _silicon_text(home_um, *(h for _, _, _, h in settings))
     cut_um, step_um = (t for _, _, t, _ in settings)
     if math.isclose(named_um, base_um, rel_tol=1e-5) and cut_um is None and step_um is None:
         match = REPO
@@ -286,6 +284,86 @@ def check_thickness_label(in_path, geo, home):
                  f"(the variant `python {REPO}/sim/make_geometry_variant.py {args}` writes)")
     raise SystemExit(f"{os.path.basename(in_path)} {named}, but --home {home} has {has}; nothing "
                      f"written. The --home for this input is {match}")
+
+
+# The config root sim/make_geometry_variant.py writes by default (decal_geometry.variant_home).
+_VARIANT_ROOT = re.compile(r"geometry_si([0-9]+(?:[.][0-9]+)?)um(?:_cut([0-9]+(?:[.][0-9]+)?)um)?"
+                           r"(?:_stepmax([0-9]+(?:[.][0-9]+)?)um)?_[0-9a-f]{10}\Z")
+
+
+def header_compact_files(params):
+    """The compact files the ddsim run header params (run_header) record under compactFile, which
+    ddsim writes as a Python list ("['/path/SiD_TestBeam.xml']"); [] when it records none."""
+    text = params.get("compactFile")
+    if not text:
+        return []
+    try:
+        value = ast.literal_eval(text)
+    except (ValueError, SyntaxError):
+        value = text
+    if isinstance(value, str):
+        value = [value]
+    return [f for f in value if isinstance(f, str)] if isinstance(value, (list, tuple)) else []
+
+
+def check_compact_geometry(params, in_path, geo, home):
+    """Exit unless the compact file of the ddsim run header params (run_header) has the silicon of
+    the --home geometry `home` (geo = geometry_provenance(home)): its thickness, production cut and
+    step limit. A relative compact path is taken from the header's WorkingDirectory. A compact
+    readable on this host as <config root>/geometry/SiD_TestBeam.xml is read with
+    decal_geometry; otherwise the name of its config root gives them when it is a variant
+    root geometry_si<T>um[_cut<C>um][_stepmax<S>um]_<hash> (no _cut or _stepmax tag: no such
+    setting of its own). Returns None when the compact matches, else a note saying why it could
+    not be cross-checked (no compact recorded, several, or one neither readable nor named as a
+    variant)."""
+    files = header_compact_files(params)
+    if len(files) != 1:
+        return ("the ddsim run header records " + ("no compact file" if not files else
+                f"{len(files)} compact files") + "; the geometry was not cross-checked with --home")
+    compact, = files
+    if not os.path.isabs(compact):            # relative to ddsim's working directory
+        if not params.get("WorkingDirectory"):
+            return (f"the ddsim run header records the compact {compact} relative to a working "
+                    f"directory it does not record; the geometry was not cross-checked with --home")
+        compact = os.path.join(params["WorkingDirectory"], compact)
+    root = os.path.dirname(os.path.dirname(compact))
+    if not (os.path.basename(compact) == "SiD_TestBeam.xml"
+            and os.path.basename(os.path.dirname(compact)) == "geometry"):
+        return (f"the compact {compact} of the ddsim run header is not <config root>/geometry/"
+                f"SiD_TestBeam.xml; the geometry was not cross-checked with --home")
+    if os.path.isfile(compact):
+        try:
+            cut, step = decal_geometry.compact_si_cut_mm(compact), decal_geometry.compact_si_step_mm(compact)
+            sim = (decal_geometry.compact_si_thickness_mm(compact) * 1e3,
+                   None if cut is None else cut * 1e3, None if step is None else step * 1e3)
+            source = f"the compact {compact}"
+        except (OSError, SyntaxError, ValueError, AttributeError) as e:   # ET.ParseError: SyntaxError
+            return (f"the compact {compact} of the ddsim run header cannot be read ({e}); the "
+                    f"geometry was not cross-checked with --home")
+    elif _VARIANT_ROOT.match(os.path.basename(root)):
+        t, c, s = _VARIANT_ROOT.match(os.path.basename(root)).groups()
+        sim = (float(t), None if c is None else float(c), None if s is None else float(s))
+        source = f"the variant name of the compact {compact}, not readable here"
+    else:
+        return (f"the compact {compact} of the ddsim run header is not readable here and its "
+                f"config root is not named as a geometry variant; the geometry was not "
+                f"cross-checked with --home")
+    home_um = float(geo["geo_si_thick_mm"]) * 1e3
+    own = [float(geo[k]) * 1e3 if k in geo else math.nan for k in ("geo_si_cut_mm", "geo_si_step_mm")]
+    have = (home_um,) + tuple(None if math.isnan(x) else x for x in own)
+    if all((a is None and b is None) or (a is not None and b is not None and math.isclose(a, b, rel_tol=1e-5))
+           for a, b in zip(sim, have)):
+        return None
+    raise SystemExit(f"{os.path.basename(in_path)} was simulated with {_silicon_text(*sim)} "
+                     f"({source}), but --home {home} has {_silicon_text(*have)}; nothing written. "
+                     f"The --home for this input is {root}")
+
+
+def _silicon_text(thick_um, cut_um, step_um):
+    """'<T> um silicon without a production cut of its own and with a <S> um step limit', say."""
+    return f"{thick_um:g} um silicon " + " and ".join(
+        f"without a {what} of its own" if um is None else f"with a {um:g} um {what}"
+        for what, um in (("production cut", cut_um), ("step limit", step_um)))
 
 
 def seed_tag(path):
@@ -382,6 +460,8 @@ def sim_provenance(root_file, in_path):
       sim_n_events        numberOfEvents: the events ddsim was asked to simulate (-1 when unknown)
       sim_gun_particle    gun.particle
       sim_gun_energy_GeV  gun.energy, which ddsim records in MeV (NaN when unknown)
+      sim_rangecut_mm     physics.rangecut, the run's Geant4 production cut in mm, which applies
+                          wherever no region has a cut of its own (NaN when unknown)
       sim_dd4hep_version, sim_geant4_version, sim_date_utc   DD4hepVersion, GEANT4Version, DateUTC
     The header is read only when it holds exactly one run. Without it, particle and energy come
     from in_path's name as the steering files write it (<prefix>_<tag><E>_..., the tag spelling
@@ -397,6 +477,10 @@ def sim_provenance(root_file, in_path):
         energy = float(params["gun.energy"]) / 1000.0
     except (KeyError, ValueError):
         energy = math.nan
+    try:
+        rangecut = float(params["physics.rangecut"])   # Geant4's internal length unit, mm
+    except (KeyError, ValueError):
+        rangecut = math.nan
     particle = params.get("gun.particle")
     source = "ddsim run header"
     if particle is None or not math.isfinite(energy):
@@ -407,7 +491,7 @@ def sim_provenance(root_file, in_path):
             energy = float(m.group(2))
         source = "file name" if m else "unknown, no run header and no particle/energy in the file name"
     out.update(sim_n_events=np.int64(n_events), sim_gun_particle=np.array(particle),
-               sim_gun_energy_GeV=np.float64(energy))
+               sim_gun_energy_GeV=np.float64(energy), sim_rangecut_mm=np.float64(rangecut))
     return out, source
 
 

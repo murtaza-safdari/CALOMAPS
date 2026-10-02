@@ -108,10 +108,12 @@ SIM.part.printStartTracking = False
 # ---- tracker hits: per crossing (default) or per Geant4 step (CALOMAPS_TRACKER_HITS=step) ----
 # CollectSingleDeposits makes every step its own hit: the midpoint of the step's pre- and
 # post-step points, the mean of their momenta, the step length as pathLength and the step's
-# deposit as EDep. The tracker filter (1 keV per step) would drop most of those steps, so the
-# ECal gets edep0, which keeps every step with a deposit. The shower itself is unchanged; the run
-# header records both settings (action.mapActions, filter.mapDetFilter), and
-# analysis/extract_trackermom.py reads the hit mode from there.
+# deposit as EDep. In both modes the ECal keeps every step with a deposit: ECalBarrel is a
+# calorimeter-type sensitive detector, so ddsim gives it the calorimeter filter (filter.calo,
+# edep0), not the tracker one (filter.tracker, edep1kev: 1 keV per step); step mode also names
+# edep0 for it (filter.mapDetFilter). The shower itself is unchanged; the run header records
+# both settings (action.mapActions, filter.mapDetFilter), and analysis/extract_trackermom.py
+# reads the hit mode from there.
 _hits = os.environ.get("CALOMAPS_TRACKER_HITS", "").strip() or "crossing"
 if _hits not in ("crossing", "step"):
     raise SystemExit("CALOMAPS_TRACKER_HITS=%r: expected crossing or step" % _hits)
