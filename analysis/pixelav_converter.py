@@ -34,8 +34,9 @@ is the coarsest pixel-centroid fallback. main() selects C if tracker hits are pr
 GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified from data:
 the +y beam strikes the 90 deg face; all this event's deposits are on it). Si layers sit at
 constant DEPTH (perpendicular face distance). The depth/normal axis w is the per-face radial
-direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-z axis. The
-per-face normal azimuth phi_n is derived from the hit position (not +y-hardcoded).
+direction; the across-pitch axis u is tangential (x-y plane); v is the cylinder-z axis. A tracker
+hit's face and layer are its cellID module and layer when the npz holds them, else the face its
+azimuth points at and the layer nearest in depth (sensor_crossings.tracker_hit_frame).
 
 DECK: write_pixelav_deck() emits the Stage-B per-track list. Default layout 'badeaa3' = the 7-column
 ppixelav2_list_trkpy_n_2f.c format (our driver lineage; the driver is analysis/pixelav/, built by

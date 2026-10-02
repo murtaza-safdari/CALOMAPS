@@ -9,14 +9,18 @@
 The thickness under test is the npz's geo_si_thick_mm, or the 320 um baseline (SI_THICK_MM) for
 an npz without geometry provenance. --si-thickness-um tests another value; when the npz records
 a different geo_si_thick_mm the run says so and fails, whatever the data show. Both checks use
-sensor_crossings' own local frame, face assignment and layer centres:
+the frame the crossing records use, sensor_crossings.tracker_hit_frame: face and layer from the
+hit's cellID module and layer when the npz holds them (tmodule, tlayer), and the layer centres
+of sensor_crossings:
 
-  (a) containment: every tracker hit of a charged particle (the hits that become crossings)
-      lies in the Si slab of its nearest layer, |w - centre| <= thickness/2 + 0.002 mm. The
-      hit position is the midpoint of the hit's first and last step points (the run header's
-      action.tracker HitPositionCombination 2), inside the slab when both points are. Hits of
-      neutral particles are counted, not tested: a neutron hit of a 3-event 50 GeV photon run
-      sat 2.0 mm outside every slab.
+  (a) containment: every tracker hit lies in the Si slab of its layer, |w - centre| <=
+      thickness/2 + 0.002 mm, w being its depth along its face normal. The hit position is the
+      midpoint of the hit's first and last step points (the run header's action.tracker
+      HitPositionCombination 2), inside the slab when both points are. An npz without
+      tmodule/tlayer takes the face the hit's azimuth points at and the layer nearest in depth;
+      the barrel's staves overlap past the 30-degree sector boundaries, so a hit in an overlap
+      region gets the neighbouring face, can land outside every slab and fail this check:
+      re-extract such an npz with extract_trackermom.py.
   (b) path length (path_length_test, which extract_trackermom.py also applies before it writes
       an npz): for clean through-going crossings the Geant4 pathLength is the straight chord
       thickness/|cos(theta)|, theta being the inclination to the sensor normal. Clean means: a
@@ -51,16 +55,6 @@ _KEYS = ("thx", "thy", "thz", "tpx", "tpy", "tpz", "tpath", "tedep", "tmc", "pdg
          "vsx", "vsy", "vex", "vey")
 
 
-def _layers(d):
-    """(face normal azimuth, depth w, nearest layer index, layer centres) per tracker hit."""
-    thx, thy, thz = (np.asarray(d[k], float) for k in ("thx", "thy", "thz"))
-    centers = sc.si_layer_centers()
-    phin = sc.face_phi(thx, thy)
-    _, _, w = sc.to_local(thx, thy, thz, phin)
-    layer = np.argmin(np.abs(w[:, None] - centers[None, :]), axis=1)
-    return phin, w, layer, centers
-
-
 def path_length_test(d, thick_mm):
     """Check (b) of the module docstring on tracker-route arrays `d` (an npz from
     extract_trackermom.py, or a dict with the same keys) for a thick_mm sensor. Returns a dict:
@@ -71,7 +65,8 @@ def path_length_test(d, thick_mm):
     tpx, tpy, tpz = (np.asarray(d[k], float) for k in ("tpx", "tpy", "tpz"))
     tpath, tedep = np.asarray(d["tpath"], float), np.asarray(d["tedep"], float)
     mc = np.asarray(d["tmc"]).astype(int)
-    phin, _, layer, centers = _layers(d)
+    phin, _, layer = sc.tracker_hit_frame(d)
+    centers = sc.si_layer_centers()
     half = thick_mm / 2
     _, _, pw = sc.to_local(tpx, tpy, tpz, phin)
     p = np.sqrt(tpx**2 + tpy**2 + tpz**2)
@@ -128,21 +123,21 @@ def main(argv=None):
         print("  no tracker hits -> FAIL")
         return 1
 
-    _, w, layer, centers = _layers(d)
-    resid = w - centers[layer]
-    charged = sc.is_charged(np.asarray(d["pdg"])[np.asarray(d["tmc"]).astype(int)])
-    outside = ~(np.abs(resid) <= half + DEPTH_TOL_MM)
-    n_out = int(np.count_nonzero(outside & charged))
-    n_out_neutral = int(np.count_nonzero(outside & ~charged))
+    cellid = sc.has_cellid_frame(d)
+    _, w, layer = sc.tracker_hit_frame(d)
+    resid = w - sc.si_layer_centers()[layer]
+    n_out = int(np.count_nonzero(~(np.abs(resid) <= half + DEPTH_TOL_MM)))
     ok_a = n_out == 0
-    span = (f"[{resid[charged].min():+.4f}, {resid[charged].max():+.4f}] mm" if charged.any()
-            else "(no charged hits)")
-    print(f"  (a) containment: {int(charged.sum())} hits of charged particles (of {thx.size}); depth "
-          f"residual w - centre in {span}; allowed |.| <= {half + DEPTH_TOL_MM:.4f} mm; "
+    print("  frame: face and layer from the "
+          + ("hit cellIDs (tmodule, tlayer)" if cellid else
+             "hit azimuth and depth (the npz has no tmodule/tlayer)"))
+    print(f"  (a) containment: {thx.size} hits; depth residual w - centre in "
+          f"[{resid.min():+.4f}, {resid.max():+.4f}] mm; allowed |.| <= {half + DEPTH_TOL_MM:.4f} mm; "
           f"{n_out} outside -> {'PASS' if ok_a else 'FAIL'}")
-    if n_out_neutral:
-        print(f"      {n_out_neutral} hit(s) of neutral particles outside their slab; not tested, "
-              f"neutral hits make no crossings")
+    if n_out and not cellid:
+        print("      this npz has no cellID module/layer: hits where neighbouring staves overlap "
+              "get the face their azimuth points at, the wrong one. Re-extract it with "
+              "analysis/extract_trackermom.py, which stores them")
 
     b = path_length_test(d, thick)
     print(f"  (b) path length: {b['n_sel']} clean crossings (charged, |p| > {P_MIN_GEV:g} GeV, "

@@ -32,6 +32,14 @@ one tracker hit (about 1 in 40 in a 50 GeV photon shower), tmc pointing into the
 npz has no dbeg/dend/dau: the daughters of a kept particle are mostly not kept, so a reader of
 the decay tree fails on the missing key. The mode is stored as particles_kept.
 
+FRAME: tmodule and tlayer (int32, per tracker hit) are the `module` (the stave, i.e. the barrel
+face) and `layer` (Si layer 0..29) fields of the hit's cellID, decoded with the layout the file
+itself records (metadata tree, ECalBarrelHits__CellIDEncoding), which is stored as
+tcellID_encoding. The staves overlap past the 30-degree sector boundaries, so a hit's azimuth
+does not always name its face; sensor_crossings.tracker_hit_frame takes face and layer from
+these. Without the layout, or without both fields in it, none of the three is stored and the
+run says so; readers then fall back to the hit azimuth and depth.
+
 PROVENANCE: the sim_* keys (seed, events simulated, gun particle and energy, DD4hep and Geant4
 versions, date) and meta come from the file's ddsim run header (sensor_crossings.sim_provenance);
 without one, particle and energy come from the file name and the seed is "unknown".
@@ -49,7 +57,8 @@ Nothing is written when the data and --home disagree:
 """
 import argparse, math, os
 import numpy as np
-from sensor_crossings import REPO, geometry_provenance, check_thickness_label, sim_provenance
+from sensor_crossings import (REPO, geometry_provenance, check_thickness_label, sim_provenance,
+                              cellid_encoding, decode_cellid, face_phi, module_face_phi, N_FACES)
 from validate_crossings import MIN_SELECTED, PATH_TOL, path_length_test
 
 CHUNK_EVENTS = 10   # events per read: a 50 GeV photon event holds ~78k MCParticles
@@ -173,6 +182,7 @@ def main(argv=None):
     import uproot
     f = uproot.open(IN)
     SIM, sim_source = sim_provenance(f, IN)
+    encoding = cellid_encoding(f, "ECalBarrelHits")
     t = f["events"]
     n_file = t.num_entries
     if n_file == 0:
@@ -197,6 +207,21 @@ def main(argv=None):
             D[k] = D[k].astype(dt)
     hits_per_event = np.concatenate(hits_per_event)
     D["E"] = np.sqrt(D["px"]**2 + D["py"]**2 + D["pz"]**2 + D["mass"]**2)
+    FRAME = {}
+    if encoding is None:
+        frame_note = "NOT stored: the file records no ECalBarrelHits cellID layout"
+    else:
+        try:
+            fields = decode_cellid(D["tcellID"], encoding, ("module", "layer"))
+        except ValueError as e:
+            frame_note = f"NOT stored: {e}"
+        else:
+            D["tmodule"], D["tlayer"] = (fields[k].astype(np.int32) for k in ("module", "layer"))
+            FRAME = {"tcellID_encoding": np.array(encoding)}
+            dk = (face_phi(D["thx"], D["thy"]) - module_face_phi(D["tmodule"])) / (2 * np.pi / N_FACES)
+            n_other = int(np.count_nonzero(np.round(dk) % N_FACES != 0))
+            frame_note = (f"cellID module and layer (tmodule, tlayer); {n_other} hit(s) on a stave "
+                          f"other than the one their azimuth points at")
 
     b = path_length_test(D, thick_mm)
     if b["ok"] is False:
@@ -211,13 +236,15 @@ def main(argv=None):
                               str(SIM["sim_seed"]))
     order = ["pdg", "mass", "px", "py", "pz", "E", "pex", "pey", "pez",
              "vsx", "vsy", "vsz", "vex", "vey", "vez", "pid", "status", "gstat", "dbeg", "dend", "dau",
-             "thx", "thy", "thz", "tpx", "tpy", "tpz", "tpath", "ttime", "tedep", "tcellID", "tmc",
+             "thx", "thy", "thz", "tpx", "tpy", "tpz", "tpath", "ttime", "tedep", "tcellID",
+             "tmodule", "tlayer", "tmc",
              "evt_id_particle", "evt_id_hit"]
     os.makedirs(os.path.dirname(os.path.abspath(OUT)), exist_ok=True)
     np.savez_compressed(
         OUT,
         **{k: D[k] for k in order if k in D},
         num_events=np.int64(stop - start), particles_kept=np.array(args.particles),
+        **FRAME,
         **SIM,
         **GEO,
         meta=np.array([particle, f"{energy:g} GeV" if math.isfinite(energy) else "unknown",
@@ -236,6 +263,10 @@ def main(argv=None):
         print(f"  WARNING: the file holds {n_file} events; its ddsim run header says {n_sim} were simulated")
     print(f"  events: {stop - start} extracted, entries {start}..{stop - 1} of the file's {n_file}")
     print(f"  geometry: {GEO['geo_si_thick_mm'] * 1e3:g} um Si, config root {GEO['geo_home']}")
+    print(f"  face and layer per hit: {frame_note}")
+    if not FRAME:
+        print("    readers take the face from the hit azimuth and the layer from its depth, which puts "
+              "hits where neighbouring staves overlap on the wrong face")
     if b["ok"]:
         print(f"  thickness confirmed by {b['n_sel']} clean crossings: median "
               f"pathLength*|cos|/thickness = {b['ratio']:.4f}")

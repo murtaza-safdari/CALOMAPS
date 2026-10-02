@@ -32,12 +32,17 @@ GEOMETRY: 12-sided Si-W barrel, axis along z; face centres at k*30 deg (verified
 data: the +y beam strikes the 90-deg face). Si layers sit at constant DEPTH -- the
 perpendicular distance from the barrel axis to the flat face -- so the local depth axis w
 is the per-face outward normal, u is tangential (in the x-y plane) and v is the cylinder
-z. The per-face normal azimuth is derived from each hit's position, never hardcoded.
+z. The staves overlap past the 30-degree sector boundaries, so near a boundary a hit can
+sit on the neighbouring stave. A tracker hit's face and layer are its cellID module and layer
+when the npz holds them (tracker_hit_frame); otherwise, and for the calorimeter route (A, B),
+the face is the one the position's azimuth points at (face_phi) and the layer the one nearest
+in depth, which misassigns hits in those overlap regions.
 
 RECORDS: one dict per crossing, fields in this order (build_segments_A/B/C via _record):
   field              unit   meaning
   track_id           -      index of the producing particle in the npz MCParticle arrays (pdg, px...)
-  layer_id           -      Si layer 0..29 whose mid-plane is nearest in depth
+  layer_id           -      Si layer 0..29: the hit's cellID layer (C, when the npz has it), else
+                            the layer whose mid-plane is nearest in depth
   pdg                -      PDG code of the particle
   p_GeV              GeV/c  raw momentum magnitude |p|: at the crossing (C), the particle's
                             production |p| (A, B). Not the betagamma-matched ppion of a PIXELAV deck
@@ -98,6 +103,13 @@ ECAL_RMAX_MM = ECAL_RMIN_MM + ECAL_STACK_OFFSET_MM + 20 * 3.75 + 10 * 6.25   # =
 SI_THICK_MM = 0.32   # baseline sensor thickness (320 um); si_thickness_mm(d) prefers the npz's own
 N_FACES = 12
 FACE_PHI0_DEG = 0.0           # face-centre azimuths at k*30 deg (verified: +y beam face is 90 deg)
+# The face of a hit's stave is the cellID field `module`: module m has its outward normal at
+# FACE_PHI0_DEG + (MODULE0_FACE - m) * 360/N_FACES, i.e. 300 - 30*m deg. This map is measured
+# from the data (module 7 holds the 90-deg +y beam face; modules 0, 2-7, 9, 10 seen), not taken
+# from the driver; validate_crossings.py tests it on every run, since a wrong face puts hits
+# outside their slab.
+MODULE0_FACE = 10
+CELLID_ENCODING_KEY = "{}__CellIDEncoding"   # metadata-tree key of a collection's cellID layout
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 # The sim wrappers append _si<T>um to every output name of a silicon-thickness variant run.
 _SI_TAG = re.compile(r"_si([0-9]+(?:[.][0-9]+)?)um(?![0-9A-Za-z])")
@@ -280,6 +292,93 @@ def face_phi(x, y):
     return np.radians(FACE_PHI0_DEG + k * (360.0 / N_FACES))
 
 
+def cellid_encoding(root_file, collection="ECalBarrelHits"):
+    """The cellID layout string of `collection` (DD4hep's "name:offset:width,..."), from the
+    `metadata` tree of the open EDM4hep file root_file (uproot), or None when it has none."""
+    try:
+        meta = root_file["metadata"]
+        if meta.num_entries != 1:
+            return None
+        keys = meta["GPStringKeys"].array(library="ak").tolist()[0]
+        values = meta["GPStringValues"].array(library="ak").tolist()[0]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    for k, v in zip(keys, values):
+        if k == CELLID_ENCODING_KEY.format(collection) and len(v) == 1:
+            return v[0]
+    return None
+
+
+def decode_cellid(cellid, encoding, names):
+    """{name: int64 array} of the fields `names` of the uint64 cellIDs, laid out by `encoding`
+    ("name:offset:width" or "name:width" per field, the latter starting where the previous field
+    ends; a negative width is a signed field). Raises ValueError for a field the encoding lacks."""
+    fields, nxt = {}, 0
+    for item in encoding.split(","):
+        parts = item.strip().split(":")
+        if len(parts) == 3:
+            offset, width = int(parts[1]), int(parts[2])
+        elif len(parts) == 2:
+            offset, width = nxt, int(parts[1])
+        else:
+            raise ValueError(f"cellID encoding field {item!r} is not name:offset:width")
+        fields[parts[0]] = (offset, width)
+        nxt = offset + abs(width)
+    c = np.asarray(cellid).astype(np.uint64)
+    out = {}
+    for name in names:
+        if name not in fields:
+            raise ValueError(f"cellID encoding {encoding!r} has no field {name!r}")
+        offset, width = fields[name]
+        n = abs(width)
+        v = ((c >> np.uint64(offset)) & np.uint64((1 << n) - 1)).astype(np.int64)
+        if width < 0:
+            v = np.where(v >= (1 << (n - 1)), v - (1 << n), v)
+        out[name] = v
+    return out
+
+
+def module_face_phi(module):
+    """Outward-normal azimuth (rad) of the face of cellID module `module` (MODULE0_FACE), on the
+    face_phi grid: the face index is taken into (-N_FACES/2, N_FACES/2], the range face_phi gives."""
+    half = N_FACES // 2
+    k = (MODULE0_FACE - np.asarray(module, np.int64) + half - 1) % N_FACES - (half - 1)
+    return np.radians(FACE_PHI0_DEG + k * (360.0 / N_FACES))
+
+
+def has_cellid_frame(d):
+    """True when the tracker-route npz (or dict) d holds the hits' cellID module and layer."""
+    return "tmodule" in d and "tlayer" in d
+
+
+def tracker_hit_frame(d):
+    """(face-normal azimuth [rad], depth w [mm], layer index) per tracker hit of the npz d.
+
+    The one frame of the tracker hits: build_segments_C and validate_crossings.py both take it
+    from here. Face and layer are the hit's cellID module and layer (tmodule, tlayer of
+    extract_trackermom.py) when d has them. An npz without them falls back to the face the
+    hit's azimuth points at (face_phi) and the layer nearest in depth, which puts a hit on the
+    wrong face where neighbouring staves overlap past the 30-degree sector boundary. w is the
+    hit's projection on the face normal."""
+    thx, thy = np.asarray(d["thx"], float), np.asarray(d["thy"], float)
+    centers = si_layer_centers()
+    if has_cellid_frame(d):
+        module, layer = np.asarray(d["tmodule"], np.int64), np.asarray(d["tlayer"], np.int64)
+        bad_m = (module < 0) | (module >= N_FACES)
+        bad_l = (layer < 0) | (layer >= len(centers))
+        if bad_m.any() or bad_l.any():
+            raise ValueError(f"tracker-hit cellIDs outside this barrel: modules "
+                             f"{sorted(set(module[bad_m].tolist()))} (expected 0..{N_FACES - 1}), "
+                             f"layers {sorted(set(layer[bad_l].tolist()))} (expected 0..{len(centers) - 1})")
+        phin = module_face_phi(module)
+        w = thx * np.cos(phin) + thy * np.sin(phin)
+    else:
+        phin = face_phi(thx, thy)
+        w = thx * np.cos(phin) + thy * np.sin(phin)
+        layer = np.argmin(np.abs(w[:, None] - centers[None, :]), axis=1)   # layers sit at constant depth, not r
+    return phin, w, layer
+
+
 def to_local(x, y, z, phi_n):
     """Global (x,y,z) -> sensor-local (u across-pitch, v along-z, w radial/depth)."""
     c, s = np.cos(phi_n), np.sin(phi_n)
@@ -432,10 +531,7 @@ def build_segments_C(d):
     evt_h = _event_ids(d, "evt_id_hit")
     pdg_all = d["pdg"]
     assert tmc.size == 0 or (tmc.min() >= 0 and tmc.max() < len(pdg_all)), "trackerhit->MCParticle index out of range"
-    centers = si_layer_centers()
-    phin = face_phi(thx, thy)
-    wdep = thx * np.cos(phin) + thy * np.sin(phin)                       # depth = projection on face normal
-    layer = np.argmin(np.abs(wdep[:, None] - centers[None, :]), axis=1)  # layers sit at constant depth, not r
+    phin, _, layer = tracker_hit_frame(d)     # face and layer: the validator's frame
     segs, n_neutral = [], 0
     for j in range(len(thx)):
         mc = int(tmc[j]); pdg = int(pdg_all[mc])

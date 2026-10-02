@@ -206,14 +206,14 @@ deck's length labels are in µm).
 | Field | Unit | Meaning |
 |---|---|---|
 | `track_id` | – | index into the npz's MCParticle arrays (trace any line back to its particle); with several events these hold every event's particles in turn, and the npz `pid` is the index in the event's own `MCParticles` |
-| `layer_id` | – | Si layer 0–29 (0 = innermost); assignment verified against the readout `cellID` |
+| `layer_id` | – | Si layer 0–29 (0 = innermost): the `layer` field of the hit's readout `cellID` when the npz has it (`tlayer`), else the layer nearest in depth |
 | `pdg` | – | PDG code of the crossing particle |
 | `p_GeV` | GeV | \|p\| — variant **C**: true Geant4 momentum *at the crossing*; **A**/**B**: momentum at production |
 | `entry_u`, `entry_v` | mm | sensor-local impact point. Variant **C**: `Geant4TrackerWeightedAction`'s energy-weighted mid-crossing position (~mid-plane), **not** the entry face; **A**: earliest-in-time step position |
 | `cot_alpha` | – | `p_u / p_w` (drives PIXELAV's 13-px/Lorentz **y** axis in our driver) |
 | `cot_beta` | – | `p_v / p_w` (drives PIXELAV's 21-px **x** axis) |
 | `flipped` | 0/1 | 1 = outward-going (`p_w ≥ 0`) → driver entry face `z = 0`; 0 → `z = thick` |
-| `sensor_normal_phi` | rad | outward-normal azimuth of the dodecagon face the crossing is on |
+| `sensor_normal_phi` | rad | outward-normal azimuth of the dodecagon face the crossing is on: the face of the hit's `cellID` `module` (stave) when the npz has it (`tmodule`), else the face its azimuth points at; the staves overlap past the 30° sector boundaries |
 | `depth_w_mm` | mm | radial depth (apothem) of the impact point |
 | `energy_dep_GeV` | GeV | Geant4 energy deposited in the crossing — bookkeeping only; PIXELAV regenerates its own ionization |
 | `n_steps` | – | Geant4 steps merged into this record (variant C: 1 combined hit) |
