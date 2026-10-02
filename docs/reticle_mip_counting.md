@@ -208,10 +208,11 @@ over the showers (the ± of the last column, not an error) of 1.0 to 1.3% for th
 binary networks, 1.7% for the cluster count and 2.7% for the hit-count table. The mean of that
 ratio is known to 0.1 to 0.2%, so the offsets of `hits`, `cluster_shape` and the charge sum
 (+1.1 to +1.2%) are real. Without the layer weights every estimator gives 0.998 (the missing
-0.2% are crossings in reticles without a hit): one table serves all layers, and the weighted
-sum leans on the last ten, where the same hit pattern stands for fewer crossings (section 6.4). Rounding the estimate of each reticle to an 8-bit number in steps of 0.25
-(largest value 63.75) barely changes the spread (2.60% to 2.62% for `gbt`); steps of 1 give 2.67%
-and shift the scale by 5%.
+0.2% are crossings in reticles without a hit): one table serves all layers, and the weighted sum
+leans on the last ten, where the same hit pattern stands for fewer crossings (section 6.4).
+Rounding the estimate of each reticle to an 8-bit number in steps of 0.25 (largest value 63.75)
+barely changes the spread (2.60% to 2.62% for `gbt`); steps of 1 give 2.67% and shift the scale
+by 5%.
 
 Giving the trees the layer number (`gbt_layer`) improves the rms per reticle a little (4.2
 against 4.4 at 13 to 20 crossings) and makes the shower total worse (2.9% against 2.6%, a
@@ -483,10 +484,9 @@ python3 $A/mip_counting.py big_K1.npz --out-dir B --no-scan --layer-weights 20:2
         --include-preds B/cnn_preds.npz
 ```
 
-Sections 6.1, 6.2, 6.5 and 6.7 come from `S`, sections 6.3 and 6.4 from `U`, section 6.6 and
-the 42 x 26 columns of 6.7 from `B`. `results.json` holds every number, `preds.npz` the estimate of every reticle. One training
-of a network (one fold, one input) takes about 50 s (tiny) or 150 s (small) on an A100 slice,
-200 s for the 42 x 26 reticles; the tables and trees run on a CPU in about 20 minutes per
-directory.
-`python3 $A/mip_counting.py --self-test` checks the truth definitions, the clustering and the
-weighted totals on a hand-made case.
+Sections 6.1, 6.2, 6.5 and 6.7 come from `S`, sections 6.3 and 6.4 from `U`, section 6.6 and the
+42 x 26 columns of 6.7 from `B`. `results.json` holds every number, `preds.npz` the estimate of
+every reticle. One training of a network (one fold, one input) takes about 50 s (tiny) or 150 s
+(small) on an A100 slice, 200 s for the 42 x 26 reticles; the tables and trees run on a CPU in
+about 20 minutes per directory. `python3 $A/mip_counting.py --self-test` checks the truth
+definitions, the clustering and the weighted totals on a hand-made case.
