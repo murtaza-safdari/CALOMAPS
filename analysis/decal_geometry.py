@@ -10,6 +10,7 @@ and refuse a geometry where the two disagree.
     layer_radii(home)      per-layer Si mid-plane apothems [mm] (ECalBarrel_rmin + in-layer offset)
     layer_stack(home)      per-layer [(material, thickness_mm), ...], repeats expanded
     si_thickness_mm(home)  the sensor silicon thickness [mm]
+    compact_si_thickness_mm(compact)  the same, for the config root of a compact file
     cell_size_mm(home)     the pixel pitch [mm] (ECal_cell_size)
     geometry_hash(home)    content hash of home/geometry/
     variant_home(T, home)  where sim/make_geometry_variant.py puts the T-micron variant of home
@@ -126,6 +127,18 @@ def si_thickness_mm(calomaps_home):
     if len(found) != 1:
         raise ValueError(f"layer blocks have different Silicon thicknesses: {sorted(found)} mm")
     return found.pop()
+
+
+def compact_si_thickness_mm(compact):
+    """si_thickness_mm of the config root whose compact is the file `compact` (ddsim's
+    --compactFile), which must be <config root>/geometry/SiD_TestBeam.xml, as the repo's and every
+    variant's compact is. Raises ValueError for any other path, whose layer stack is not the one
+    this module reads."""
+    compact = os.path.abspath(compact)
+    g = os.path.dirname(compact)
+    if os.path.basename(compact) != "SiD_TestBeam.xml" or os.path.basename(g) != "geometry":
+        raise ValueError(f"{compact} is not <config root>/geometry/SiD_TestBeam.xml")
+    return si_thickness_mm(os.path.dirname(g))
 
 
 def cell_size_mm(calomaps_home):
