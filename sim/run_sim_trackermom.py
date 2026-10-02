@@ -11,8 +11,8 @@ A tracker SD produces SimTrackerHits, which DO carry momentum[3], position[3], p
 time and a link to the producing MCParticle -- i.e. one record per charged-track crossing of a Si
 sensor, with the true Geant4 momentum at that crossing. (The hit position is the action's
 energy-weighted COMBINED position over the crossing, ~the sensor mid-plane -- not the
-entry-face point; see notebooks 06/07.) Same gun, physics and seed (424242) as
-run_sim_fullcascade.py, so the shower is identical; only the Si readout differs.
+entry-face point; see notebooks 06/07.) Same gun, physics and seed (CALOMAPS_SEED, default
+424242) as run_sim_fullcascade.py, so the shower is identical; only the Si readout differs.
 
 This is a SEPARATE run from the calorimeter one: notebook 05 (shower display) and notebook 07's
 calo route still use the calorimeter output; the crossing records (sensor_crossings.py) use THIS
@@ -28,12 +28,17 @@ Environment knobs (all optional; the defaults reproduce the canonical 50 GeV pho
     CALOMAPS_KEEP_ALL        1 keeps every track; 0 prunes by min-KE  (default 1)
     CALOMAPS_MIN_KE_MEV      truth-persistency KE floor in MeV        (default 1.0)
     CALOMAPS_DATA_BASE       output directory root                    (default ~/CALOMAPS-data)
+    CALOMAPS_SEED            random seed, an integer; run_sim_fullcascade.py reads the same knob
+                             (default 424242). A --random.seed on the ddsim command line overrides it
     CALOMAPS_SI_THICKNESS_UM sensor silicon thickness in um; only the sim/*.sh wrappers act on
                              it, by passing a variant --compactFile. Here the default output name
                              is tagged _si<T>um by the --compactFile's own thickness (untagged at
                              the repo's 320 um); the knob only prints a warning when it disagrees.
 See docs/handbook.md "Controlling which secondaries are produced and saved" for the physics
 (production cut) vs. output-only (persistency floor) distinction.
+
+The default output name is trackermom_<tag><E>_<N>evt[_si<T>um].root, N being the
+--numberOfEvents of the ddsim command line; --outputFile replaces it.
 
 Keep this file pure ASCII (non-ASCII breaks the EDM4hep RunHeader std::map conversion).
 """
@@ -45,7 +50,7 @@ from g4units import GeV, MeV, mm, deg
 SIM = DD4hepSimulation()
 
 # Reproducibility: same seed as the calorimeter cascade so the shower is identical.
-SIM.random.seed = 424242
+SIM.random.seed = int(os.environ.get("CALOMAPS_SEED", "424242"))
 
 # ---- particle gun: single fixed-energy particle, +y pencil beam (both overridable) ----
 _particle = os.environ.get("CALOMAPS_GUN_PARTICLE", "gamma")
@@ -89,22 +94,24 @@ SIM.part.printStartTracking = False
 # per crossing = one crossing record.
 SIM.action.mapActions['ECalBarrel'] = 'Geant4TrackerWeightedAction'
 
-# ---- silicon thickness: the default output name is tagged by the --compactFile's geometry ----
-# sim/steering_geometry.py reads the thickness of the compact on ddsim's command line: no tag at
-# the repo's 320 um, _si<T>um otherwise, and a WARNING when CALOMAPS_SI_THICKNESS_UM disagrees.
+# ---- default output name: event count and silicon thickness from the ddsim command line ----
+# sim/steering_output.py reads ddsim's command line: _<N>evt from --numberOfEvents, and the
+# thickness of the --compactFile: no tag at the repo's 320 um, _si<T>um otherwise, with a WARNING
+# when CALOMAPS_SI_THICKNESS_UM disagrees.
 # ddsim exec()s this file without __file__; the compiled code keeps the file's path.
-_si_tag = ""
+_si_tag, _n_tag = "", ""
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(sys._getframe().f_code.co_filename)))
-    from steering_geometry import si_output_tag
+    from steering_output import events_tag, si_output_tag
+    _n_tag = events_tag(fallback=SIM.numberOfEvents)
     _si_tag = si_output_tag()
 except Exception as _err:
-    print("WARNING: sim/steering_geometry.py could not be loaded from beside this steering file "
+    print("WARNING: sim/steering_output.py could not be loaded from beside this steering file "
           "(%s): the silicon thickness of the --compactFile is unconfirmed and the default output "
-          "name is untagged." % _err)
+          "name carries neither the event count nor a thickness tag." % _err)
 
 # ---- output ----
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "trackermom")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g_1evt%s.root" % (_tag, _energy_gev, _si_tag))
+SIM.outputFile = os.path.join(_out_dir, "trackermom_%s%g%s%s.root" % (_tag, _energy_gev, _n_tag, _si_tag))

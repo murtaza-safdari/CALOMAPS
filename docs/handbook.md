@@ -599,7 +599,7 @@ The notebook parallelizes with `ProcessPoolExecutor(max_workers=min(32, os.cpu_c
 
 The per-sensor crossing product (notebooks 05–07) needs the full shower cascade and, per
 charged-track sensor crossing, the impact point, direction and **momentum**. Two single-event `ddsim`
-runs of the same 50 GeV photon (both pin seed 424242 → identical shower), steered from `sim/`, produce it:
+runs of the same 50 GeV photon (both take the seed `CALOMAPS_SEED`, default 424242 → identical shower), steered from `sim/`, produce it:
 
 | Run | Steering | Si readout | Gives |
 |-----|----------|-----------|-------|
@@ -615,7 +615,7 @@ five lines are load-bearing (the rest just reproduces the canonical gun or is op
 
 | Line | Run | What it does |
 |------|-----|--------------|
-| `SIM.random.seed = 424242` | both | pins the shower, so the calo and tracker runs read out the *same* event |
+| `SIM.random.seed` (`CALOMAPS_SEED`, default 424242) | both | pins the shower, so the calo and tracker runs read out the *same* event |
 | `SIM.part.userParticleHandler = ""` | both | removes the tracking-region cut so ECal secondaries (born r > 1267 mm) persist |
 | `SIM.part.keepAllParticles = True` | both | writes every Geant4 track as an `MCParticle` (no KE pruning) |
 | `SIM.enableDetailedShowerMode = True` | calo | fills each `CaloHitContribution` with per-step `stepPosition`/`PDG` (zero in SIMPLE mode) |

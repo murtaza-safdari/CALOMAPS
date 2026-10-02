@@ -29,7 +29,7 @@ common = ["ddsim", "--compactFile", "SiD_TestBeam.xml", "-N", "20"]
 subprocess.run(common + ["--steeringFile", "../sim/run_sim.py", "--random.seed", "424242",
                          "--outputFile", def20], cwd=GEO, check=True,
                env={**os.environ, "CALOMAPS_GUN_ENERGY_GEV": "50"})
-subprocess.run(common + ["--steeringFile", "../sim/run_sim_fullcascade.py",
+subprocess.run(common + ["--steeringFile", "../sim/run_sim_fullcascade.py", "--random.seed", "424242",
                          "--outputFile", casc20], cwd=GEO, check=True,
                env={**os.environ, "CALOMAPS_KEEP_ALL": "0"})
 

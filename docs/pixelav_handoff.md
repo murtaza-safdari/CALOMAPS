@@ -21,14 +21,14 @@ rest under `$CALOMAPS_HOME/models`):
 
 | File | What it is |
 |------|------------|
-| `trackermom_<tag><E>_1evt.root` | tracker-SD readout: one `SimTrackerHit` per Si crossing, carrying the **real Geant4 momentum**, entry position, path length, energy, time, and a link to the producing MCParticle |
-| `trackermom_<tag><E>_1evt.npz` | the same, plus the full MCParticle cascade, as NumPy arrays |
-| **`pixelav_segments_<tag><E>_1evt.pixelav.txt`** | **the deck** — one line per crossing, 7 columns (`cot_alpha cot_beta ppion flipped modx mody pT`), lengths in microns |
-| `..._1evt.pixelav.txt.columns.txt` | column legend (human reference; PIXELAV doesn't read it) |
-| `..._1evt.json` / `.csv` | per-crossing records, 18 fields each (provenance + the raw numbers behind the deck) |
+| `trackermom_<tag><E>_<N>evt.root` | tracker-SD readout: one `SimTrackerHit` per Si crossing, carrying the **real Geant4 momentum**, entry position, path length, energy, time, and a link to the producing MCParticle |
+| `trackermom_<tag><E>_<N>evt.npz` | the same, plus the MCParticle cascade, as NumPy arrays (for N > 1 only the particles with a tracker hit) |
+| **`pixelav_segments_<tag><E>_<N>evt.pixelav.txt`** | **the deck** — one line per crossing, 7 columns (`cot_alpha cot_beta ppion flipped modx mody pT`), lengths in microns |
+| `..._<N>evt.pixelav.txt.columns.txt` | column legend (human reference; PIXELAV doesn't read it) |
+| `..._<N>evt.json` / `.csv` | per-crossing records, 18 fields each (provenance + the raw numbers behind the deck) |
 
-`<tag>` is `gamma`, `piplus`, `piminus`, … and `<E>` is the beam energy in GeV (e.g.
-`trackermom_piplus50_1evt.root`). The deck is the hand-off file; the `.npz`/`.json`/`.csv`
+`<tag>` is `gamma`, `piplus`, `piminus`, …, `<E>` is the beam energy in GeV and `<N>` the number
+of events, `CALOMAPS_N_EVENTS` (default 1; e.g. `trackermom_piplus50_1evt.root`). The deck is the hand-off file; the `.npz`/`.json`/`.csv`
 travel with it so the recipient can trace any line back to its MCParticle.
 
 > **All particles, no filtering (current default).** Every charged crossing is written.
@@ -80,14 +80,19 @@ CALOMAPS_GUN_PARTICLE=pi- CALOMAPS_GUN_ENERGY_GEV=80 bash $CALOMAPS_HOME/sim/mak
 
 # add the calorimeter cascade too (for the notebook-05 shower display / notebook-07 calo view):
 CALOMAPS_GUN_PARTICLE=pi+ bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh --fullcascade
+
+# 200 events, another seed, outputs outside the home quota (~3.7 MB per 50 GeV photon event):
+CALOMAPS_N_EVENTS=200 CALOMAPS_SEED=7 CALOMAPS_OUTPUT_DIR=/path/to/scratch \
+    bash $CALOMAPS_HOME/sim/make_pixelav_inputs.sh
 ```
 
 What it does, in order:
 
 1. **tracker-SD simulation** — `ddsim` with `run_sim_trackermom.py`, which maps the ECal Si
    to `Geant4TrackerWeightedAction` so each sensor crossing becomes a `SimTrackerHit` with
-   the real momentum (one event; the shower is fully contained in the MCParticle tree).
-2. **extract** — `extract_trackermom.py` reads the ROOT into the `.npz` arrays.
+   the real momentum (`CALOMAPS_N_EVENTS` events, default 1; `CALOMAPS_SEED` sets the seed).
+2. **extract** — `extract_trackermom.py` reads every event of the ROOT file into the `.npz` arrays
+   (for more than one event, only the MCParticles with a tracker hit).
 3. **convert** — `pixelav_converter.py` builds per-crossing records (variant C, the
    tracker path) and writes the 7-column deck + the `.json`/`.csv` records.
 
@@ -124,10 +129,10 @@ patched `ppixelav2_list_trkpy_real_entry` driver (on the `pixelav-integration` b
 Give your collaborator the deck plus its companions:
 
 ```
-pixelav_segments_<tag><E>_1evt.pixelav.txt           <- feed this to PIXELAV
-pixelav_segments_<tag><E>_1evt.pixelav.txt.columns.txt
-pixelav_segments_<tag><E>_1evt.json / .csv           <- per-crossing provenance
-trackermom_<tag><E>_1evt.npz                         <- full MCParticle + tracker arrays
+pixelav_segments_<tag><E>_<N>evt.pixelav.txt         <- feed this to PIXELAV
+pixelav_segments_<tag><E>_<N>evt.pixelav.txt.columns.txt
+pixelav_segments_<tag><E>_<N>evt.json / .csv         <- per-crossing provenance
+trackermom_<tag><E>_<N>evt.npz                       <- MCParticle + tracker arrays
 ```
 
 They run it through their PIXELAV with the DECAL sensor model (320 µm Si, 100 µm pitch).

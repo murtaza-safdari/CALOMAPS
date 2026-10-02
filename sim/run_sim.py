@@ -69,16 +69,16 @@ SIM.physicsList = "FTFP_BERT"
 # OUTPUT
 # ==========================================
 # ---- silicon thickness: the default output name is tagged by the --compactFile's geometry ----
-# sim/steering_geometry.py reads the thickness of the compact on ddsim's command line: no tag at
+# sim/steering_output.py reads the thickness of the compact on ddsim's command line: no tag at
 # the repo's 320 um, _si<T>um otherwise, and a WARNING when CALOMAPS_SI_THICKNESS_UM disagrees.
 # ddsim exec()s this file without __file__; the compiled code keeps the file's path.
 _si_tag = ""
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(sys._getframe().f_code.co_filename)))
-    from steering_geometry import si_output_tag
+    from steering_output import si_output_tag
     _si_tag = si_output_tag()
 except Exception as _err:
-    print("WARNING: sim/steering_geometry.py could not be loaded from beside this steering file "
+    print("WARNING: sim/steering_output.py could not be loaded from beside this steering file "
           "(%s): the silicon thickness of the --compactFile is unconfirmed and the default output "
           "name is untagged." % _err)
 

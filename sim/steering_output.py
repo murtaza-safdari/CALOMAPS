@@ -1,10 +1,16 @@
-"""The silicon-thickness tag of a ddsim steering file's default output name (stdlib + numpy).
+"""Parts of a ddsim steering file's default output name, read from ddsim's command line
+(stdlib + numpy). ddsim exec()s the steering file in its own process, so sys.argv is ddsim's.
 
-run_sim.py, run_sim_trackermom.py and run_sim_fullcascade.py name their default output after the
-geometry ddsim simulates. si_output_tag() finds the compact on ddsim's command line (ddsim exec()s
-the steering file in its own process, so sys.argv is ddsim's), reads its ECal silicon thickness
-with analysis/decal_geometry.py and returns "" for this checkout's own thickness (320 um), else
-"_si<T>um", the tag sim/geometry_variant.sh gives the same geometry.
+events_tag(): run_sim_trackermom.py and run_sim_fullcascade.py name their default output
+_<N>evt, N being the --numberOfEvents / -N of the command line (the last one, as ddsim's argparse
+takes it). Without one, N is the fallback the steering file passes (its SIM.numberOfEvents, which
+ddsim's command line would otherwise set) when that is positive; otherwise the name carries no
+event count, with a WARNING. events_tag() does not raise.
+
+si_output_tag(): run_sim.py, run_sim_trackermom.py and run_sim_fullcascade.py name their default
+output after the geometry ddsim simulates. It finds the compact on the command line, reads its
+ECal silicon thickness with analysis/decal_geometry.py and returns "" for this checkout's own
+thickness (320 um), else "_si<T>um", the tag sim/geometry_variant.sh gives the same geometry.
 
 CALOMAPS_SI_THICKNESS_UM selects a variant compact only in the sim/*.sh wrappers. Here it is
 compared with the compact, and a WARNING is printed when the two disagree. When the compact's
@@ -36,6 +42,45 @@ def compact_files(argv):
                 files.append(argv[i])
         i += 1
     return files
+
+
+def number_of_events(argv):
+    """The value of the last --numberOfEvents N, --numberOfEvents=N, -N N or -NN in argv, or
+    None when there is none or it is not an integer."""
+    n, i = None, 1
+    while i < len(argv):
+        a, value = argv[i], None
+        if a in ("--numberOfEvents", "-N"):
+            if i + 1 < len(argv):
+                i += 1
+                value = argv[i]
+        elif a.startswith("--numberOfEvents="):
+            value = a.split("=", 1)[1]
+        elif a.startswith("-N") and not a.startswith("--"):
+            value = a[2:]
+        if value is not None:
+            try:
+                n = int(value)
+            except ValueError:
+                n = None
+        i += 1
+    return n
+
+
+def events_tag(argv=None, fallback=None):
+    """"_<N>evt" for the default output name of the ddsim run whose command line is argv
+    (default sys.argv); fallback is the N to use when the command line gives none."""
+    try:
+        n = number_of_events(sys.argv if argv is None else argv)
+        if n is None and isinstance(fallback, int) and fallback > 0:
+            n = fallback
+    except Exception:
+        n = None
+    if n is None:
+        print("WARNING: no --numberOfEvents on the ddsim command line; the default output name "
+              "carries no event count. Name the output with --outputFile.")
+        return ""
+    return "_%devt" % n
 
 
 def _um(mm):

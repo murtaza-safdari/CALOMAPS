@@ -16,12 +16,17 @@ Environment knobs (all optional; the defaults reproduce the canonical 50 GeV pho
     CALOMAPS_KEEP_ALL        1 keeps every track; 0 prunes by min-KE  (default 1)
     CALOMAPS_MIN_KE_MEV      truth-persistency KE floor in MeV        (default 1.0)
     CALOMAPS_DATA_BASE       output directory root                    (default ~/CALOMAPS-data)
+    CALOMAPS_SEED            random seed, an integer; run_sim_trackermom.py reads the same knob
+                             (default 424242). A --random.seed on the ddsim command line overrides it
     CALOMAPS_SI_THICKNESS_UM sensor silicon thickness in um; only the sim/*.sh wrappers act on
                              it, by passing a variant --compactFile. Here the default output name
                              is tagged _si<T>um by the --compactFile's own thickness (untagged at
                              the repo's 320 um); the knob only prints a warning when it disagrees.
 See docs/handbook.md "Controlling which secondaries are produced and saved" for the
 difference between the production cut (a PHYSICS knob) and the persistency floor (OUTPUT only).
+
+The default output name is fullcascade_<tag><E>_<N>evt[_si<T>um].root, N being the
+--numberOfEvents of the ddsim command line; --outputFile replaces it.
 
 The one non-obvious setting is `part.userParticleHandler = ""`:
 DDSim's default Geant4TCUserParticleHandler restricts MC-truth to the inner *tracking*
@@ -47,9 +52,9 @@ from g4units import GeV, MeV, mm, deg
 SIM = DD4hepSimulation()
 
 # Reproducibility: fix the seed so the shower is stable run-to-run AND identical to
-# run_sim_trackermom.py (which pins the same seed), letting the calo and tracker readouts be
-# compared on the SAME shower. Comment out for statistically independent showers.
-SIM.random.seed = 424242
+# run_sim_trackermom.py (which reads the same CALOMAPS_SEED), letting the calo and tracker
+# readouts be compared on the SAME shower. Another CALOMAPS_SEED gives an independent shower.
+SIM.random.seed = int(os.environ.get("CALOMAPS_SEED", "424242"))
 
 # ==========================================
 # PARTICLE GUN -- single fixed-energy particle, +y pencil beam
@@ -112,19 +117,21 @@ SIM.part.printStartTracking = False
 # NOTE: SIM.part.enableDetailedHitsAndParticleInfo is a different knob and does NOT do this.
 SIM.enableDetailedShowerMode = True
 
-# ---- silicon thickness: the default output name is tagged by the --compactFile's geometry ----
-# sim/steering_geometry.py reads the thickness of the compact on ddsim's command line: no tag at
-# the repo's 320 um, _si<T>um otherwise, and a WARNING when CALOMAPS_SI_THICKNESS_UM disagrees.
+# ---- default output name: event count and silicon thickness from the ddsim command line ----
+# sim/steering_output.py reads ddsim's command line: _<N>evt from --numberOfEvents, and the
+# thickness of the --compactFile: no tag at the repo's 320 um, _si<T>um otherwise, with a WARNING
+# when CALOMAPS_SI_THICKNESS_UM disagrees.
 # ddsim exec()s this file without __file__; the compiled code keeps the file's path.
-_si_tag = ""
+_si_tag, _n_tag = "", ""
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(sys._getframe().f_code.co_filename)))
-    from steering_geometry import si_output_tag
+    from steering_output import events_tag, si_output_tag
+    _n_tag = events_tag(fallback=SIM.numberOfEvents)
     _si_tag = si_output_tag()
 except Exception as _err:
-    print("WARNING: sim/steering_geometry.py could not be loaded from beside this steering file "
+    print("WARNING: sim/steering_output.py could not be loaded from beside this steering file "
           "(%s): the silicon thickness of the --compactFile is unconfirmed and the default output "
-          "name is untagged." % _err)
+          "name carries neither the event count nor a thickness tag." % _err)
 
 # ==========================================
 # OUTPUT -- EDM4hep ROOT (.root + default => EDM4hep)
@@ -132,4 +139,4 @@ except Exception as _err:
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "fullcascade")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "fullcascade_%s%g_1evt%s.root" % (_tag, _energy_gev, _si_tag))
+SIM.outputFile = os.path.join(_out_dir, "fullcascade_%s%g%s%s.root" % (_tag, _energy_gev, _n_tag, _si_tag))

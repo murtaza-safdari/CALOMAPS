@@ -55,10 +55,10 @@ A second product line branches off after simulation — per-sensor track crossin
 
 ```
 sim/run_sim_trackermom.py  ──> ddsim ──> SimTrackerHits (true per-crossing momentum)  [route C, primary]
-    └── analysis/extract_trackermom.py ──> models/trackermom_<tag><E>_1evt.npz ─┐
-sim/run_sim_fullcascade.py ──> ddsim ──> per-step CaloHitContributions           │  [route A, cross-check]
-    └── analysis/extract_cascade.py    ──> models/fullcascade_<tag><E>_1evt.npz ──┤  (also feeds notebook 05)
-                                                                                  ▼
+    └── analysis/extract_trackermom.py ──> models/trackermom_<tag><E>_<N>evt.npz ─┐
+sim/run_sim_fullcascade.py ──> ddsim ──> per-step CaloHitContributions             │  [route A, cross-check]
+    └── analysis/extract_cascade.py    ──> models/fullcascade_<tag><E>_1evt.npz ────┤  (also feeds notebook 05)
+                                                                                    ▼
                                           analysis/sensor_crossings.py ──> models/sensor_crossings_*.{json,csv}
                                             (one record per charged-track sensor crossing:
                                              impact point, direction, |p|, particle type)
