@@ -16,6 +16,9 @@ Environment knobs (all optional; the defaults reproduce the canonical 50 GeV pho
     CALOMAPS_KEEP_ALL        1 keeps every track; 0 prunes by min-KE  (default 1)
     CALOMAPS_MIN_KE_MEV      truth-persistency KE floor in MeV        (default 1.0)
     CALOMAPS_DATA_BASE       output directory root                    (default ~/CALOMAPS-data)
+    CALOMAPS_SI_THICKNESS_UM sensor silicon thickness in um; only the sim/*.sh wrappers act on
+                             it, by passing a variant --compactFile. Here a value other than 320
+                             only tags the default output name _si<T>um and prints a warning.
 See docs/handbook.md "Controlling which secondaries are produced and saved" for the
 difference between the production cut (a PHYSICS knob) and the persistency floor (OUTPUT only).
 
@@ -107,10 +110,21 @@ SIM.part.printStartTracking = False
 # NOTE: SIM.part.enableDetailedHitsAndParticleInfo is a different knob and does NOT do this.
 SIM.enableDetailedShowerMode = True
 
+# ---- silicon thickness: the geometry is the --compactFile's, whatever this knob says ----
+# 320 um is the repo geometry's ECal_Si_thickness (a steering file cannot locate the repo to read it).
+_si_um = os.environ.get("CALOMAPS_SI_THICKNESS_UM", "")
+_si_tag = ""
+if _si_um and "%g" % float(_si_um) != "320":
+    _si_tag = "_si%gum" % float(_si_um)
+    print("WARNING: CALOMAPS_SI_THICKNESS_UM=%s does not change the geometry: ddsim simulates the "
+          "--compactFile it was given. The sim/*.sh wrappers pass the matching variant compact; a "
+          "direct ddsim run needs the one sim/make_geometry_variant.py prints. The default output "
+          "name is tagged %s." % (_si_um, _si_tag))
+
 # ==========================================
 # OUTPUT -- EDM4hep ROOT (.root + default => EDM4hep)
 # ==========================================
 _data_base = os.environ.get("CALOMAPS_DATA_BASE", os.path.expanduser("~/CALOMAPS-data"))
 _out_dir = os.path.join(_data_base, "fullcascade")
 os.makedirs(_out_dir, exist_ok=True)
-SIM.outputFile = os.path.join(_out_dir, "fullcascade_%s%g_1evt.root" % (_tag, _energy_gev))
+SIM.outputFile = os.path.join(_out_dir, "fullcascade_%s%g_1evt%s.root" % (_tag, _energy_gev, _si_tag))

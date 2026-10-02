@@ -16,6 +16,9 @@ SIM = DD4hepSimulation()
 #   CALOMAPS_GUN_PMIN_GEV   momentum spectrum min   (default 5.0)
 #   CALOMAPS_GUN_PMAX_GEV   momentum spectrum max   (default 400.0)
 #   CALOMAPS_GUN_ENERGY_GEV if set, a mono-energetic beam at this energy (overrides PMIN/PMAX)
+#   CALOMAPS_SI_THICKNESS_UM sensor silicon thickness in um; only the sim/*.sh wrappers act on it,
+#                           by passing a variant --compactFile. Here a value other than 320 only
+#                           tags the default output name _si<T>um and prints a warning.
 #
 # Examples:
 #   CALOMAPS_GUN_PARTICLE=pi+ ddsim --compactFile SiD_TestBeam.xml --steeringFile run_sim.py -N 100 ...
@@ -63,8 +66,19 @@ SIM.physicsList = "FTFP_BERT"
 # ==========================================
 # OUTPUT
 # ==========================================
+# ---- silicon thickness: the geometry is the --compactFile's, whatever this knob says ----
+# 320 um is the repo geometry's ECal_Si_thickness (a steering file cannot locate the repo to read it).
+_si_um = os.environ.get("CALOMAPS_SI_THICKNESS_UM", "")
+_si_tag = ""
+if _si_um and "%g" % float(_si_um) != "320":
+    _si_tag = "_si%gum" % float(_si_um)
+    print("WARNING: CALOMAPS_SI_THICKNESS_UM=%s does not change the geometry: ddsim simulates the "
+          "--compactFile it was given. The sim/*.sh wrappers pass the matching variant compact; a "
+          "direct ddsim run needs the one sim/make_geometry_variant.py prints. The default output "
+          "name is tagged %s." % (_si_um, _si_tag))
+
 # Standalone default name (derived from the particle). The batch scripts
 # generate_dataset.sh / generate_batched.sh override this with --outputFile.
 _tag = {"gamma": "photons", "pi+": "piplus", "pi-": "piminus"}.get(
     PARTICLE, PARTICLE.replace("+", "plus").replace("-", "minus"))
-SIM.outputFile = "sim_data_%s.root" % _tag
+SIM.outputFile = "sim_data_%s%s.root" % (_tag, _si_tag)
