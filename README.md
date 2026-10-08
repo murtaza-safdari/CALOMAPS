@@ -125,6 +125,8 @@ CALOMAPS/
 │   ├── 06_sensor_crossings_tracker.ipynb  ← per-sensor crossings: tracker route (primary)
 │   ├── 07_sensor_crossings_calo.ipynb     ← per-sensor crossings: calorimeter route (cross-check)
 │   ├── 08_pixelav_deck_inspection.ipynb  ← [this branch] validate a PIXELAV deck before sending it
+│   ├── 09_deposits_to_charge.ipynb       ← [this branch] from the energy of each Geant4 step to the
+│   │                                       charge on the pixels: groups, jobs, PIXELAV, one crossing
 │   ├── 10_reticles_one_plane.ipynb       ← [this branch] one sensor plane as the detector sees it:
 │   │                                       charge, hit map, reticles, crossings per reticle
 │   └── 11_counting_in_a_reticle.ipynb    ← [this branch] the count of a reticle from its hit map:
