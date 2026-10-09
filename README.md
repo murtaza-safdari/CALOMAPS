@@ -12,9 +12,12 @@
 > [`docs/pixelav_reference.md`](docs/pixelav_reference.md) (the recipe and the format /
 > conventions reference),
 > [`docs/reticle_mip_counting.md`](docs/reticle_mip_counting.md) (reticles of the charge maps and
-> the number of particles in each from its hit map), and notebook
+> the number of particles in each from its hit map), notebook
 > [`08_pixelav_deck_inspection.ipynb`](notebooks/08_pixelav_deck_inspection.ipynb) (validate a
-> deck before sending it).
+> deck before sending it), and notebooks 09 to 12 ([`09_deposits_to_charge.ipynb`](notebooks/09_deposits_to_charge.ipynb)
+> to [`12_counting_a_shower.ipynb`](notebooks/12_counting_a_shower.ipynb)), which follow the
+> chain stage by stage: the charge on the pixels, one sensor plane and its reticles, the count of
+> a reticle, the counts summed over a shower.
 
 A research framework for digital electromagnetic calorimeter (DECAL) studies using simulated Monolithic Active Pixel Sensor (MAPS) silicon layers. CALOMAPS pairs a DD4hep / Geant4 simulation of a custom 100 µm-pitch silicon-tungsten ECal barrel with two deliverables, built up from first principles in the notebooks:
 
@@ -129,8 +132,10 @@ CALOMAPS/
 │   │                                       charge on the pixels: groups, jobs, PIXELAV, one crossing
 │   ├── 10_reticles_one_plane.ipynb       ← [this branch] one sensor plane as the detector sees it:
 │   │                                       charge, hit map, reticles, crossings per reticle
-│   └── 11_counting_in_a_reticle.ipynb    ← [this branch] the count of a reticle from its hit map:
-│                                           four estimators, scored on unseen showers, layer by layer
+│   ├── 11_counting_in_a_reticle.ipynb    ← [this branch] the count of a reticle from its hit map:
+│   │                                       four estimators, scored on unseen showers, layer by layer
+│   └── 12_counting_a_shower.ipynb        ← [this branch] the counts summed over a shower: layer
+│                                           profile, shower total, density and depth, data volume
 └── models/                            ← (gitignored) extracted data + trained checkpoints
     ├── decal_extracted_data*.npz  /  mono_gamma/*.npz
     ├── saved_cbnet_gpu_*/             ← CB-density ensembles (trained on the A100)
