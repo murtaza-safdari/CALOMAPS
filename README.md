@@ -118,6 +118,7 @@ CALOMAPS/
 │   │                                  ← legacy quantile-regression surrogate (kept for reference)
 │   ├── pixelav_converter.py           ← [this branch] crossing records → 7-column PIXELAV deck
 │   └── pixelav/                       ← [this branch] deposit jobs, PIXELAV drivers, sensor models, cluster readers
+│                                      ← the energy-loss formula (energy_loss.py), the drawn schematics (sketches.py)
 ├── notebooks/                         ← interactive workflow notebooks (read in order)
 │   ├── 00_simulate_your_samples.ipynb ← primer: generate your own samples (any particle via env vars)
 │   ├── 01_detector_and_data.ipynb     ← the detector from first principles (01b: pion contrast)
