@@ -9,6 +9,7 @@
                                                 [--batch 512] [--lr 0.003] [--device auto]
                                                 [--layer-weights L:W[,L:W ...]]
                                                 [--out-name cnn] [--compare <preds.npz> ...]
+                                                [--train-on <reticles.npz> ...]
 
 The readout, truths, folds and file tags are those of analysis/pixelav/mip_counting.py (its
 prepare, on the files sorted by overlay, with the same seed: the same hit maps); the reticle shape
@@ -16,7 +17,11 @@ comes from the files. For each fold a model is trained on the reticles of all fi
 lie in the other folds and predicts that fold's reticles of every file; EXTRAPOLATION (unless
 --skip-extrapolation) trains on the files of overlay <= --extrap-max-k only and predicts the files
 of larger overlay. Reticles without a hit are left out of training and predicted 0, as in
-mip_counting.py.
+mip_counting.py. TRANSFER (--train-on, as in mip_counting.py): for each model, input and target
+one network is trained on all maps of the --train-on files (read out with the noise stream of
+mip_counting.py for them) and predicts every file under study, into the xpred channel in place of
+the extrapolation; --train-on implies --skip-extrapolation. A printed line says when the
+transfer is in-sample (a --train-on file shares an input with a file under study).
 
 INPUT (--input, comma-separated): binary, the hit map; tot2, a 2-bit charge per pixel, the number
 of the levels 1, 4 and 16 times the threshold that the noisy charge exceeds (0..3, scaled to
@@ -33,16 +38,19 @@ TRAINING: Poisson negative log-likelihood of the count, Adam, learning rate --lr
 batches of --batch, whole epochs: --epochs if given, else the fewest epochs holding --steps
 batches. The training maps and counts are held on the device for the whole training and indexed
 there; the order of each epoch is numpy default_rng((seed, fold, model, target, training files,
-input)).permutation, torch seeded with the same numbers. Device auto: cuda, else mps, else cpu
+input)).permutation, torch seeded with the same numbers (for the transfer: fold = --folds and
+training files = 1000 + their number). Device auto: cuda, else mps, else cpu
 (mps and cuda results are reproducible to float rounding only). The wall time of every training
 is printed and stored.
 
 OUTPUT in --out-dir: <out-name>_preds.npz in the layout of mip_counting.py's preds.npz (readable
 by its --include-preds), results_<out-name>.json (the metrics of mip_counting.py for these
-estimators, the parameter counts, losses and wall times). With --compare <preds.npz> ... (of
-mip_counting.py or of this script, the same files, readout and --extrap-max-k, checked by its
-load_preds): the comparison table of
-every estimator and the figures fig_<out-name>_*.png with all of them.
+estimators, the parameter counts, losses and wall times; with --train-on the transfer tables under
+"transfer", with the names and reticle count of the training files and shares_events, as in
+mip_counting.py). With --compare <preds.npz> ... (of mip_counting.py or of this script, the same
+files, readout, --extrap-max-k and train_on, checked by its load_preds): the comparison table of
+every estimator and the figures fig_<out-name>_*.png with all of them; with --train-on the
+transfer tables of the comparison are under "transfer" -> "comparison".
 """
 import argparse, json, math, os, sys, time
 import numpy as np
@@ -186,6 +194,29 @@ def crossfit_cnn(Ds, Xd, Yd, target, size, inp, args, device, train_tags, eval_t
     return P, folds
 
 
+def transfer_cnn(DsA, XA, YA, Ds, Xd, target, size, inp, args, device, log):
+    """{tag: prediction} of model size on input inp for every file of Ds, trained once on all maps
+    of the files DsA (another sample, maps XA and counts YA on the device), and that training."""
+    import torch
+    t0 = time.time()
+    rows = [torch.from_numpy(np.flatnonzero(D["n_hits"] > 0)).to(device) for D in DsA]
+    X = torch.cat([XA[D["tag"]][r] for D, r in zip(DsA, rows)])
+    y = torch.cat([YA[D["tag"]][target][r] for D, r in zip(DsA, rows)])
+    key = (args.seed, args.folds, list(MODELS).index(size), mc.TRUTHS.index(target),
+           mc.TRAIN_ON_STREAM + len(DsA), INPUTS.index(inp))
+    model, ls, epochs, steps = train(X, y, SCALE[inp], MODELS[size], args, device, key,
+                                     log if args.verbose else None)
+    del X, y
+    P = {D["tag"]: np.where(D["n_hits"] > 0, predict(model, Xd[D["tag"]], SCALE[inp]), 0.0) for D in Ds}
+    for g, p in P.items():
+        mc._require(np.all(np.isfinite(p)), f"{g}: a reticle without a prediction")
+    dt = time.time() - t0
+    n_train = int(sum(len(r) for r in rows))
+    log(f"    {est_name(size, inp)} {target} transfer: {n_train} training maps, {epochs} epochs "
+        f"({steps} steps), final loss {ls[-1]:.4f}, {dt:.1f} s")
+    return P, {"training_maps": n_train, "epochs": epochs, "steps": steps, "final_loss": ls[-1], "wall_s": dt}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("reticles", nargs="+", help="reticles.npz of analysis/pixelav/reticles.py, the same events")
@@ -210,6 +241,9 @@ def main(argv=None):
     ap.add_argument("--verbose", action="store_true", help="the epoch losses of the first fold")
     ap.add_argument("--compare", nargs="+", default=[], metavar="NPZ",
                     help="preds.npz of mip_counting.py or of this script, the same files and readout")
+    ap.add_argument("--train-on", nargs="+", default=[], metavar="NPZ",
+                    help="reticles.npz of another sample: train on all of them and predict the files "
+                    "under study, in place of the extrapolation")
     args = ap.parse_args(argv)
     sizes = [s for s in args.sizes.split(",") if s]
     inputs = [s for s in args.input.split(",") if s]
@@ -236,6 +270,13 @@ def main(argv=None):
     order = np.argsort([R["overlay"] for R in raws], kind="stable")
     raws = [raws[i] for i in order]
     tags = mc.file_tags(raws)
+    rawsA = [mc.load_reticles(p) for p in args.train_on]
+    rawsA = [rawsA[i] for i in np.argsort([R["overlay"] for R in rawsA], kind="stable")]
+    train_on = [os.path.basename(R["path"]) for R in rawsA]
+    shared = mc.shared_inputs(rawsA, raws)
+    DsA = []
+    if train_on:
+        args.skip_extrapolation = True
     try:
         Ds, ev_fold = mc.prepare(raws, tags, args.threshold, args.noise, args.seed, args.folds,
                                  keep_hits="binary" in inputs, encode=tuple(i for i in inputs if i != "binary"))
@@ -243,13 +284,21 @@ def main(argv=None):
             steps = mc.parse_layer_weights(args.layer_weights)
             for D in Ds:
                 D["layer_w"] = mc.layer_weights(steps, D["layer"])
+        if rawsA:
+            mc.check_same_events(rawsA + raws, mc._SAME_RETICLE, "the --train-on files and the files under "
+                                 "study must agree in reticle size, pitch and truth objects")
+            DsA, _ = mc.prepare(rawsA, mc.file_tags(rawsA), args.threshold, args.noise, args.seed, args.folds,
+                                keep_hits="binary" in inputs, encode=tuple(i for i in inputs if i != "binary"),
+                                stream0=mc.TRAIN_ON_STREAM)
     except mc.Inconsistent as err:
         raise SystemExit(f"mip_counting_cnn: {err}") from None
-    del raws
+    n_events_A = int(rawsA[0]["n_events"]) if rawsA else 0
+    del raws, rawsA
     n_events = int(len(ev_fold))
     ny, nx = Ds[0]["ny"], Ds[0]["nx"]
     settings = {"threshold": args.threshold, "noise": args.noise, "seed": args.seed,
-                "folds": args.folds, "event_fold": ev_fold, "extrap_max_k": args.extrap_max_k}
+                "folds": args.folds, "event_fold": ev_fold, "extrap_max_k": args.extrap_max_k,
+                "train_on": np.array(train_on, str), "shares_events": np.bool_(bool(shared))}
     info = {}
     for s in sizes:
         info[s] = {"channels": list(MODELS[s]), "parameters": n_params(build(MODELS[s])),
@@ -257,16 +306,22 @@ def main(argv=None):
     log(f"mip_counting_cnn: {len(Ds)} file(s), {n_events} events, {ny} x {nx} pixels, device {device}; "
         + "; ".join(f"{s}: {v['parameters']} parameters, {v['multiply_adds_per_reticle']} multiply-adds per reticle"
                     for s, v in info.items()))
+    if shared:
+        log("  the transfer is in-sample for " + ", ".join(f"{a} -> {b}" for a, b in shared)
+            + ": they share events")
 
     preds, xpreds, runs = {}, {}, {}
     small = [D["tag"] for D in Ds if D["overlay"] <= args.extrap_max_k]
     large = [D["tag"] for D in Ds if D["overlay"] > args.extrap_max_k]
     t_all = time.time()
     Yd = {D["tag"]: {t: torch.from_numpy(D[t].astype(np.float32)).to(device) for t in targets} for D in Ds}
+    YA = {D["tag"]: {t: torch.from_numpy(D[t].astype(np.float32)).to(device) for t in targets} for D in DsA}
     try:
         for inp in inputs:
             Xd = {D["tag"]: torch.from_numpy(D["hits"].view(np.uint8) if inp == "binary" else D["enc"][inp]).to(device)
                   for D in Ds}
+            XA = {D["tag"]: torch.from_numpy(D["hits"].view(np.uint8) if inp == "binary" else D["enc"][inp]).to(device)
+                  for D in DsA}
             for t in targets:
                 for s in sizes:
                     nm = est_name(s, inp)
@@ -283,7 +338,13 @@ def main(argv=None):
                         for g, p in X.items():
                             xpreds.setdefault(g, {}).setdefault(t, {})[nm] = p
                         runs[f"{nm}__{t}__extrapolation"] = {"folds": fl, "wall_s": time.time() - t0}
-            del Xd
+                    if DsA:
+                        log(f"  transfer {nm} {t}: train on {', '.join(train_on)}, evaluate {tags}")
+                        X, rec = transfer_cnn(DsA, XA, YA, Ds, Xd, t, s, inp, args, device, log)
+                        for g, p in X.items():
+                            xpreds.setdefault(g, {}).setdefault(t, {})[nm] = p
+                        runs[f"{nm}__{t}__transfer"] = rec
+            del Xd, XA
     except mc.Inconsistent as err:
         raise SystemExit(f"mip_counting_cnn: {err}") from None
     log(f"  training and prediction: {time.time() - t_all:.0f} s")
@@ -298,6 +359,12 @@ def main(argv=None):
                         "layer_weights": args.layer_weights,
                         "reticle_shape": [ny, nx], "estimators": names},
            "models": info, "trainings": runs, "results": results}
+    if train_on:
+        out["results"], moved = mc.split_transfer(results)
+        out["transfer"] = {"train_on": train_on, "files": [D["path"] for D in DsA],
+                           "n_reticles": int(sum(D["n"] for D in DsA)), "n_events": n_events_A,
+                           "shares_events": bool(shared), "shared": shared, "results": moved}
+    xlabel = f"transfer from {', '.join(train_on)}" if train_on else "trained on small overlays"
 
     lines = ["", "rms/bias of estimate - truth per truth bin (n_frac rounded to an integer); sum ratio = "
              "mean+-std over super-events of sum(estimate)/sum(truth); spread = std/mean of sum(estimate)"]
@@ -314,9 +381,11 @@ def main(argv=None):
             raise SystemExit(f"mip_counting_cnn: {err}") from None
         both = mc.evaluate(Ds, allp, allx)
         out["comparison"] = both
+        if train_on:
+            out["comparison"], out["transfer"]["comparison"] = mc.split_transfer(both)
         for t in targets:
             lines += mc.table(both, t)
-            lines += mc.table(both, t, kind="extrapolation")
+            lines += mc.table(both, t, kind="extrapolation", label=xlabel)
         fig_names = list(dict.fromkeys(list(mc.FIG_ESTIMATORS) + [nm for P in allp.values() for by in P.values()
                                                                    for nm in by if nm.startswith("cnn_")]))
         figs = []
@@ -328,7 +397,7 @@ def main(argv=None):
     else:
         for t in targets:
             lines += mc.table(results, t)
-            lines += mc.table(results, t, kind="extrapolation")
+            lines += mc.table(results, t, kind="extrapolation", label=xlabel)
     with open(os.path.join(args.out_dir, f"results_{args.out_name}.json"), "w") as f:
         json.dump(mc._jsonable(out), f, indent=1)
     lines.append(f"  written: {args.out_dir}/{args.out_name}_preds.npz, results_{args.out_name}.json"

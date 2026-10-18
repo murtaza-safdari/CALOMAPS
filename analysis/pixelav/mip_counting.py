@@ -9,6 +9,7 @@
                                             [--count-bits 8] [--no-scan] [--no-figures]
                                             [--layer-weights L:W[,L:W ...]]
                                             [--include-preds <preds.npz> ...]
+                                            [--train-on <reticles.npz> ...]
     python analysis/pixelav/mip_counting.py --self-test
 
 INPUTS: reticles.npz files of analysis/pixelav/reticles.py cut from the same events (the same
@@ -17,7 +18,9 @@ typically one per --overlay K. The reticle shape comes from the files. Each file
 its own; the estimators are trained on all of them.
 
 READOUT: hit = img + noise > threshold, with noise Gaussian of sigma --noise electrons, independent
-per pixel, drawn from numpy default_rng((seed, file index)) with the files sorted by overlay. Only
+per pixel, drawn from numpy default_rng((seed, file index)) with the files sorted by overlay (for
+the --train-on files default_rng((seed, 1000 + file index)), so that the files under study read
+out as in a run without them). Only
 the reticles that hold charge are stored, so every number here is over those; a reticle without
 charge has no hit unless noise makes one, and the noise-only rate (hits and estimated particles in
 a pure-noise reticle) is given separately in the threshold scan.
@@ -80,6 +83,14 @@ estimators are trained on the reticles of all files whose events lie in the othe
 predict that fold's reticles of every file (checked: no event in both), so every reticle gets one
 out-of-fold prediction. EXTRAPOLATION (unless --skip-extrapolation): the same with training on
 the files of overlay <= --extrap-max-k only, evaluated on the files of larger overlay.
+TRANSFER (--train-on A.npz [...]): reticle files of another sample, cut from their own events
+(checked among themselves) with the same reticle size, pitch and truth objects as the files under
+study (checked). Every estimator is fitted once on all reticles of those files and predicts every
+file under study. These predictions take the place of the extrapolation (--train-on implies
+--skip-extrapolation); the out-of-fold predictions of the files under study do not change. A
+reticles.npz holds every event of each of its inputs, so a --train-on file that shares an input
+with a file under study shares its events: a printed line says the transfer is in-sample for those
+files, and shares_events is recorded (results.json, preds.npz).
 
 METRICS per file and truth: bias and rms of estimate - truth in TRUTH_BINS and in R_BINS of r_mm;
 per super-event totals over all its stored reticles: sum(estimate)/sum(truth) (mean and spread),
@@ -94,13 +105,16 @@ hit), count (--count-bits, with the share of reticles whose n_in does not fit).
 
 OUTPUT in --out-dir: results.json; preds.npz (per file tag: the truths, super_evt, layer, r_mm,
 q_sum, n_hits, n_clusters, fold, and pred__<truth>__<estimator> / xpred__<truth>__<estimator> for
-the out-of-fold and extrapolation predictions, with the file tags and names, the readout settings
-and --extrap-max-k; the layout read by --include-preds and analysis/pixelav/mip_counting_cnn.py);
-clusters.npz (the cluster table of the main readout); fig_*.png. A printed summary.
---include-preds adds the predictions of other preds.npz files of the same inputs, tags, readout
-and --extrap-max-k (checked, file names without their directories; a file without the tags, names
-or --extrap-max-k is read with a printed line that they were not checked) to the metrics and
-figures.
+the out-of-fold and the extrapolation (or transfer) predictions, with the file tags and names, the
+readout settings, --extrap-max-k and train_on, the names of the --train-on files; the layout read
+by --include-preds and analysis/pixelav/mip_counting_cnn.py); clusters.npz (the cluster table of
+the main readout); fig_*.png. A printed summary. With --train-on, results.json holds the transfer
+tables under "transfer", with the names and the reticle count of the training files, and the
+printed tables say "transfer from" those files.
+--include-preds adds the predictions of other preds.npz files of the same inputs, tags, readout,
+--extrap-max-k and train_on (checked, file names without their directories; a file without the
+tags, names or --extrap-max-k is read with a printed line that they were not checked, one without
+train_on as made without --train-on) to the metrics and figures.
 """
 import argparse, json, math, os, sys
 import numpy as np
@@ -111,6 +125,7 @@ NOISE = 100.0               # electrons, Gaussian sigma per pixel
 SEED = 1
 N_FOLDS = 5
 EXTRAP_MAX_K = 2
+TRAIN_ON_STREAM = 1000      # the --train-on files draw their noise from (seed, this + file index)
 MIN_COUNT = 20              # training entries a table cell needs before it stands alone
 GBT_ITER = 300
 GBT_MAX_ROWS = 400000       # training reticles per gradient-boosted fit
@@ -143,9 +158,11 @@ _NEED = ("img", "super_evt", "module", "layer", "r_mm", "q_sum", "n_true", "trut
          "n_super_events", "inputs", "input_event_offset", "input_n_events", "n_empty_within",
          "count_radii_mm")
 _OPTIONAL = ("part_id", "part_island", "part_q_total", "truth", "island_gap")
-_SAME = ("inputs", "input_event_offset", "input_n_events", "n_events", "size_x", "size_y",
-         "pitch_x_um", "pitch_y_um", "truth")
+_SAME_RETICLE = ("size_x", "size_y", "pitch_x_um", "pitch_y_um", "truth")
+_SAME = ("inputs", "input_event_offset", "input_n_events", "n_events") + _SAME_RETICLE
 _PRED_OPTIONAL = ("extrap_max_k",)    # settings a preds.npz may lack (read without that check)
+# settings read as these values when a preds.npz lacks them
+_PRED_DEFAULT = {"train_on": np.array([], str), "shares_events": np.bool_(False)}
 
 
 class Inconsistent(RuntimeError):
@@ -207,15 +224,16 @@ def file_tags(raws):
     return tags
 
 
-def check_same_events(raws):
+def check_same_events(raws, keys=_SAME, why="not cut from the same events"):
     """Every file cut from the same events with the same reticle size, pitch and truth objects;
-    with crossings, the same island_gap (or none stored in either)."""
+    with crossings, the same island_gap (or none stored in either). With keys=_SAME_RETICLE only
+    the reticle size, pitch and truth objects."""
     r0 = raws[0]
     for R in raws[1:]:
-        for k in _SAME:
+        for k in keys:
             a, b = np.asarray(r0[k]), np.asarray(R[k])
             _require(a.shape == b.shape and np.array_equal(a, b),
-                     f"{R['path']} and {r0['path']} differ in {k}: not cut from the same events")
+                     f"{R['path']} and {r0['path']} differ in {k}: {why}")
         if r0["truth"] == "crossings":
             a, b = (int(X["island_gap"]) if "island_gap" in X else None for X in (r0, R))
             _require(a == b, f"{R['path']} and {r0['path']} differ in island_gap ({b} vs {a}): "
@@ -434,10 +452,12 @@ def super_event_fold(ev_fold, n_super, K):
     return f[:, 0]
 
 
-def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode=(), truth_cut=None):
+def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode=(), truth_cut=None,
+            stream0=0):
     """Per file: the readout, truths, cluster table and features of the module docstring, with the
     fold of each reticle; the truths at the charge cut truth_cut (default the threshold); with
-    keep_hits the hit maps, with encode those encodings of the noisy image (readout)."""
+    keep_hits the hit maps, with encode those encodings of the noisy image (readout). File i draws
+    its noise from default_rng((seed, stream0 + i))."""
     cut = threshold if truth_cut is None else truth_cut
     check_same_events(raws)
     ev_fold = event_folds(raws[0]["n_events"], [R["overlay"] for R in raws], n_folds)
@@ -450,7 +470,7 @@ def prepare(raws, tags, threshold, noise, seed, n_folds, keep_hits=False, encode
         n, ny, nx = img.shape
         _require(nx < 64 and ny < 64, "reticles of 64 pixels or more on a side are not supported")
         px, py = float(R["pitch_x_um"]), float(R["pitch_y_um"])
-        rng = np.random.default_rng((seed, i))
+        rng = np.random.default_rng((seed, stream0 + i))
         hits, enc = readout(img, threshold, noise, rng, encode)
         T, W, info = truths(R, cut)
         pix, cl = clusters(hits, px, py)
@@ -721,6 +741,21 @@ def crossfit(Ds, target, names, n_folds, train_tags, eval_tags, m=MIN_COUNT, gbt
     return P
 
 
+def transfer(DsA, Ds, target, names, m=MIN_COUNT, gbt_iter=GBT_ITER, seed=SEED, log=None,
+             gbt_max_rows=GBT_MAX_ROWS):
+    """{tag: {name: prediction}} for every file of Ds, the estimators fitted once on all reticles
+    of the files DsA (another sample)."""
+    V = view(DsA, [np.ones(D["n"], bool) for D in DsA])
+    est = Estimators(names, m, gbt_iter, seed, gbt_max_rows).fit(V, target)
+    if log:
+        log(f"    trained on {V['n']} reticles")
+    P = {D["tag"]: est.predict(view([D], [np.ones(D["n"], bool)])) for D in Ds}
+    for g, by in P.items():
+        for nm in names:
+            _require(np.all(np.isfinite(by[nm])), f"{g} {nm}: a reticle without a prediction")
+    return P
+
+
 # ----------------------------------------------------------------------------------------------
 # metrics
 
@@ -870,6 +905,27 @@ def evaluate(Ds, preds, xpreds=None):
     return out
 
 
+def split_transfer(results):
+    """(results without the xpred tables, those tables as {tag: {truth: ...}}): with --train-on the
+    xpred channel holds the transfer, stored apart from the extrapolation."""
+    rest, moved = {}, {}
+    for tag, E in results.items():
+        truths = {}
+        for t, res in E["truths"].items():
+            truths[t] = {k: v for k, v in res.items() if k != "extrapolation"}
+            if "extrapolation" in res:
+                moved.setdefault(tag, {})[t] = res["extrapolation"]
+        rest[tag] = dict(E, truths=truths)
+    return rest, moved
+
+
+def shared_inputs(rawsA, raws):
+    """(A file, B file) basename pairs whose inputs share a path: a reticles.npz holds every event
+    of each of its inputs, so these files share events and their transfer is in-sample."""
+    return [(os.path.basename(a["path"]), os.path.basename(b["path"])) for a in rawsA for b in raws
+            if set(map(str, np.atleast_1d(a["inputs"]))) & set(map(str, np.atleast_1d(b["inputs"])))]
+
+
 # ----------------------------------------------------------------------------------------------
 # predictions file
 
@@ -900,8 +956,8 @@ def save_preds(path, Ds, preds, xpreds, settings):
 
 def load_preds(path, Ds, settings):
     """(preds, xpreds) of a preds.npz, after checking it holds the same tags, files (by name),
-    readout, extrap_max_k and truths; a file without tags, files or extrap_max_k is read with one
-    printed line naming those not checked."""
+    readout, extrap_max_k, train_on and truths; a file without tags, files or extrap_max_k is read
+    with one printed line naming those not checked, one without train_on as made without it."""
     with np.load(path, allow_pickle=False) as d:
         A = {k: d[k] for k in d.files}
     unchecked = []
@@ -916,6 +972,8 @@ def load_preds(path, Ds, settings):
         if k not in A and k in _PRED_OPTIONAL:
             unchecked.append(k)
             continue
+        if k not in A and k in _PRED_DEFAULT:
+            A[k] = _PRED_DEFAULT[k]
         _require(k in A and np.array_equal(np.asarray(A[k]), np.asarray(v)),
                  f"{path}: {k} differs from this run ({A.get(k)} vs {v})")
     if unchecked:
@@ -952,8 +1010,9 @@ def _cell(r):
     return f"{r['rms']:.2f}/{r['bias']:+.2f}"
 
 
-def table(results, truth, kind="main"):
-    """The printed table: per file and estimator, rms/bias per truth bin and the event totals."""
+def table(results, truth, kind="main", label="trained on small overlays"):
+    """The printed table: per file and estimator, rms/bias per truth bin and the event totals; the
+    xpred tables (any kind but main) headed by label."""
     lines = []
     for tag, E in results.items():
         if truth not in E["truths"]:
@@ -964,7 +1023,7 @@ def table(results, truth, kind="main"):
         if not names:
             continue
         first = src[names[0]]["truth_bins"]
-        head = f"  {tag} {truth}" + (" (trained on small overlays)" if kind != "main" else "")
+        head = f"  {tag} {truth}" + (f" ({label})" if kind != "main" else "")
         lines.append(f"{head}: {E['n_reticles']} reticles, {E['n_super_events']} super-events, "
                      f"sum truth {T['sum_truth']:.1f}")
         weighted = "weighted" in src[names[0]]["event_totals"]
@@ -1438,8 +1497,73 @@ def self_test():
         check(False, "a layer given twice in --layer-weights refused")
     except Inconsistent:
         check(True, "a layer given twice in --layer-weights refused")
+    check_transfer(check)
     print(f"self-test: {len(fails)} failure(s)")
     return len(fails)
+
+
+def check_transfer(check):
+    """--train-on with the hand-made file as both samples, at a noise that adds hits: the run
+    without it and the one with it, through main."""
+    import contextlib, io, tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        f = os.path.join(tmp, "ret_syn.npz")
+        R = {k: v for k, v in _synthetic().items() if k != "path"}
+        R["q_sum"] = R["q_sum"] + np.arange(len(R["q_sum"]))   # distinct, for the analog quantile bins
+        np.savez(f, **R)
+        common = ["--noise", "400", "--min-count", "2", "--gbt-iter", "20", "--no-scan", "--no-figures"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            main([f, "--out-dir", os.path.join(tmp, "t0"), "--skip-extrapolation"] + common)
+            main([f, "--out-dir", os.path.join(tmp, "t1"), "--train-on", f] + common)
+        p0, p1 = {}, {}
+        for d, P in (("t0", p0), ("t1", p1)):
+            with np.load(os.path.join(tmp, d, "preds.npz")) as z:
+                P.update({k: z[k] for k in z.files})
+        j0, j1 = ({k: v for k, v in json.load(open(os.path.join(tmp, d, "results.json"))).items()}
+                  for d in ("t0", "t1"))
+        own = sorted(k for k in p0 if "__pred__" in k)
+        check(bool(own) and own == sorted(k for k in p1 if "__pred__" in k)
+              and all(np.array_equal(p0[k], p1[k]) for k in own),
+              f"transfer: the out-of-fold predictions do not change with --train-on ({len(own)} arrays)")
+        check(j0 == {k: v for k, v in j1.items() if k != "transfer"},
+              "transfer: results.json outside its transfer block equals that of a run without --train-on")
+        tr = j1.get("transfer", {})
+        check(tr.get("train_on") == ["ret_syn.npz"] and tr.get("n_reticles") == 11
+              and sorted(tr.get("results", {}).get("K2", {})) == sorted(TRUTHS)
+              and str(p1["train_on"].tolist()) == "['ret_syn.npz']",
+              "transfer: results.json and preds.npz name the training file, 11 reticles, every truth")
+        f2 = os.path.join(tmp, "ret_other.npz")
+        np.savez(f2, **dict(R, inputs=np.array(["synthetic_other"])))
+        with contextlib.redirect_stdout(io.StringIO()):
+            main([f, "--out-dir", os.path.join(tmp, "t2"), "--train-on", f2] + common)
+        tr2 = json.load(open(os.path.join(tmp, "t2", "results.json")))["transfer"]
+        with np.load(os.path.join(tmp, "t2", "preds.npz")) as z:
+            s2 = bool(z["shares_events"])
+        check(tr.get("shares_events") is True and bool(p1["shares_events"]) and tr2["shares_events"] is False
+              and not s2, "transfer: shares_events true when training on the file itself, false on a file "
+              "of other inputs (results.json and preds.npz)")
+        DA = prepare([load_reticles(f)], ["K2"], 1000.0, 400.0, SEED, 5, stream0=TRAIN_ON_STREAM)[0][0]
+        DB = prepare([load_reticles(f)], ["K2"], 1000.0, 400.0, SEED, 5)[0][0]
+        check(not np.array_equal(DA["n_hits"], DB["n_hits"]),
+              "transfer: the training readout draws its noise from its own stream (other hit counts)")
+        V_A = view([DA], [np.ones(DA["n"], bool)])
+        V_B = view([DB], [np.ones(DB["n"], bool)])
+        bad = []
+        for t in TRUTHS:
+            ref = Estimators(ESTIMATORS, 2, 20, SEED).fit(V_A, t).predict(V_B)
+            bad += [f"{t} {nm}" for nm in ESTIMATORS
+                    if not np.array_equal(p1[f"K2__xpred__{t}__{nm}"], ref[nm].astype(np.float32))]
+        check(not bad, "transfer: the xpred channel equals an in-sample fit on the whole training file "
+              f"(differ: {', '.join(bad) or 'none'})")
+        settings = {k: p1[k] for k in ("threshold", "noise", "seed", "folds", "event_fold", "extrap_max_k",
+                                       "train_on", "shares_events")}
+        _, x1 = load_preds(os.path.join(tmp, "t1", "preds.npz"), [DB], settings)
+        check(sorted(x1.get("K2", {})) == sorted(TRUTHS), "transfer: its preds.npz passes load_preds")
+        try:
+            load_preds(os.path.join(tmp, "t0", "preds.npz"), [DB], settings)
+            check(False, "transfer: a preds.npz made without --train-on refused")
+        except Inconsistent:
+            check(True, "transfer: a preds.npz made without --train-on refused")
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1496,6 +1620,9 @@ def main(argv=None):
                     help="also give the event totals with each reticle weighed W from layer L on")
     ap.add_argument("--include-preds", nargs="*", default=[], metavar="NPZ",
                     help="preds.npz of the same inputs and readout whose estimators join the report")
+    ap.add_argument("--train-on", nargs="+", default=[], metavar="NPZ",
+                    help="reticles.npz of another sample: every estimator is fitted on all of them and "
+                    "predicts the files under study, in place of the extrapolation")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
@@ -1522,20 +1649,39 @@ def main(argv=None):
     order = np.argsort([R["overlay"] for R in raws], kind="stable")
     raws = [raws[i] for i in order]
     tags = file_tags(raws)
+    rawsA = [load_reticles(p) for p in args.train_on]
+    rawsA = [rawsA[i] for i in np.argsort([R["overlay"] for R in rawsA], kind="stable")]
+    train_on = [os.path.basename(R["path"]) for R in rawsA]
+    shared = shared_inputs(rawsA, raws)
+    DsA = []
+    if train_on:
+        args.skip_extrapolation = True
     try:
         Ds, ev_fold = prepare(raws, tags, args.threshold, args.noise, args.seed, args.folds)
         if args.layer_weights:
             steps = parse_layer_weights(args.layer_weights)
             for D in Ds:
                 D["layer_w"] = layer_weights(steps, D["layer"])
+        if rawsA:
+            check_same_events(rawsA + raws, _SAME_RETICLE, "the --train-on files and the files under "
+                              "study must agree in reticle size, pitch and truth objects")
+            DsA, _ = prepare(rawsA, file_tags(rawsA), args.threshold, args.noise, args.seed, args.folds,
+                             stream0=TRAIN_ON_STREAM)
     except Inconsistent as err:
         raise SystemExit(f"mip_counting: {err}") from None
     n_events = raws[0]["n_events"]
     settings = {"threshold": args.threshold, "noise": args.noise, "seed": args.seed,
-                "folds": args.folds, "event_fold": ev_fold, "extrap_max_k": args.extrap_max_k}
+                "folds": args.folds, "event_fold": ev_fold, "extrap_max_k": args.extrap_max_k,
+                "train_on": np.array(train_on, str), "shares_events": np.bool_(bool(shared))}
     log(f"mip_counting: {len(Ds)} file(s), {n_events} events, folds of "
         f"{np.bincount(ev_fold).tolist()} events; threshold {args.threshold:g} e, noise {args.noise:g} e; "
         f"{Ds[0]['ny']} x {Ds[0]['nx']} pixels; truth objects: {Ds[0]['truth_objects']}")
+    if DsA:
+        log(f"  transfer from {', '.join(train_on)}: {sum(D['n'] for D in DsA)} reticles of "
+            f"{rawsA[0]['n_events']} events, in place of the extrapolation")
+    if shared:
+        log("  the transfer is in-sample for " + ", ".join(f"{a} -> {b}" for a, b in shared)
+            + ": they share events")
 
     # cluster summary and the truths side by side
     summary = {}
@@ -1589,6 +1735,12 @@ def main(argv=None):
                              args.seed, n_events, None, args.gbt_max_rows)
                 for g, by in X.items():
                     xpreds.setdefault(g, {})[t] = by
+            if DsA:
+                log(f"  transfer {t}: train on {', '.join(train_on)}, evaluate {tags}")
+                X = transfer(DsA, Ds, t, ESTIMATORS, args.min_count, args.gbt_iter, args.seed, log,
+                             args.gbt_max_rows)
+                for g, by in X.items():
+                    xpreds.setdefault(g, {})[t] = by
         for path in args.include_preds:
             p2, x2 = load_preds(path, Ds, settings)
             merge_preds(preds, p2)
@@ -1627,6 +1779,11 @@ def main(argv=None):
                         + ["col_v%d" % i for i in range(Ds[0]["nx"])], "gbt_layer_extra_feature": "layer"},
            "clusters": summary, "results": results, "data_volume": volume, "scan": scan_out,
            "figures": figs}
+    if train_on:
+        out["results"], moved = split_transfer(results)
+        out["transfer"] = {"train_on": train_on, "files": [D["path"] for D in DsA],
+                           "n_reticles": int(sum(D["n"] for D in DsA)), "n_events": int(rawsA[0]["n_events"]),
+                           "shares_events": bool(shared), "shared": shared, "results": moved}
     with open(os.path.join(args.out_dir, "results.json"), "w") as f:
         json.dump(_jsonable(out), f, indent=1)
 
@@ -1635,8 +1792,9 @@ def main(argv=None):
              + ("; w. = the same with the layer weights " + args.layer_weights if args.layer_weights else "")]
     for t in args.truths:
         lines += table(results, t)
+    xlabel = f"transfer from {', '.join(train_on)}" if train_on else "trained on small overlays"
     for t in args.truths:
-        lines += table(results, t, kind="extrapolation")
+        lines += table(results, t, kind="extrapolation", label=xlabel)
     lines.append("  data volume per reticle holding hits (bits) and per shower (kbit):")
     for g, v in volume.items():
         mb, sh = v["mean_bits_per_reticle"], v["bits_per_shower"]
