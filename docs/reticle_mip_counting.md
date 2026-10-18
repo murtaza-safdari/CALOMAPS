@@ -330,9 +330,9 @@ layer. Estimated over true number of crossings in groups of layers, single showe
 |---|---|---|---|---|---|
 | *share of the crossings* | *3.1%* | *21.4%* | *35.5%* | *27.9%* | *12.0%* |
 | *hit pixels per crossing* | *2.9* | *3.5* | *4.0* | *4.4* | *4.7* |
-| `hits` | 0.72 | 0.95 | 1.00 | 1.01 | 1.12 |
+| `hits` | 0.72 | 0.94 | 1.00 | 1.01 | 1.12 |
 | `clusters` | 0.72 | 0.92 | 1.03 | 1.04 | 1.01 |
-| `gbt` | 0.89 | 0.99 | 1.01 | 1.00 | 1.01 |
+| `gbt` | 0.89 | 0.99 | 1.01 | 1.00 | 1.00 |
 | `gbt_layer` | 0.99 | 1.00 | 1.00 | 1.00 | 1.00 |
 
 The hit-count table is 28% low at the front and 12% high at the back. The trees are within 1%
