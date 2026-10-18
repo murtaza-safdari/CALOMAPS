@@ -6,12 +6,18 @@
                                         [--offset-x 0 --offset-y 0]
                                         [--truth crossings|particles] [--island-gap 1]
                                         [--truth-cuts 0,500,1000,2000] [--count-radii-mm 2,5,10,20]
+                                        [--allow-equal-driver-seeds]
+    python analysis/pixelav/reticles.py --self-test
 
 The inputs are charges.npz files of analysis/pixelav/charge_maps.py, batches of one sample: the
 same sensor, geometry, gun and job options (SAME_KEYS, checked) and different events (two batches
 with the same sim_seed must hold disjoint event ranges). Events are numbered from 0 over the
 inputs in the order given, each batch's events_first..events_stop-1 in turn; groups are numbered
-the same way, so a group id is unique over the inputs.
+the same way, so a group id is unique over the inputs. Two or more inputs must also carry
+distinct driver seeds (driver_seed, which charge_maps.py takes from the run.json of
+run_deposit_jobs.sh): every job set numbers its jobs from 0, so two batches transported with one
+driver seed reuse the same random streams. Inputs whose driver seeds are equal or absent (the
+batches made before run.json existed have none) are refused unless --allow-equal-driver-seeds.
 
 RETICLES: a reticle is a fixed block of size-x x size-y pixels of a sensor plane, by default the
 PIXELAV window (21 x 13 pixels, 1.05 x 0.325 mm in a 50 x 25 um sensor), size-x along v (pitch_x)
@@ -143,7 +149,7 @@ SAME_KEYS = ("pitch_x_um", "pitch_y_um", "thick_um", "ev_per_pair", "pixelav_tit
 BATCH_KEYS = ("sim_seed", "sim_date_utc", "sim_n_events", "num_events", "events_first",
               "events_stop", "source_npz", "jobs_npz", "geo_home", "sensor_source", "parts",
               "n_jobs", "n_groups", "n_pix", "total_q", "total_neh", "total_n_out", "total_edep_keV",
-              "pixelav_run")
+              "pixelav_run", "driver_seed")
 _NEEDED = ("pix_group_id", "pix_iv", "pix_iu", "pix_q", "group_id", "group_evt_id", "group_module",
            "group_layer", "group_root_pdg", "group_root_p_MeV", "group_created_in_slab",
            "events_first", "events_stop", "pitch_x_um", "pitch_y_um")
@@ -168,9 +174,10 @@ def _same(a, b):
     return bool(np.array_equal(a, b))
 
 
-def load_inputs(paths):
+def load_inputs(paths, allow_equal_driver_seeds=False):
     """The arrays of every charges npz of paths; SystemExit when a key is missing, a SAME_KEYS
-    value differs between them, or two share a sim_seed and overlapping event ranges."""
+    value differs between them, two share a sim_seed and overlapping event ranges, or (unless
+    allow_equal_driver_seeds) two or more inputs do not all carry distinct driver seeds."""
     D = []
     for p in paths:
         try:
@@ -194,6 +201,18 @@ def load_inputs(paths):
             if seeds[i] == seeds[j] and a[0] < b[1] and b[0] < a[1]:
                 sys.exit(f"reticles: {paths[j]} and {paths[i]} hold the same events (sim_seed "
                          f"{seeds[i]}, events {b[0]}..{b[1] - 1} and {a[0]}..{a[1] - 1})")
+    # every job set numbers its jobs from 0, so two batches transported with one driver seed
+    # reuse the same random streams; batches made before run.json existed carry no seed
+    if len(D) > 1:
+        dseeds = [int(d["driver_seed"]) if "driver_seed" in d else None for d in D]
+        known = [x for x in dseeds if x is not None]
+        if len(known) < len(D) or len(set(known)) < len(known):
+            vals = "; ".join(f"{p}: {'unknown' if x is None else x}" for p, x in zip(paths, dseeds))
+            if not allow_equal_driver_seeds:
+                sys.exit(f"reticles: the driver seeds of the inputs are not distinct (or unknown), so "
+                         f"their batches may share random streams: {vals}; give "
+                         f"--allow-equal-driver-seeds to combine them anyway")
+            print(f"reticles: the driver seeds of the inputs are not distinct (or unknown): {vals}")
     return D
 
 
@@ -535,10 +554,57 @@ def _dist(x):
             f"p99 {np.percentile(x, 99):.0f}, max {x.max()}")
 
 
+# ----------------------------------------------------------------------------------------------
+# self-test
+
+def _tiny_input(path, first, driver_seed=None):
+    """A charges npz at path with the keys load_inputs needs, no pixels, events first..first+9 of
+    sim_seed 7, and driver_seed when one is given."""
+    keys = {k: np.zeros(0, np.int64) for k in _NEEDED}
+    keys.update(events_first=np.int64(first), events_stop=np.int64(first + 10),
+                pitch_x_um=np.float64(50.0), pitch_y_um=np.float64(25.0), sim_seed=np.int64(7))
+    if driver_seed is not None:
+        keys["driver_seed"] = np.int64(driver_seed)
+    np.savez(path, **keys)
+    return path
+
+
+def self_test():
+    """The driver seed check of load_inputs on tiny inputs; returns the number of failures."""
+    import tempfile
+    fails = []
+
+    def check(ok, what):
+        print(f"  {'ok  ' if ok else 'FAIL'} {what}")
+        if not ok:
+            fails.append(what)
+
+    def accepted(seeds, allow=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [_tiny_input(os.path.join(tmp, f"b{i}.npz"), 10 * i, x) for i, x in enumerate(seeds)]
+            try:
+                return len(load_inputs(paths, allow_equal_driver_seeds=allow)) == len(seeds)
+            except SystemExit as err:
+                print(f"    refused: {err}")
+                return False
+
+    check(not accepted([1, 1]), "driver seeds 1 and 1: refused")
+    check(accepted([1, 2]), "driver seeds 1 and 2: accepted")
+    check(accepted([1, 2, 3]), "driver seeds 1, 2 and 3: accepted")
+    check(not accepted([1, 2, 1]), "driver seeds 1, 2 and 1: refused")
+    check(not accepted([None, None]), "no driver seeds, no flag: refused")
+    check(not accepted([1, None]), "driver seed 1 and none, no flag: refused")
+    check(accepted([None, None], allow=True), "no driver seeds, --allow-equal-driver-seeds: accepted")
+    check(accepted([1, 1], allow=True), "driver seeds 1 and 1, --allow-equal-driver-seeds: accepted")
+    check(accepted([None]), "one input without a driver seed: accepted")
+    print(f"self-test: {len(fails)} failure(s)")
+    return len(fails)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("charges", nargs="+", help="charges.npz of analysis/pixelav/charge_maps.py, batches of one sample")
-    ap.add_argument("--out", required=True, metavar="FILE", help="output npz")
+    ap.add_argument("charges", nargs="*", help="charges.npz of analysis/pixelav/charge_maps.py, batches of one sample")
+    ap.add_argument("--out", metavar="FILE", help="output npz")
     ap.add_argument("--overlay", type=int, default=1, metavar="K",
                     help="sum consecutive K events into one super-event (default 1)")
     ap.add_argument("--size-x", type=int, default=SIZE_X, metavar="NX",
@@ -562,7 +628,16 @@ def main(argv=None):
                     f"(default {TRUTH_CUTS})")
     ap.add_argument("--count-radii-mm", default=COUNT_RADII_MM, metavar="R,...",
                     help=f"radii around the axis within which reticles are counted (default {COUNT_RADII_MM})")
+    ap.add_argument("--allow-equal-driver-seeds", action="store_true",
+                    help="combine inputs whose driver seeds are equal or unknown. Every job set numbers "
+                    "its jobs from 0, so two batches transported with one driver seed reuse the same "
+                    "random streams; the batches made before run.json existed carry no driver seed")
+    ap.add_argument("--self-test", action="store_true", help="check the input checks on tiny inputs")
     args = ap.parse_args(argv)
+    if args.self_test:
+        return 1 if self_test() else 0
+    if not args.charges or not args.out:
+        ap.error("give charges.npz files and --out (or --self-test)")
     if args.overlay < 1:
         ap.error(f"--overlay must be at least 1, got {args.overlay}")
     if args.size_x < 1 or args.size_y < 1:
@@ -574,7 +649,7 @@ def main(argv=None):
     if not radii[0] > 0:
         ap.error("--count-radii-mm must be positive")
 
-    D = load_inputs(args.charges)
+    D = load_inputs(args.charges, args.allow_equal_driver_seeds)
     G, P, info = merge(D)
     px, py = float(D[0]["pitch_x_um"]), float(D[0]["pitch_y_um"])
     if info["n_events_total"] // args.overlay == 0:

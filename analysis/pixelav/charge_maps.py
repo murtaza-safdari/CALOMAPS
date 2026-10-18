@@ -36,8 +36,11 @@ OUTPUT <prefix>.charges.npz (or --out), compressed:
       out_files, jobs_npz, pixelav_title (the outputs' first line), pixelav_stimstp_ps
   pixelav_run: the text of <prefix>.run.json, the record run_deposit_jobs.sh writes of the driver
       run (driver seed, sensor files' sha256, commits, host, time), when that file exists
+  driver_seed (int64), driver_sha256: that record's "driver_seed" and "sha256_driver" fields,
+      when the record exists (absent otherwise); reticles.py refuses to combine batches whose
+      driver seeds are equal or absent unless told to
 """
-import argparse, os, sys
+import argparse, json, os, sys
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +60,23 @@ def load_table(path):
             return {k: d[k] for k in d.files}
     except (FileNotFoundError, OSError, ValueError) as err:
         sys.exit(f"charge_maps: cannot read {path}: {err}")
+
+
+def run_fields(text, record):
+    """driver_seed (int64) and driver_sha256 of the run.json text of record, from its
+    "driver_seed" and "sha256_driver" fields. SystemExit when the text is not a JSON object or a
+    field is missing, the seed not an integer or the sha not a string."""
+    try:
+        rec = json.loads(text)
+    except ValueError as err:
+        sys.exit(f"charge_maps: {record} is not JSON ({err}); nothing written")
+    if not isinstance(rec, dict):
+        sys.exit(f"charge_maps: {record} is not a JSON object; nothing written")
+    seed, sha = rec.get("driver_seed"), rec.get("sha256_driver")
+    if not isinstance(seed, int) or isinstance(seed, bool) or not isinstance(sha, str):
+        sys.exit(f"charge_maps: {record}: expected an integer driver_seed and a string "
+                 f"sha256_driver, got {seed!r} and {sha!r}; nothing written")
+    return {"driver_seed": np.int64(seed), "driver_sha256": np.array(sha)}
 
 
 def output_files(prefix, parts):
@@ -276,7 +296,8 @@ def main(argv=None):
     run = {}
     if os.path.isfile(record):
         with open(record, encoding="utf-8", errors="replace") as f:
-            run = {"pixelav_run": np.array(f.read())}
+            text = f.read()
+        run = {"pixelav_run": np.array(text), **run_fields(text, record)}
 
     copied = {k: v for k, v in T.items()
               if not k.startswith(("job_", "group_")) and k not in ("job_id", "group_id")}
