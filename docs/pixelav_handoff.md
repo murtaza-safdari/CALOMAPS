@@ -344,6 +344,13 @@ python3 analysis/pixelav/charge_maps.py $P
   the same seed reuse the same random streams: give each job set its own seed when several are to
   be combined. Parts are the unit of parallelism: write at least as many as the
   cores you will use (`CALOMAPS_JOB_PARTS`).
+- A campaign runs the whole chain batch by batch with `analysis/pixelav/prod_sample.sh
+  <particle> <GeV> <first batch> <last batch> <driver seed base> <work dir> <dest dir>`.
+  Batch b gets the sim seed 424242 + 1000 b and its own driver seed, the base + b, and no batch
+  may get the seed 1 of the first sample. Each batch keeps its jobs table, charge maps and
+  `run.json` next to its gzipped outputs, so the charges and the record of the run stay with the
+  data. A batch is marked DONE only after its copy is checked, and a rerun skips the batches
+  already done.
 - One jobs file by hand, in the run directory after `ulimit -s unlimited`:
   `./ppixelav2_inject_deposits <jobs_file> <out_file> [seed] [last|all]` (seed default 1; `last`,
   the default, writes the final time slice, `all` all 20).
