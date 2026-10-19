@@ -65,8 +65,9 @@ rmwork() {  # removes one batch work dir, never anything outside <work>
   case "$1" in "$PROD_WORK"/b[0-9]*) run - rm -rf -- "$1" ;; *) die "refusing to remove $1" ;; esac; }
 if ! command -v ddsim > /dev/null 2>&1; then
   if [ -n "$DRY" ]; then echo "+ unset KEY4HEP_STACK; source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01"
-  else unset KEY4HEP_STACK; source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01 > /dev/null 2>&1 \
-    || die "cannot source the Key4hep stack"; fi
+  else unset KEY4HEP_STACK; set +u  # the Key4hep setup reads unset variables and stops under set -u
+    source /cvmfs/sw.hsf.org/key4hep/setup.sh -r 2026-02-01 > /dev/null 2>&1 || die "cannot source the Key4hep stack"
+    set -u; command -v ddsim > /dev/null 2>&1 || die "no ddsim on PATH after the Key4hep setup"; fi
 fi
 export CALOMAPS_HOME="$PROD_HOME"
 fail() {  # fail <stage> <log>: FAILED holds the stage and the log tail
